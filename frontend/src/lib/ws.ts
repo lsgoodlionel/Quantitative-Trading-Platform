@@ -66,7 +66,7 @@ const clients = new Map<string, WebSocketClient>()
 
 export function getWsClient<T>(path: string): WebSocketClient<T> {
   if (!clients.has(path)) {
-    clients.set(path, new WebSocketClient<T>(path))
+    clients.set(path, new WebSocketClient<T>(path) as unknown as WebSocketClient<unknown>)
   }
   return clients.get(path) as WebSocketClient<T>
 }

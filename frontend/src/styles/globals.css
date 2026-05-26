@@ -1,0 +1,80 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface text-fg;
+    margin: 0;
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-surface-1; }
+  ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-fg-subtle; }
+
+  /* Number formatting — monospace for financial data */
+  .mono { font-family: "JetBrains Mono", monospace; }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface-1 border border-border rounded-lg;
+  }
+
+  .card-header {
+    @apply px-4 py-3 border-b border-border flex items-center justify-between;
+  }
+
+  .tag-up   { @apply text-up   font-mono text-sm; }
+  .tag-down { @apply text-down font-mono text-sm; }
+  .tag-flat { @apply text-flat font-mono text-sm; }
+
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium
+           transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-accent-hover;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-fg-muted hover:bg-surface-2 hover:text-fg;
+  }
+  .btn-danger {
+    @apply btn bg-danger/10 text-danger hover:bg-danger/20 border border-danger/30;
+  }
+
+  .input {
+    @apply w-full bg-surface-2 border border-border rounded-md px-3 py-1.5 text-sm
+           text-fg placeholder:text-fg-subtle
+           focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
+           transition-colors;
+  }
+
+  .select {
+    @apply input appearance-none cursor-pointer;
+  }
+
+  .label {
+    @apply block text-xs text-fg-muted mb-1 font-medium;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-medium;
+  }
+  .badge-up      { @apply badge bg-up/10   text-up;   }
+  .badge-down    { @apply badge bg-down/10 text-down; }
+  .badge-accent  { @apply badge bg-accent/10 text-accent; }
+  .badge-warn    { @apply badge bg-warn/10 text-warn; }
+  .badge-neutral { @apply badge bg-surface-3 text-fg-muted; }
+}
