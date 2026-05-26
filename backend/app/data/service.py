@@ -25,6 +25,7 @@ from functools import lru_cache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.data.feeds.akshare_feed import AkShareDataFeed
 from app.data.feeds.alpaca import AlpacaDataFeed
 from app.data.feeds.base import DataFeed
 from app.data.feeds.futu import FutuDataFeed
@@ -185,6 +186,7 @@ class _FeedRegistry:
         self._futu_hk = FutuDataFeed(Market.HK)
         self._yf_us = YFinanceDataFeed(Market.US)
         self._yf_hk = YFinanceDataFeed(Market.HK)
+        self._akshare = AkShareDataFeed()
 
     @classmethod
     def instance(cls) -> _FeedRegistry:
@@ -204,8 +206,10 @@ class _FeedRegistry:
             return self._alpaca, self._yf_us
         if market == Market.HK:
             return self._futu_hk, self._yf_hk
-        # A股 Phase 4 接入
-        raise ValueError(f"Market {market} not yet supported. See DEVPLAN.md Phase 6")
+        if market == Market.A:
+            # A股: akshare (免费数据源，日/周线), 无备用
+            return self._akshare, None
+        raise ValueError(f"Unknown market: {market}")
 
 
 # FastAPI Depends 工厂

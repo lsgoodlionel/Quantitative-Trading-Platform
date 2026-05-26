@@ -12,6 +12,7 @@ import { Backtest } from "@/pages/Backtest"
 import { Orders } from "@/pages/Orders"
 import { Portfolio } from "@/pages/Portfolio"
 import { Risk } from "@/pages/Risk"
+import { AlgoLab } from "@/pages/AlgoLab"
 import { Settings } from "@/pages/Settings"
 
 const queryClient = new QueryClient({
@@ -47,7 +48,8 @@ export default function App() {
               <Route path="/orders"      element={<Protected element={<Orders />} />} />
               <Route path="/portfolio"   element={<Protected element={<Portfolio />} />} />
               <Route path="/risk"        element={<Protected element={<Risk />} />} />
-              <Route path="/settings"    element={<Protected element={<Settings />} />} />
+              <Route path="/algolab"    element={<Protected element={<AlgoLab />} />} />
+              <Route path="/settings"   element={<Protected element={<Settings />} />} />
               <Route path="*"            element={<Navigate to="/" replace />} />
             </Routes>
           </div>
