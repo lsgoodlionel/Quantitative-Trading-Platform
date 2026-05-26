@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000"
+// 开发: VITE_API_URL=http://localhost:8000（直连后端）
+// 生产: 不设 VITE_API_URL → 空字符串 → 相对路径 → Nginx 代理 /api/ → backend:8000
+const API_BASE = import.meta.env.VITE_API_URL ?? ""
 
 class ApiError extends Error {
   constructor(

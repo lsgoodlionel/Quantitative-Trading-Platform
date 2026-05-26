@@ -27,7 +27,7 @@ export function Login() {
     try {
       // FastAPI OAuth2 form login
       const body = new URLSearchParams({ username, password })
-      const resp = await fetch("/api/v1/auth/login", {
+      const resp = await fetch("/api/v1/auth/token", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: body.toString(),
