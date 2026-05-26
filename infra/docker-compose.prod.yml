@@ -1,0 +1,142 @@
+# QuantBot — 生产环境
+# 用法: make prod  或  docker compose -f infra/docker-compose.prod.yml up -d
+#
+# 前置条件:
+#   1. 复制 .env.example 为 .env，填写所有 CHANGE_ME 字段
+#   2. 确保 SECRET_KEY 已通过 `openssl rand -hex 32` 生成
+#   3. ALLOWED_ORIGINS 设置为你的域名，如 https://quantbot.example.com
+
+services:
+
+  # ── 数据库 ──────────────────────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: qb_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB:       ${DB_NAME}
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: qb_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 3600 1
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── 后端 (生产多 Worker) ──────────────────────────────────────────
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: production
+    image: quantbot-backend:latest
+    container_name: qb_backend
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL:     postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME}
+      REDIS_URL:        redis://redis:6379/0
+      ENVIRONMENT:      production
+      ALLOWED_ORIGINS:  ${ALLOWED_ORIGINS:-http://localhost}
+    networks:
+      - backend_net
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── 前端 (Nginx 静态 + 反向代理) ─────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: production
+    image: quantbot-frontend:latest
+    container_name: qb_frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    networks:
+      - backend_net
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── 监控 ─────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: qb_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - backend_net
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    profiles: ["monitoring"]
+
+  grafana:
+    image: grafana/grafana:12.0.1
+    container_name: qb_grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - backend_net
+    profiles: ["monitoring"]
+
+networks:
+  backend_net:
+    driver: bridge
+
+volumes:
+  timescale_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

@@ -1,17 +1,31 @@
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from app.core.config import settings
 
 router = APIRouter()
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
+
+# ── 内置账户（种子数据同步） ──────────────────────────────────────
+# 生产环境应改用数据库查询；此处保持 Phase 1 的内置账户以支持零配置启动
+_BUILTIN_USERS: dict[str, dict[str, str]] = {
+    "admin": {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "email": "admin@quantbot.local",
+        "role": "admin",
+        # bcrypt hash 对应 "admin123" (bcrypt 5.x 生成)
+        "hashed_pw": "$2b$12$0kMLEk./lr7l8hLBc4MIaeZTrJwp03XI3Zjw2LmiBjp5Of.KqvwWC",
+    }
+}
 
 
 class Token(BaseModel):
@@ -44,25 +58,30 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInfo:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         user_id: str | None = payload.get("sub")
+        role: str = payload.get("role", "trader")
+        email: str = payload.get("email", "")
         if user_id is None:
             raise credentials_exc
     except JWTError:
         raise credentials_exc
 
-    # TODO Phase 0.5: 从数据库查询用户信息
-    return UserInfo(id=user_id, email="user@example.com", role="trader")
+    return UserInfo(id=user_id, email=email, role=role)
 
 
 @router.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()) -> Token:
-    # TODO: 从数据库验证用户凭据
-    # 当前为开发模式占位，仅接受 admin/admin
-    if form_data.username != "admin" or form_data.password != "admin":
+    user = _BUILTIN_USERS.get(form_data.username)
+    if user is None or not _verify_password(form_data.password, user["hashed_pw"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    token = create_access_token({"sub": "dev-user-id", "role": "admin"})
+    token = create_access_token({
+        "sub": user["id"],
+        "role": user["role"],
+        "email": user["email"],
+    })
     return Token(
         access_token=token,
         expires_in=settings.access_token_expire_minutes * 60,

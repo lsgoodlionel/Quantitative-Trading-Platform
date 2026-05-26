@@ -39,12 +39,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # CORS origins — dev 默认允许 localhost；生产通过 ALLOWED_ORIGINS 环境变量控制
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"] if not settings.is_production else [],
+        allow_origins=settings.origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
 
     # Prometheus 指标端点

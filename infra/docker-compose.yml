@@ -1,51 +1,56 @@
-version: "3.9"
+# QuantBot — 开发环境 (热重载)
+# 用法: make dev  或  docker compose -f infra/docker-compose.yml up
 
 services:
-  # --- 数据库层 ---
+
+  # ── 数据库 ──────────────────────────────────────────────────────
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    container_name: qb_timescaledb
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: qb_db
     environment:
-      POSTGRES_USER: ${DB_USER:-quantbot}
+      POSTGRES_USER:     ${DB_USER:-quantbot}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-quantbot_dev}
-      POSTGRES_DB: ${DB_NAME:-quantbot}
+      POSTGRES_DB:       ${DB_NAME:-quantbot}
     ports:
       - "5432:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
+      - ./init-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-quantbot}"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: qb_redis
-    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # --- 后端服务 ---
+  # ── 后端 (热重载) ────────────────────────────────────────────────
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
       target: development
     container_name: qb_backend
+    env_file: ../.env
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-quantbot}:${DB_PASSWORD:-quantbot_dev}@timescaledb:5432/${DB_NAME:-quantbot}
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: development
-      LOG_LEVEL: DEBUG
+      REDIS_URL:    redis://redis:6379/0
+      ENVIRONMENT:  development
     ports:
       - "8000:8000"
     volumes:
@@ -55,27 +60,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0 --port 8000
+      --reload --reload-dir /app/app
 
-  # --- 任务队列 Worker ---
-  celery_worker:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-      target: development
-    container_name: qb_celery
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-quantbot}:${DB_PASSWORD:-quantbot_dev}@timescaledb:5432/${DB_NAME:-quantbot}
-      REDIS_URL: redis://redis:6379/0
-      ENVIRONMENT: development
-    volumes:
-      - ../backend:/app
-    depends_on:
-      - backend
-      - redis
-    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=4
-
-  # --- 前端 ---
+  # ── 前端 (Vite 热重载) ───────────────────────────────────────────
   frontend:
     build:
       context: ../frontend
@@ -85,37 +75,41 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ../frontend:/app
-      - /app/node_modules
+      - ../frontend/src:/app/src
+      - ../frontend/index.html:/app/index.html
     environment:
       VITE_API_URL: http://localhost:8000
-      VITE_WS_URL: ws://localhost:8000
+      VITE_WS_URL:  ws://localhost:8000
+    depends_on:
+      - backend
 
-  # --- 监控 ---
+  # ── 监控（可选 profile）─────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.4.0
     container_name: qb_prometheus
     ports:
       - "9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
     profiles: ["monitoring"]
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:12.0.1
     container_name: qb_grafana
     ports:
       - "3001:3000"
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
     profiles: ["monitoring"]
 
 volumes:
   timescale_data:
-  redis_data:
   prometheus_data:
   grafana_data:

@@ -28,7 +28,7 @@ from app.quant.hmm_regime import fit_hmm
 from app.quant.kelly import compute_kelly
 from app.quant.pca_factor import analyze_pca
 
-router = APIRouter(prefix="/quant", tags=["quant"])
+router = APIRouter(tags=["Quant Algorithms"])
 
 
 # ── 请求模型 ──────────────────────────────────────────────────────

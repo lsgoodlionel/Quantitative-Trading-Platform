@@ -159,3 +159,28 @@ CREATE TABLE IF NOT EXISTS alerts (
     is_read     BOOLEAN         NOT NULL DEFAULT FALSE,
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
+
+-- ── 种子数据 ─────────────────────────────────────────────────────
+-- 默认管理员账户: admin / admin123
+-- bcrypt hash 对应密码: admin123  (rounds=12)
+-- 生产环境务必通过 API 修改密码
+INSERT INTO users (id, email, hashed_pw, role)
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'admin@quantbot.local',
+    '$2b$12$0kMLEk./lr7l8hLBc4MIaeZTrJwp03XI3Zjw2LmiBjp5Of.KqvwWC',
+    'admin'
+) ON CONFLICT (id) DO NOTHING;
+
+-- 默认风控配置
+INSERT INTO risk_configs (user_id, name, rules)
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'default',
+    '[
+        {"id":"max_position_size","name":"单仓上限","enabled":true,"value":0.2,"unit":"ratio"},
+        {"id":"max_drawdown","name":"最大回撤止损","enabled":true,"value":0.15,"unit":"ratio"},
+        {"id":"daily_loss_limit","name":"日亏损限额","enabled":true,"value":5000,"unit":"currency"},
+        {"id":"max_orders_per_day","name":"日最大订单数","enabled":false,"value":50,"unit":"count"}
+    ]'::jsonb
+) ON CONFLICT DO NOTHING;

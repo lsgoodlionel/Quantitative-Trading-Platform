@@ -1,3 +1,5 @@
+import json
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +16,24 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
     debug: bool = False
+
+    # CORS — 逗号分隔的允许来源字符串（环境变量），内部转为列表
+    # 开发默认: http://localhost:3000,http://localhost:5173
+    # 生产示例: https://quantbot.example.com
+    allowed_origins: str = "http://localhost:3000,http://localhost:5173"
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_origins(cls, v: object) -> str:
+        """接受逗号分隔字符串或 JSON 数组，统一返回逗号字符串供 _origins 解析。"""
+        if isinstance(v, list):
+            return ",".join(str(x) for x in v)
+        return str(v)
+
+    @property
+    def origins_list(self) -> list[str]:
+        """将 allowed_origins 字符串解析为列表（去除空白）。"""
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     # 数据库
     database_url: str = "postgresql+asyncpg://quantbot:quantbot_dev@localhost:5432/quantbot"
