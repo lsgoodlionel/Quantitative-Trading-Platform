@@ -1,0 +1,100 @@
+[tool.poetry]
+name = "quantbot-backend"
+version = "0.1.0"
+description = "QuantBot — Multi-market quantitative trading platform (US/HK/A)"
+authors = ["QuantBot Team"]
+readme = "README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Web框架
+fastapi = "^0.115.0"
+uvicorn = { version = "^0.32.0", extras = ["standard"] }
+websockets = "^13.0"
+python-multipart = "^0.0.12"
+
+# 数据验证
+pydantic = "^2.9.0"
+pydantic-settings = "^2.6.0"
+
+# 数据库
+asyncpg = "^0.30.0"
+sqlalchemy = { version = "^2.0.36", extras = ["asyncio"] }
+alembic = "^1.13.3"
+
+# 缓存/消息队列
+redis = { version = "^5.2.0", extras = ["hiredis"] }
+celery = { version = "^5.4.0", extras = ["redis"] }
+
+# 认证
+python-jose = { version = "^3.3.0", extras = ["cryptography"] }
+passlib = { version = "^1.7.4", extras = ["bcrypt"] }
+
+# 数据处理
+pandas = "^2.2.3"
+numpy = "^2.1.0"
+pandas-ta = "^0.3.14b"      # 技术指标库
+scipy = "^1.14.0"
+
+# 美股数据/交易 (参考 refs/alpaca-py/)
+alpaca-py = "^0.34.0"
+
+# 港股数据/交易 (参考 refs/py-futu-api/)
+futu-api = "^9.4.5408"
+
+# 通用行情数据（备用）
+yfinance = "^0.2.50"
+akshare = "^1.14.0"
+
+# 组合优化 (参考 refs/PyPortfolioOpt/)
+pyportfolioopt = "^1.5.5"
+
+# 任务调度
+apscheduler = "^3.10.4"
+
+# 日志
+structlog = "^24.4.0"
+loguru = "^0.7.2"
+
+# 告警通知
+httpx = "^0.28.0"          # HTTP客户端（Webhook/Telegram）
+python-telegram-bot = "^21.7"
+
+# 监控
+prometheus-client = "^0.21.0"
+opentelemetry-api = "^1.28.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.3"
+pytest-asyncio = "^0.24.0"
+pytest-cov = "^6.0.0"
+httpx = "^0.28.0"           # TestClient
+faker = "^30.8.2"
+ruff = "^0.7.4"
+mypy = "^1.13.0"
+pre-commit = "^4.0.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = ["E", "F", "I", "N", "UP", "B", "C4", "PT"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+omit = ["tests/*", "alembic/*"]
