@@ -9,15 +9,16 @@ router = APIRouter()
 StrategyStatus = Literal["draft", "backtesting", "paper", "live", "stopped", "error"]
 
 # 内置预设策略列表 — Phase 2 实现具体策略类
+# name = snake_case 策略 ID（前端路由用）; description = 中文显示名
 PRESET_STRATEGIES = [
-    {"id": "double_ma", "name": "双均线趋势", "type": "trend", "markets": ["US", "HK"]},
-    {"id": "bollinger", "name": "布林带均值回归", "type": "mean_reversion", "markets": ["US", "HK"]},
-    {"id": "macd", "name": "MACD动量", "type": "momentum", "markets": ["US", "HK"]},
-    {"id": "rsi_mean_reversion", "name": "RSI均值回归", "type": "mean_reversion", "markets": ["US", "HK"]},
-    {"id": "momentum_rotation", "name": "动量轮动ETF", "type": "rotation", "markets": ["US"]},
-    {"id": "grid_trading", "name": "网格交易", "type": "grid", "markets": ["US", "HK"]},
-    {"id": "pairs_trading", "name": "配对统计套利", "type": "arbitrage", "markets": ["HK", "US"]},
-    {"id": "multi_factor", "name": "多因子选股", "type": "factor", "markets": ["US"]},
+    {"name": "double_ma",          "description": "双均线趋势 — 短期均线穿越长期均线触发买卖信号"},
+    {"name": "bollinger",          "description": "布林带均值回归 — 价格触碰通道边界时反向交易"},
+    {"name": "macd",               "description": "MACD 动量 — 利用 MACD 柱与信号线交叉捕捉趋势"},
+    {"name": "rsi_mean_reversion", "description": "RSI 均值回归 — 超买超卖区域的反向修复策略"},
+    {"name": "momentum_rotation",  "description": "动量轮动 ETF — 持有近期表现最强的 ETF 组合"},
+    {"name": "grid_trading",       "description": "网格交易 — 在价格区间内自动挂出买卖网格订单"},
+    {"name": "pairs_trading",      "description": "配对统计套利 — 基于协整关系的多空配对策略"},
+    {"name": "multi_factor",       "description": "多因子选股 — 综合价值/动量/质量因子排名选股"},
 ]
 
 

@@ -46,15 +46,24 @@ class OrderResponse(BaseModel):
 
 # ── 依赖注入 ──────────────────────────────────────────────────
 
-def get_oms() -> OrderManager:
+def _try_get_oms() -> OrderManager | None:
+    """返回 OMS 实例；未配置时返回 None。"""
     from app.oms.manager import get_order_manager
     try:
         return get_order_manager()
     except RuntimeError:
+        return None
+
+
+def get_oms() -> OrderManager:
+    """仅写操作使用：OMS 未配置时返回 503。"""
+    oms = _try_get_oms()
+    if oms is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Order management system not available (live trading not configured)",
         )
+    return oms
 
 
 # ── 端点 ─────────────────────────────────────────────────────
@@ -95,12 +104,14 @@ async def submit_order(
 
 @router.get("", response_model=list[OrderResponse])
 async def list_orders(
-    oms: Annotated[OrderManager, Depends(get_oms)],
     strategy_id: Optional[str] = Query(None),
     order_status: Optional[str] = Query(None, alias="status"),
     limit: int = Query(100, ge=1, le=1000),
 ) -> list[OrderResponse]:
-    """查询订单列表。"""
+    """查询订单列表。未配置券商时返回空列表。"""
+    oms = _try_get_oms()
+    if oms is None:
+        return []
     orders = oms.list_orders(strategy_id=strategy_id, status=order_status, limit=limit)
     return [_to_response(o) for o in orders]
 

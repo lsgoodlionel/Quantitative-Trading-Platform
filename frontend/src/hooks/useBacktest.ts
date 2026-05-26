@@ -5,7 +5,7 @@ import type { BacktestRequest, BacktestResult, Strategy } from "@/types"
 export function useStrategies() {
   return useQuery<Strategy[]>({
     queryKey: ["strategies"],
-    queryFn: () => api.get<Strategy[]>("/api/v1/backtests/strategies"),
+    queryFn: () => api.get<Strategy[]>("/api/v1/strategies/presets"),
     staleTime: Infinity,
   })
 }
