@@ -29,7 +29,7 @@ export function useBars(params: BarsParams | null) {
         start_date: params.start_date,
         end_date: params.end_date,
       })
-      return api.get<BarsResponse>(`/api/v1/market/bars?${qs}`)
+      return api.get<BarsResponse>(`/api/v1/bars?${qs}`)
     },
     enabled: params !== null,
     staleTime: 1000 * 60,

@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.data.models import Market, Frequency
 from app.data.service import DataService
 from app.engine.backtest.engine import BacktestEngine, BacktestConfig
@@ -67,8 +69,8 @@ class BacktestResponse(BaseModel):
 
 # ── 依赖注入 ──────────────────────────────────────────────────
 
-def get_service() -> DataService:
-    return DataService()
+def get_service(session: AsyncSession = Depends(get_db)) -> DataService:
+    return DataService(session)
 
 
 # ── 端点 ─────────────────────────────────────────────────────
@@ -109,16 +111,13 @@ async def run_backtest(
         )
 
     # 4. 获取历史数据
-    start_dt = datetime(body.start_date.year, body.start_date.month, body.start_date.day, tzinfo=timezone.utc)
-    end_dt = datetime(body.end_date.year, body.end_date.month, body.end_date.day, 23, 59, tzinfo=timezone.utc)
-
     try:
         bars = await svc.get_bars(
             symbol=body.symbol,
             market=market,
             frequency=frequency,
-            start=start_dt,
-            end=end_dt,
+            start=body.start_date,
+            end=body.end_date,
         )
     except Exception as e:
         raise HTTPException(

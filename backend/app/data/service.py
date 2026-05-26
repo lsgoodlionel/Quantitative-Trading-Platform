@@ -28,6 +28,7 @@ from app.core.logging import get_logger
 from app.data.feeds.akshare_feed import AkShareDataFeed
 from app.data.feeds.alpaca import AlpacaDataFeed
 from app.data.feeds.base import DataFeed
+from app.data.feeds.demo_feed import DemoDataFeed
 from app.data.feeds.futu import FutuDataFeed
 from app.data.feeds.yfinance_feed import YFinanceDataFeed
 from app.data.models import Bar, Frequency, Market, SymbolInfo, Tick
@@ -69,10 +70,11 @@ class DataService:
         if use_cache:
             cached = await self._repo.get_bars(symbol, market, frequency, start, end)
             if cached:
-                # 简单验证: 缓存数据覆盖所需时间范围 80%+ 则认为命中
-                expected_days = (end - start).days + 1
-                coverage = len(cached) / max(expected_days, 1)
-                if coverage >= 0.5 or frequency in (Frequency.DAY_1, Frequency.WEEK_1):
+                # 验证缓存覆盖率: 至少覆盖请求时间范围的 50% 日历天
+                # 避免日线/周线仅有少量边界数据时错误地命中缓存
+                expected_days = max(1, (end - start).days + 1)
+                coverage = len(cached) / expected_days
+                if coverage >= 0.5:
                     logger.debug("Cache hit", symbol=symbol, count=len(cached))
                     return cached
 
@@ -95,7 +97,15 @@ class DataService:
                 except Exception as e2:
                     logger.error("Fallback feed also failed", error=str(e2))
 
-        # 写入缓存
+        # 所有真实数据源失败 → 使用合成演示数据兜底
+        if not bars:
+            demo = self._registry.get_demo_feed(market)
+            try:
+                bars = await demo.get_bars(symbol, frequency, start, end)
+            except Exception as e:
+                logger.error("Demo feed also failed", error=str(e))
+
+        # 写入缓存（只缓存真实数据，不缓存合成数据以避免污染）
         if bars and use_cache:
             saved = await self._repo.save_bars(bars)
             logger.debug("Cached bars", symbol=symbol, count=saved)
@@ -187,6 +197,9 @@ class _FeedRegistry:
         self._yf_us = YFinanceDataFeed(Market.US)
         self._yf_hk = YFinanceDataFeed(Market.HK)
         self._akshare = AkShareDataFeed()
+        self._demo_us = DemoDataFeed(Market.US)
+        self._demo_hk = DemoDataFeed(Market.HK)
+        self._demo_a = DemoDataFeed(Market.A)
 
     @classmethod
     def instance(cls) -> _FeedRegistry:
@@ -200,16 +213,25 @@ class _FeedRegistry:
 
         美股: Alpaca → yfinance
         港股: Futu   → yfinance
-        A股:  (Phase 4 接入，当前无可用源)
+        A股:  akshare（免费日/周线）
+
+        所有真实数据源失败后，DataService 会自动调用 get_demo_feed() 兜底。
         """
         if market == Market.US:
             return self._alpaca, self._yf_us
         if market == Market.HK:
             return self._futu_hk, self._yf_hk
         if market == Market.A:
-            # A股: akshare (免费数据源，日/周线), 无备用
             return self._akshare, None
         raise ValueError(f"Unknown market: {market}")
+
+    def get_demo_feed(self, market: Market) -> DemoDataFeed:
+        """返回对应市场的合成演示数据源（最终兜底）。"""
+        if market == Market.US:
+            return self._demo_us
+        if market == Market.HK:
+            return self._demo_hk
+        return self._demo_a
 
 
 # FastAPI Depends 工厂
