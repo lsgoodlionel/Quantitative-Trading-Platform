@@ -74,18 +74,39 @@ class AlpacaDataFeed(DataFeed):
     def __init__(self) -> None:
         self._hist_client: object | None = None
         self._stream_client: object | None = None
+        self._cached_config_version: int = -1
+
+    def _load_redis_credentials(self) -> dict[str, str] | None:
+        """从 Redis 同步读取券商配置（供非 async 场景使用）。"""
+        try:
+            import asyncio
+            import redis as sync_redis
+            r = sync_redis.from_url(settings.redis_url, decode_responses=True)
+            data = r.hgetall("broker_config:alpaca")
+            r.close()
+            return data if data else None
+        except Exception:
+            return None
+
+    def _get_credentials(self) -> tuple[str | None, str | None]:
+        """优先级: Redis 配置 > 环境变量。"""
+        cfg = self._load_redis_credentials()
+        if cfg:
+            return cfg.get("api_key") or None, cfg.get("api_secret") or None
+        return settings.alpaca_api_key or None, settings.alpaca_secret_key or None
 
     def _get_hist_client(self) -> object:
-        if self._hist_client is None:
-            try:
-                from alpaca.data.historical.stock import StockHistoricalDataClient
-            except ImportError as e:
-                raise RuntimeError("alpaca-py not installed: pip install alpaca-py") from e
+        """每次重建客户端，确保使用最新 Redis 凭据（StockHistoricalDataClient 构建廉价）。"""
+        try:
+            from alpaca.data.historical.stock import StockHistoricalDataClient
+        except ImportError as e:
+            raise RuntimeError("alpaca-py not installed: pip install alpaca-py") from e
 
-            self._hist_client = StockHistoricalDataClient(
-                api_key=settings.alpaca_api_key or None,
-                secret_key=settings.alpaca_secret_key or None,
-            )
+        api_key, secret_key = self._get_credentials()
+        self._hist_client = StockHistoricalDataClient(
+            api_key=api_key,
+            secret_key=secret_key,
+        )
         return self._hist_client
 
     async def get_bars(
@@ -182,9 +203,10 @@ class AlpacaDataFeed(DataFeed):
             bar = _to_bar(raw_bar, sym, frequency)
             await queue.put(bar)
 
+        api_key, secret_key = self._get_credentials()
         stream = StockDataStream(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
+            api_key=api_key or "",
+            secret_key=secret_key or "",
             feed=AlpacaFeed.IEX,
         )
         stream.subscribe_bars(on_bar, *symbols)
@@ -223,9 +245,10 @@ class AlpacaDataFeed(DataFeed):
             )
             await queue.put(tick)
 
+        api_key, secret_key = self._get_credentials()
         stream = StockDataStream(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
+            api_key=api_key or "",
+            secret_key=secret_key or "",
             feed=AlpacaFeed.IEX,
         )
         stream.subscribe_trades(on_trade, *symbols)
@@ -239,7 +262,8 @@ class AlpacaDataFeed(DataFeed):
 
     @property
     def supports_realtime(self) -> bool:
-        return bool(settings.alpaca_api_key and settings.alpaca_secret_key)
+        api_key, secret_key = self._get_credentials()
+        return bool(api_key and secret_key)
 
     async def search_symbols(self, query: str) -> list[SymbolInfo]:
         """通过 Alpaca assets API 搜索股票。"""
@@ -250,10 +274,13 @@ class AlpacaDataFeed(DataFeed):
         except ImportError:
             return []
 
+        api_key, secret_key = self._get_credentials()
+        cfg = self._load_redis_credentials()
+        paper = (cfg.get("paper_mode", "true").lower() == "true") if cfg else settings.alpaca_paper
         client = TradingClient(
-            api_key=settings.alpaca_api_key or None,
-            secret_key=settings.alpaca_secret_key or None,
-            paper=settings.alpaca_paper,
+            api_key=api_key,
+            secret_key=secret_key,
+            paper=paper,
         )
         req = GetAssetsRequest(asset_class=AssetClass.US_EQUITY, status=AssetStatus.ACTIVE)
         loop = asyncio.get_event_loop()
