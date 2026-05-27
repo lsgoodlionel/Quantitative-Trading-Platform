@@ -226,3 +226,94 @@ async def compute_rebalance_endpoint(body: RebalanceRequest) -> dict:
         "total_buy": round(sum(o.delta_value for o in orders if o.delta_value > 0), 2),
         "total_sell": round(abs(sum(o.delta_value for o in orders if o.delta_value < 0)), 2),
     }
+
+
+# ── VaR / CVaR Analysis ───────────────────────────────────────────
+
+class VaRPositionInput(BaseModel):
+    symbol: str
+    market: str = "US"
+    weight: float = Field(ge=0.0, le=1.0)
+
+
+class VaRRequest(BaseModel):
+    positions: list[VaRPositionInput] = Field(min_length=1)
+    portfolio_value: float = Field(gt=0)
+    lookback_days: int = Field(default=252, ge=60, le=1260)
+
+
+@router.post("/var")
+async def compute_var(body: VaRRequest) -> dict:
+    """
+    历史模拟 + 参数法 VaR / CVaR 分析。
+
+    传入持仓权重列表，自动从行情库拉取历史日收益率，
+    合并为组合收益率序列，计算 95% / 99% VaR 和 CVaR。
+    """
+    from datetime import date, timedelta
+
+    import numpy as np
+    import pandas as pd
+
+    from app.core.database import AsyncSessionLocal
+    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.service import DataService
+    from app.risk.var_engine import aggregate_portfolio_returns, compute_portfolio_var
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=body.lookback_days + 30)
+
+    # Normalize weights
+    total_w = sum(p.weight for p in body.positions)
+    if total_w <= 0:
+        raise HTTPException(status_code=400, detail="Total weight must be positive")
+    weights = {p.symbol: p.weight / total_w for p in body.positions}
+
+    # Fetch historical data
+    position_returns: dict[str, np.ndarray] = {}
+    async with AsyncSessionLocal() as session:
+        svc = DataService(session)
+        for pos in body.positions:
+            try:
+                market_enum = MarketEnum(pos.market)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid market: {pos.market}")
+
+            try:
+                bars = await svc.get_bars(
+                    pos.symbol, market_enum, FreqEnum.DAY_1, start_date, end_date
+                )
+            except Exception as e:
+                raise HTTPException(status_code=503, detail=f"Data feed error for {pos.symbol}: {e}")
+
+            if len(bars) < 20:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient history for {pos.symbol}: {len(bars)} bars"
+                )
+
+            closes = np.array([b.close for b in bars])
+            returns = np.diff(closes) / closes[:-1]
+            position_returns[pos.symbol] = returns
+
+    # Aggregate portfolio returns
+    try:
+        portfolio_ret = aggregate_portfolio_returns(position_returns, weights)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Compute VaR
+    try:
+        result = compute_portfolio_var(
+            returns=portfolio_ret.tolist(),
+            portfolio_value=body.portfolio_value,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"VaR computation error: {e}")
+
+    monetary = result.as_monetary()
+    monetary["weights"] = weights
+    monetary["return_series"] = [round(float(r), 5) for r in portfolio_ret[-252:]]
+    return monetary

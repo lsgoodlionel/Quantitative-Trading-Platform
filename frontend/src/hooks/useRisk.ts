@@ -51,3 +51,36 @@ export function usePreTradeCheck() {
       api.post<{ passed: boolean; violations: RiskViolation[] }>("/api/v1/risk/check/pre-trade", req),
   })
 }
+
+interface VaRPosition { symbol: string; market: string; weight: number }
+
+export interface VaRResult {
+  hist_var_95_pct:    number
+  hist_var_99_pct:    number
+  hist_cvar_95_pct:   number
+  hist_cvar_99_pct:   number
+  hist_var_95_value:  number
+  hist_var_99_value:  number
+  hist_cvar_95_value: number
+  hist_cvar_99_value: number
+  param_var_95_pct:   number
+  param_var_99_pct:   number
+  param_cvar_95_pct:  number
+  param_cvar_99_pct:  number
+  mean_return_pct:    number
+  std_return_pct:     number
+  skewness:           number
+  kurtosis:           number
+  min_return_pct:     number
+  max_return_pct:     number
+  portfolio_value:    number
+  n_days:             number
+  weights:            Record<string, number>
+  return_series:      number[]
+}
+
+export function useVaRAnalysis() {
+  return useMutation<VaRResult, Error, { positions: VaRPosition[]; portfolio_value: number; lookback_days?: number }>({
+    mutationFn: (req) => api.post<VaRResult>("/api/v1/risk/var", req),
+  })
+}
