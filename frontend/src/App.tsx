@@ -14,6 +14,7 @@ import { Portfolio } from "@/pages/Portfolio"
 import { Risk } from "@/pages/Risk"
 import { AlgoLab } from "@/pages/AlgoLab"
 import { PortfolioOptimizer } from "@/pages/PortfolioOptimizer"
+import { FactorAnalysis } from "@/pages/FactorAnalysis"
 import { Settings } from "@/pages/Settings"
 
 const queryClient = new QueryClient({
@@ -50,8 +51,9 @@ export default function App() {
               <Route path="/portfolio"   element={<Protected element={<Portfolio />} />} />
               <Route path="/portfolio-optimizer" element={<Protected element={<PortfolioOptimizer />} />} />
               <Route path="/risk"        element={<Protected element={<Risk />} />} />
-              <Route path="/algolab"    element={<Protected element={<AlgoLab />} />} />
-              <Route path="/settings"   element={<Protected element={<Settings />} />} />
+              <Route path="/algolab"       element={<Protected element={<AlgoLab />} />} />
+              <Route path="/factor"        element={<Protected element={<FactorAnalysis />} />} />
+              <Route path="/settings"      element={<Protected element={<Settings />} />} />
               <Route path="*"            element={<Navigate to="/" replace />} />
             </Routes>
           </div>

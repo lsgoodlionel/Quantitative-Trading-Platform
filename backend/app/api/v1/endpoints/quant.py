@@ -215,3 +215,87 @@ async def run_copula(req: CopulaRequest) -> dict:
         return result.__dict__
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+# ── Factor Analysis ───────────────────────────────────────────────
+
+class FactorAnalysisRequest(BaseModel):
+    symbol: str
+    market: str = "US"
+    frequency: str = "1d"
+    start: str | None = None
+    end: str | None = None
+    factor_name: str = "momentum_20"
+    forward_periods: list[int] = Field(default=[5, 10, 20], max_length=4)
+
+
+@router.get("/factor/list")
+async def list_factors() -> list[dict]:
+    """获取所有可用因子列表。"""
+    from app.quant.factor_analysis import AVAILABLE_FACTORS
+    return AVAILABLE_FACTORS
+
+
+@router.post("/factor/analyze")
+async def run_factor_analysis(req: FactorAnalysisRequest) -> dict:
+    """
+    因子 IC 分析。
+
+    计算指定因子与多个前瞻期收益率的滚动 IC（信息系数），
+    返回 IC 时间序列、IC IR、分位数收益分析。
+    """
+    from datetime import date, timedelta
+    import pandas as pd
+    from app.quant.factor_analysis import analyze_factor
+    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.service import DataService
+    from app.core.database import AsyncSessionLocal
+
+    # parse dates
+    end_date = date.fromisoformat(req.end) if req.end else date.today()
+    start_date = date.fromisoformat(req.start) if req.start else end_date - timedelta(days=365 * 2)
+
+    try:
+        market_enum = MarketEnum(req.market)
+        freq_enum = FreqEnum(req.frequency)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    async with AsyncSessionLocal() as session:
+        svc = DataService(session)
+        try:
+            bars = await svc.get_bars(req.symbol, market_enum, freq_enum, start_date, end_date)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Data feed error: {e}") from e
+
+    if len(bars) < 60:
+        raise HTTPException(status_code=400, detail=f"Not enough data: {len(bars)} bars (need ≥ 60)")
+
+    df = pd.DataFrame([{
+        "time": b.time.isoformat(),
+        "open": b.open, "high": b.high, "low": b.low,
+        "close": b.close, "volume": b.volume,
+    } for b in bars]).set_index("time")
+
+    try:
+        result = analyze_factor(df, req.factor_name, req.forward_periods)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Factor computation error: {e}") from e
+
+    return {
+        "symbol": req.symbol,
+        "market": req.market,
+        "factor_name": result.factor_name,
+        "forward_periods": result.forward_periods,
+        "factor_series": result.factor_series[-500:],
+        "ic_series": {k: v[-500:] for k, v in result.ic_series.items()},
+        "cumulative_ic": {k: v[-500:] for k, v in result.cumulative_ic.items()},
+        "ic_mean": result.ic_mean,
+        "ic_std": result.ic_std,
+        "ic_ir": result.ic_ir,
+        "ic_positive_rate": result.ic_positive_rate,
+        "ic_abs_mean": result.ic_abs_mean,
+        "quantile_returns": result.quantile_returns,
+    }
