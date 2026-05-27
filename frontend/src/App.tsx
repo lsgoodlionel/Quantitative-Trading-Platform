@@ -13,6 +13,7 @@ import { Orders } from "@/pages/Orders"
 import { Portfolio } from "@/pages/Portfolio"
 import { Risk } from "@/pages/Risk"
 import { AlgoLab } from "@/pages/AlgoLab"
+import { PortfolioOptimizer } from "@/pages/PortfolioOptimizer"
 import { Settings } from "@/pages/Settings"
 
 const queryClient = new QueryClient({
@@ -47,6 +48,7 @@ export default function App() {
               <Route path="/backtest"    element={<Protected element={<Backtest />} />} />
               <Route path="/orders"      element={<Protected element={<Orders />} />} />
               <Route path="/portfolio"   element={<Protected element={<Portfolio />} />} />
+              <Route path="/portfolio-optimizer" element={<Protected element={<PortfolioOptimizer />} />} />
               <Route path="/risk"        element={<Protected element={<Risk />} />} />
               <Route path="/algolab"    element={<Protected element={<AlgoLab />} />} />
               <Route path="/settings"   element={<Protected element={<Settings />} />} />

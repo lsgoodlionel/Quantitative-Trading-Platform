@@ -186,6 +186,36 @@ export interface Account {
   portfolio_value: number
 }
 
+// ── 组合优化 ──────────────────────────────────────────────────
+export type PortfolioOptMethod =
+  | "max_sharpe" | "min_volatility" | "risk_parity" | "min_cvar" | "equal_weight"
+
+export interface PortfolioOptRequest {
+  symbols: string[]
+  market: Market
+  start_date: string
+  end_date: string
+  method: PortfolioOptMethod
+  include_frontier: boolean
+}
+
+export interface PortfolioFrontierPoint {
+  vol: number
+  ret: number
+  sharpe: number
+}
+
+export interface PortfolioOptResult {
+  method: string
+  weights: Record<string, number>
+  expected_return: number
+  expected_volatility: number
+  sharpe_ratio: number
+  cvar_95: number
+  frontier: PortfolioFrontierPoint[]
+  risk_contributions: Record<string, number>
+}
+
 // ── 策略 ──────────────────────────────────────────────────────
 export interface Strategy {
   name: string

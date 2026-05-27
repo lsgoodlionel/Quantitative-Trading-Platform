@@ -15,6 +15,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/backtest",  icon: "◷",  label: "回测" },
   { to: "/orders",    icon: "≡",  label: "订单" },
   { to: "/portfolio", icon: "◈",  label: "持仓" },
+  { to: "/portfolio-optimizer", icon: "⬡", label: "组合优化" },
   { to: "/risk",      icon: "⚑",  label: "风控" },
   { to: "/algolab",   icon: "∑",  label: "算法实验室" },
   { to: "/settings",  icon: "⚯",  label: "设置" },

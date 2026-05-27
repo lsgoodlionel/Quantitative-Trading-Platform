@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, bars, broker_config, strategies, backtests, orders, positions, quant, risk, stream
+from app.api.v1.endpoints import auth, bars, broker_config, strategies, backtests, orders, positions, quant, risk, stream, portfolio_opt
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -21,3 +21,4 @@ api_router.include_router(risk.router, prefix="/risk", tags=["Risk"])
 api_router.include_router(broker_config.router, prefix="/broker-config", tags=["Broker Config"])
 api_router.include_router(quant.router, prefix="/quant", tags=["Quant Algorithms"])
 api_router.include_router(stream.router, prefix="/stream", tags=["Real-time Stream"])
+api_router.include_router(portfolio_opt.router, prefix="/portfolio", tags=["Portfolio Optimizer"])
