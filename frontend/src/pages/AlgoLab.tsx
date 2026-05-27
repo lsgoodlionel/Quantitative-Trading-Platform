@@ -9,58 +9,25 @@ import {
 import { useGBM, useBSM, useGARCH, useKelly, useCointegration, useHMM } from "@/hooks/useQuant"
 import Editor from "@monaco-editor/react"
 import { usePresets, useStrategySource, useValidateStrategy } from "@/hooks/useStrategy"
+import { SectionCard, ParamRow, MetaGrid, CHART_COLORS } from "@/pages/algolab/shared"
+import { MLPanel } from "@/pages/algolab/MLStrategyPanel"
 
 // ── Shared helpers ────────────────────────────────────────────────
 
-type AlgoTab = "gbm" | "bsm" | "garch" | "kelly" | "coint" | "hmm" | "editor"
+type AlgoTab = "gbm" | "bsm" | "garch" | "kelly" | "coint" | "hmm" | "editor" | "ml"
 
 const TABS: { id: AlgoTab; label: string; cn: string }[] = [
-  { id: "gbm",   label: "GBM 蒙卡",  cn: "几何布朗运动" },
-  { id: "bsm",   label: "BSM 期权",  cn: "Black-Scholes-Merton" },
-  { id: "garch", label: "GARCH",     cn: "波动率建模" },
-  { id: "kelly", label: "凯利准则",   cn: "仓位优化" },
-  { id: "coint", label: "协整",       cn: "统计套利" },
+  { id: "gbm",    label: "GBM 蒙卡",   cn: "几何布朗运动" },
+  { id: "bsm",    label: "BSM 期权",   cn: "Black-Scholes-Merton" },
+  { id: "garch",  label: "GARCH",      cn: "波动率建模" },
+  { id: "kelly",  label: "凯利准则",    cn: "仓位优化" },
+  { id: "coint",  label: "协整",        cn: "统计套利" },
   { id: "hmm",    label: "HMM 状态",   cn: "市场状态识别" },
-  { id: "editor", label: "策略编辑器", cn: "自定义策略" },
+  { id: "editor", label: "策略编辑器",  cn: "自定义策略" },
+  { id: "ml",     label: "ML 策略",    cn: "机器学习预测" },
 ]
 
-function SectionCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
-  return (
-    <div className="card">
-      <div className="flex items-baseline gap-2 mb-4">
-        <h3 className="text-sm font-semibold text-[#e6edf3]">{title}</h3>
-        {sub && <span className="text-xs text-[#6e7681]">{sub}</span>}
-      </div>
-      {children}
-    </div>
-  )
-}
 
-function ParamRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 mb-3">
-      <label className="label w-40 shrink-0 text-right">{label}</label>
-      {children}
-    </div>
-  )
-}
-
-function MetaGrid({ items }: { items: { label: string; value: string; accent?: "up" | "down" }[] }) {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-      {items.map(({ label, value, accent }) => (
-        <div key={label} className="bg-[#1c2128] border border-[#21262d] rounded-lg p-3">
-          <p className="text-xs text-[#6e7681] mb-1">{label}</p>
-          <p className={`font-mono text-sm font-semibold ${
-            accent === "up" ? "text-[#3fb950]" : accent === "down" ? "text-[#f85149]" : "text-[#e6edf3]"
-          }`}>{value}</p>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-const CHART_COLORS = { green: "#3fb950", red: "#f85149", blue: "#58a6ff", muted: "#8b949e" }
 
 // ── GBM Panel ─────────────────────────────────────────────────────
 
@@ -754,6 +721,7 @@ export function AlgoLab() {
       {tab === "coint" && <CointegrationPanel />}
       {tab === "hmm"    && <HMMPanel />}
       {tab === "editor" && <StrategyEditorPanel />}
+      {tab === "ml"     && <MLPanel />}
     </AppShell>
   )
 }

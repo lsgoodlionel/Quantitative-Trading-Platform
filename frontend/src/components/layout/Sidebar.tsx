@@ -19,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/risk",      icon: "⚑",  label: "风控" },
   { to: "/factor",    icon: "λ",  label: "因子分析" },
   { to: "/algolab",   icon: "∑",  label: "算法实验室" },
+  { to: "/alerts",    icon: "🔔", label: "价格预警" },
   { to: "/settings",  icon: "⚯",  label: "设置" },
 ]
 

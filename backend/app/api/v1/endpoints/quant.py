@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -298,4 +300,102 @@ async def run_factor_analysis(req: FactorAnalysisRequest) -> dict:
         "ic_positive_rate": result.ic_positive_rate,
         "ic_abs_mean": result.ic_abs_mean,
         "quantile_returns": result.quantile_returns,
+    }
+
+
+# ── ML Strategy ───────────────────────────────────────────────────
+
+MLModelType = Literal["logistic_regression", "random_forest", "gradient_boosting"]
+
+
+class MLTrainRequest(BaseModel):
+    symbol:       str          = Field(min_length=1, max_length=20)
+    market:       str          = Field(default="US", pattern="^(US|HK|A)$")
+    frequency:    str          = Field(default="1d")
+    start:        str | None   = None
+    end:          str | None   = None
+    model_type:   MLModelType  = "random_forest"
+    forward_days: int          = Field(default=5, ge=1, le=60)
+    test_size:    float        = Field(default=0.2, ge=0.1, le=0.4)
+
+
+@router.post("/ml/train")
+async def train_ml_strategy(req: MLTrainRequest) -> dict:
+    """
+    训练 ML 分类策略。
+
+    使用 8 个技术指标特征训练 sklearn 分类模型，预测 n 日后价格方向。
+    返回模型评估指标（准确率、AUC、特征重要度）和近期信号。
+    """
+    from datetime import date, timedelta
+    import pandas as pd
+    from app.quant.ml_strategy import train_ml_strategy as _train
+    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.service import DataService
+    from app.core.database import AsyncSessionLocal
+
+    end_date = date.fromisoformat(req.end) if req.end else date.today()
+    start_date = (
+        date.fromisoformat(req.start) if req.start
+        else end_date - timedelta(days=365 * 3)
+    )
+
+    try:
+        market_enum = MarketEnum(req.market)
+        freq_enum = FreqEnum(req.frequency)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    async with AsyncSessionLocal() as session:
+        svc = DataService(session)
+        try:
+            bars = await svc.get_bars(req.symbol, market_enum, freq_enum, start_date, end_date)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Data feed error: {e}") from e
+
+    if len(bars) < 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not enough data: {len(bars)} bars (need >= 100)",
+        )
+
+    df = pd.DataFrame([{
+        "time": b.time.isoformat(),
+        "open": b.open, "high": b.high, "low": b.low,
+        "close": b.close, "volume": b.volume,
+    } for b in bars]).set_index("time")
+
+    try:
+        result = _train(
+            df=df,
+            model_type=req.model_type,
+            forward_days=req.forward_days,
+            test_size=req.test_size,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"ML training error: {e}") from e
+
+    return {
+        "symbol": req.symbol,
+        "market": req.market,
+        "model_type": result.model_type,
+        "forward_days": result.forward_days,
+        "n_samples": result.n_samples,
+        "n_features": result.n_features,
+        "feature_names": result.feature_names,
+        "train_accuracy": result.train_accuracy,
+        "test_accuracy": result.test_accuracy,
+        "precision": result.precision,
+        "recall": result.recall,
+        "f1_score": result.f1_score,
+        "auc_roc": result.auc_roc,
+        "feature_importance": result.feature_importance,
+        "confusion_matrix": result.confusion_matrix,
+        "predictions": result.predictions[-30:],
+        "recent_signal": result.recent_signal,
+        "recent_prob": result.recent_prob,
+        "cv_mean": result.cv_mean,
+        "cv_std": result.cv_std,
     }
