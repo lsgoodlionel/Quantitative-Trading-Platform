@@ -7,10 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import numpy as np
+import pandas as pd
+
 from app.core.database import get_db
 from app.data.models import Bar as BarModel
 from app.data.models import Frequency, Market
 from app.data.service import DataService
+# Note: indicators imported lazily inside the endpoint to avoid circular imports
+# (app.strategy.__init__ → StrategyContext → backtest.engine → strategy.__init__)
 
 router = APIRouter()
 
@@ -124,6 +129,124 @@ async def search_symbols(
         )
         for s in symbols
     ]
+
+
+@router.get("/indicators")
+async def compute_indicators(  # noqa: C901
+    symbol: Annotated[str, Query()],
+    market: Annotated[Market, Query()],
+    frequency: Annotated[Frequency, Query()] = Frequency.DAY_1,
+    start: Annotated[date | None, Query()] = None,
+    end: Annotated[date | None, Query()] = None,
+    indicators: Annotated[str, Query(description="逗号分隔指标名: sma,ema,rsi,macd,bb,atr,adx,stoch,cci,obv,vwap,williams_r,roc,mfi,donchian,keltner")] = "sma,rsi,macd",
+    svc: DataService = Depends(get_service),
+) -> dict:
+    """
+    计算技术指标并返回时序数据。
+    每个指标返回 [{time, value}, …] 格式。
+    多值指标（MACD、布林带等）返回子键。
+    """
+    end_date = end or date.today()
+    start_date = start or (end_date - timedelta(days=365))
+
+    bars = await svc.get_bars(symbol, market, frequency, start_date, end_date)
+    if not bars:
+        raise HTTPException(404, detail=f"No bars for {symbol}")
+
+    # Import from app.quant.indicators — standalone module, no circular dependencies
+    from app.quant import indicators as ind
+
+    # 构建 DataFrame
+    df = pd.DataFrame([{
+        "time": b.time.isoformat(), "open": b.open, "high": b.high,
+        "low": b.low, "close": b.close, "volume": b.volume,
+    } for b in bars]).set_index("time")
+
+    requested = {s.strip().lower() for s in indicators.split(",")}
+    result: dict[str, object] = {"time": list(df.index)}
+
+    def _series(s: pd.Series) -> list[float | None]:
+        return [None if (v is None or (isinstance(v, float) and np.isnan(v))) else round(float(v), 4) for v in s]
+
+    # ── 均线 ──
+    if "sma" in requested or "sma20" in requested:
+        result["sma20"] = _series(ind.sma(df, 20))
+        result["sma60"] = _series(ind.sma(df, 60))
+    if "ema" in requested:
+        result["ema12"] = _series(ind.ema(df, 12))
+        result["ema26"] = _series(ind.ema(df, 26))
+
+    # ── RSI ──
+    if "rsi" in requested:
+        result["rsi"] = _series(ind.rsi(df, 14))
+
+    # ── MACD ──
+    if "macd" in requested:
+        macd_line, sig_line, hist = ind.macd(df)
+        result["macd"] = _series(macd_line)
+        result["macd_signal"] = _series(sig_line)
+        result["macd_hist"] = _series(hist)
+
+    # ── Bollinger Bands ──
+    if "bb" in requested or "bollinger" in requested:
+        upper, mid, lower = ind.bollinger_bands(df)
+        result["bb_upper"] = _series(upper)
+        result["bb_mid"]   = _series(mid)
+        result["bb_lower"] = _series(lower)
+
+    # ── ATR ──
+    if "atr" in requested:
+        result["atr"] = _series(ind.atr(df, 14))
+
+    # ── ADX ──
+    if "adx" in requested:
+        result["adx"] = _series(ind.adx(df, 14))
+
+    # ── Stochastic ──
+    if "stoch" in requested:
+        k, d = ind.stochastic(df)
+        result["stoch_k"] = _series(k)
+        result["stoch_d"] = _series(d)
+
+    # ── CCI ──
+    if "cci" in requested:
+        result["cci"] = _series(ind.cci(df, 20))
+
+    # ── OBV ──
+    if "obv" in requested:
+        result["obv"] = _series(ind.obv(df))
+
+    # ── VWAP ──
+    if "vwap" in requested:
+        result["vwap"] = _series(ind.vwap(df, 20))
+
+    # ── Williams %R ──
+    if "williams_r" in requested:
+        result["williams_r"] = _series(ind.williams_r(df, 14))
+
+    # ── ROC ──
+    if "roc" in requested:
+        result["roc"] = _series(ind.roc(df, 12))
+
+    # ── MFI ──
+    if "mfi" in requested:
+        result["mfi"] = _series(ind.mfi(df, 14))
+
+    # ── Donchian ──
+    if "donchian" in requested:
+        upper, mid, lower = ind.donchian_channels(df)
+        result["donchian_upper"] = _series(upper)
+        result["donchian_mid"]   = _series(mid)
+        result["donchian_lower"] = _series(lower)
+
+    # ── Keltner ──
+    if "keltner" in requested:
+        upper, mid, lower = ind.keltner_channels(df)
+        result["keltner_upper"] = _series(upper)
+        result["keltner_mid"]   = _series(mid)
+        result["keltner_lower"] = _series(lower)
+
+    return result
 
 
 @router.post("/backfill")

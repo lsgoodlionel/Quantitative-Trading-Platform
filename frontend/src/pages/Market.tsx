@@ -2,10 +2,15 @@ import { useState, useCallback } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { CandleChart } from "@/components/charts/CandleChart"
 import { useBars, useWatchlistLatest } from "@/hooks/useMarketData"
+import { useIndicators, type IndicatorKey } from "@/hooks/useIndicators"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import type { Market, Frequency } from "@/types"
 import { format, subMonths, subYears } from "date-fns"
+import {
+  LineChart, Line, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
+} from "recharts"
 
 // ── 市场配置 ──────────────────────────────────────────────────
 interface MarketConfig {
@@ -65,6 +70,24 @@ const DEFAULT_WATCHLIST: { symbol: string; market: Market; name: string }[] = [
   { symbol: "00700", market: "HK", name: "腾讯" },
 ]
 
+// ── 技术指标配置 ──────────────────────────────────────────────
+const INDICATOR_OPTIONS: { key: IndicatorKey; label: string; group: string }[] = [
+  { key: "rsi",       label: "RSI",        group: "震荡" },
+  { key: "macd",      label: "MACD",       group: "震荡" },
+  { key: "stoch",     label: "KDJ",        group: "震荡" },
+  { key: "cci",       label: "CCI",        group: "震荡" },
+  { key: "williams_r",label: "威廉斯%R",    group: "震荡" },
+  { key: "mfi",       label: "MFI",        group: "震荡" },
+  { key: "roc",       label: "ROC",        group: "震荡" },
+  { key: "adx",       label: "ADX",        group: "趋势" },
+  { key: "atr",       label: "ATR",        group: "波动" },
+  { key: "bb",        label: "布林带",      group: "叠加" },
+  { key: "donchian",  label: "唐奇安",      group: "叠加" },
+  { key: "keltner",   label: "凯尔特纳",    group: "叠加" },
+  { key: "obv",       label: "OBV",        group: "量价" },
+  { key: "vwap",      label: "VWAP",       group: "叠加" },
+]
+
 function today() { return format(new Date(), "yyyy-MM-dd") }
 function sixMonthsAgo() { return format(subMonths(new Date(), 6), "yyyy-MM-dd") }
 function oneYearAgo() { return format(subYears(new Date(), 1), "yyyy-MM-dd") }
@@ -82,6 +105,107 @@ function fmtChange(cur: number, prev: number) {
   return { diff, pct, label: `${sign}${diff.toFixed(2)} (${sign}${pct.toFixed(2)}%)`, up: diff >= 0 }
 }
 
+// ── 指标面板 ──────────────────────────────────────────────────
+interface IndicatorPanelProps {
+  indicatorData: Record<string, (number | null)[]>
+  times: string[]
+  selectedIndicator: IndicatorKey
+}
+
+function IndicatorPanel({ indicatorData, times, selectedIndicator }: IndicatorPanelProps) {
+  const chartData = times.map((t, i) => {
+    const pt: Record<string, number | string | null> = { time: t.slice(0, 10) }
+    for (const [key, vals] of Object.entries(indicatorData)) {
+      pt[key] = (vals as (number | null)[])[i]
+    }
+    return pt
+  })
+
+  const hasData = (k: string) => indicatorData[k]?.some((v) => v != null)
+
+  // RSI
+  if (selectedIndicator === "rsi" && hasData("rsi")) {
+    return (
+      <ResponsiveContainer width="100%" height={120}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#21262d" />
+          <XAxis dataKey="time" tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis domain={[0, 100]} tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+          <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 11 }}
+            formatter={(v: number) => [v?.toFixed(2), "RSI"]} labelFormatter={(l) => l} />
+          <ReferenceLine y={70} stroke="#f85149" strokeDasharray="4 2" />
+          <ReferenceLine y={30} stroke="#3fb950" strokeDasharray="4 2" />
+          <Line type="monotone" dataKey="rsi" stroke="#e3b341" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  // MACD
+  if (selectedIndicator === "macd" && hasData("macd")) {
+    return (
+      <ResponsiveContainer width="100%" height={120}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#21262d" />
+          <XAxis dataKey="time" tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} width={52} />
+          <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 11 }} />
+          <ReferenceLine y={0} stroke="#30363d" />
+          <Line type="monotone" dataKey="macd" stroke="#58a6ff" strokeWidth={1.5} dot={false} name="MACD" isAnimationActive={false} />
+          <Line type="monotone" dataKey="macd_signal" stroke="#f85149" strokeWidth={1.5} dot={false} name="Signal" isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  // CCI / Williams %R / ROC / MFI / ADX / ATR
+  const singleLineMap: Record<string, { key: string; label: string; color: string }> = {
+    cci:       { key: "cci",       label: "CCI",     color: "#bc8cff" },
+    williams_r:{ key: "williams_r",label: "W%R",     color: "#ff9f43" },
+    roc:       { key: "roc",       label: "ROC",     color: "#54a0ff" },
+    mfi:       { key: "mfi",       label: "MFI",     color: "#00d2d3" },
+    adx:       { key: "adx",       label: "ADX",     color: "#e3b341" },
+    atr:       { key: "atr",       label: "ATR",     color: "#8b949e" },
+    obv:       { key: "obv",       label: "OBV",     color: "#3fb950" },
+  }
+  const single = singleLineMap[selectedIndicator]
+  if (single && hasData(single.key)) {
+    return (
+      <ResponsiveContainer width="100%" height={120}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#21262d" />
+          <XAxis dataKey="time" tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} width={52} />
+          <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 11 }}
+            formatter={(v: number) => [v?.toFixed(2), single.label]} />
+          <ReferenceLine y={0} stroke="#30363d" />
+          <Line type="monotone" dataKey={single.key} stroke={single.color} strokeWidth={1.5} dot={false} name={single.label} isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  // KDJ
+  if (selectedIndicator === "stoch" && hasData("stoch_k")) {
+    return (
+      <ResponsiveContainer width="100%" height={120}>
+        <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#21262d" />
+          <XAxis dataKey="time" tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+          <YAxis domain={[0, 100]} tick={{ fill: "#8b949e", fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+          <Tooltip contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 11 }} />
+          <ReferenceLine y={80} stroke="#f85149" strokeDasharray="4 2" />
+          <ReferenceLine y={20} stroke="#3fb950" strokeDasharray="4 2" />
+          <Line type="monotone" dataKey="stoch_k" stroke="#58a6ff" strokeWidth={1.5} dot={false} name="K" isAnimationActive={false} />
+          <Line type="monotone" dataKey="stoch_d" stroke="#f85149" strokeWidth={1.5} dot={false} name="D" isAnimationActive={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    )
+  }
+
+  return <div className="text-[#6e7681] text-xs text-center py-4">正在加载指标数据…</div>
+}
+
 // ── Tab: 行情查询 ─────────────────────────────────────────────
 function QueryTab() {
   const [marketCfg, setMarketCfg] = useState<MarketConfig>(MARKET_CONFIGS[0])
@@ -93,8 +217,21 @@ function QueryTab() {
     symbol: string; market: Market; frequency: Frequency
     start_date: string; end_date: string
   }>(null)
+  const [selectedIndicator, setSelectedIndicator] = useState<IndicatorKey>("rsi")
 
   const { data, isLoading, error } = useBars(query)
+  const { data: indData } = useIndicators(
+    query
+      ? {
+          symbol: query.symbol,
+          market: query.market,
+          frequency: query.frequency,
+          start: query.start_date,
+          end: query.end_date,
+          indicators: [selectedIndicator],
+        }
+      : null
+  )
 
   function handleMarketChange(market: Market) {
     const cfg = MARKET_CONFIGS.find((c) => c.value === market) ?? MARKET_CONFIGS[0]
@@ -251,6 +388,40 @@ function QueryTab() {
           <CandleChart bars={bars} height={420} showMA showVolume />
         )}
       </div>
+
+      {/* 技术指标面板 */}
+      {bars.length > 0 && (
+        <div className="card mt-4">
+          {/* 指标选择器 */}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {INDICATOR_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => setSelectedIndicator(opt.key)}
+                className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                  selectedIndicator === opt.key
+                    ? "bg-[#1f6feb]/20 text-[#58a6ff] border-[#58a6ff]/40"
+                    : "text-[#6e7681] border-[#30363d] hover:text-[#e6edf3] hover:border-[#58a6ff]/20"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {/* 指标图 */}
+          {indData ? (
+            <IndicatorPanel
+              indicatorData={indData as Record<string, (number | null)[]>}
+              times={indData.time as string[]}
+              selectedIndicator={selectedIndicator}
+            />
+          ) : (
+            <div className="h-24 flex items-center justify-center">
+              <Spinner size="sm" />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* OHLCV 数据 */}
       {last && (
