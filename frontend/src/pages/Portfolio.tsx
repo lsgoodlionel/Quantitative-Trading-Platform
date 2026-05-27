@@ -1,12 +1,16 @@
 import { useState } from "react"
+import {
+  BarChart, Bar, Cell as BarCell, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell,
+} from "recharts"
 import { AppShell } from "@/components/layout/AppShell"
 import { useAccount, usePositions } from "@/hooks/usePositions"
-import { useCreateOrder } from "@/hooks/useOrders"
+import { useCreateOrder, useAttribution } from "@/hooks/useOrders"
 import { useToast } from "@/components/ui/Toast"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { PercentCell } from "@/components/ui/PnlCell"
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
 import type { Market } from "@/types"
 
 const PALETTE = [
@@ -29,6 +33,7 @@ export function Portfolio() {
   const [market, setMarket] = useState<Market>("US")
   const { data: account, isLoading: acctLoading } = useAccount(market)
   const { data: positions, isLoading: posLoading } = usePositions(market)
+  const { data: attribution } = useAttribution(market)
   const { mutate: createOrder } = useCreateOrder()
   const { toast } = useToast()
 
@@ -237,6 +242,104 @@ export function Portfolio() {
               )}
             </div>
           </div>
+
+          {/* ── Performance Attribution ── */}
+          {attribution && attribution.positions.length > 0 && (
+            <div className="space-y-4">
+              {/* Attribution Summary */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="card">
+                  <p className="text-xs text-[#6e7681] mb-1">已实现盈亏</p>
+                  <p className={`font-mono font-semibold text-base ${attribution.totals.realized_pnl >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+                    {attribution.totals.realized_pnl >= 0 ? "+" : ""}
+                    {formatCurrency(attribution.totals.realized_pnl, marketCfg.currency)}
+                  </p>
+                </div>
+                <div className="card">
+                  <p className="text-xs text-[#6e7681] mb-1">累计手续费</p>
+                  <p className="font-mono font-semibold text-base text-[#e3b341]">
+                    {formatCurrency(attribution.totals.commission, marketCfg.currency)}
+                  </p>
+                </div>
+                <div className="card">
+                  <p className="text-xs text-[#6e7681] mb-1">总交易次数</p>
+                  <p className="font-mono font-semibold text-base text-[#e6edf3]">{attribution.totals.trade_count} 笔</p>
+                </div>
+                <div className="card">
+                  <p className="text-xs text-[#6e7681] mb-1">涉及标的</p>
+                  <p className="font-mono font-semibold text-base text-[#e6edf3]">{attribution.totals.symbol_count} 只</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* P&L Waterfall Chart */}
+                <div className="card lg:col-span-2">
+                  <h3 className="text-sm font-semibold text-[#e6edf3] mb-3">各标的已实现盈亏</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart
+                      data={attribution.positions.slice(0, 12).map((a) => ({
+                        name: a.symbol,
+                        pnl: a.realized_pnl,
+                      }))}
+                      margin={{ top: 4, right: 4, left: 0, bottom: 20 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fill: "#8b949e", fontSize: 10 }}
+                        angle={-30}
+                        textAnchor="end"
+                        interval={0}
+                      />
+                      <YAxis
+                        tick={{ fill: "#8b949e", fontSize: 10 }}
+                        width={56}
+                        tickFormatter={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(0)}`}
+                      />
+                      <Tooltip
+                        formatter={(v: number) => [
+                          `${v >= 0 ? "+" : ""}${marketCfg.currency}${v.toFixed(2)}`,
+                          "已实现盈亏",
+                        ]}
+                        contentStyle={{ background: "#161b22", border: "1px solid #30363d", fontSize: 11 }}
+                        labelStyle={{ color: "#8b949e" }}
+                        itemStyle={{ color: "#e6edf3" }}
+                      />
+                      <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                        {attribution.positions.slice(0, 12).map((a, i) => (
+                          <BarCell key={i} fill={a.realized_pnl >= 0 ? "#3fb950" : "#f85149"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Attribution Table */}
+                <div className="card lg:col-span-1">
+                  <h3 className="text-sm font-semibold text-[#e6edf3] mb-3">绩效归因明细</h3>
+                  <div className="space-y-1 overflow-y-auto max-h-52">
+                    {attribution.positions.map((a) => (
+                      <div key={`${a.market}-${a.symbol}`} className="flex items-center gap-2 py-1 border-b border-[#21262d]/40 last:border-0">
+                        <span className="font-mono text-xs text-[#e6edf3] w-16 shrink-0">{a.symbol}</span>
+                        <div className="flex-1">
+                          <div
+                            className="h-1.5 rounded"
+                            style={{
+                              width: `${Math.min(Math.abs(a.realized_pnl) / (Math.max(...attribution.positions.map((x) => Math.abs(x.realized_pnl))) || 1) * 100, 100)}%`,
+                              background: a.realized_pnl >= 0 ? "#3fb950" : "#f85149",
+                            }}
+                          />
+                        </div>
+                        <span className={`text-xs font-mono shrink-0 ${a.realized_pnl >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+                          {a.realized_pnl >= 0 ? "+" : ""}{a.realized_pnl.toFixed(0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </AppShell>

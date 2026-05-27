@@ -162,3 +162,90 @@ def _to_response(order) -> OrderResponse:
         created_at=order.created_at.isoformat(),
         filled_at=order.filled_at.isoformat() if order.filled_at else None,
     )
+
+
+@router.get("/attribution")
+async def get_performance_attribution(
+    market: Optional[str] = Query(None, description="筛选市场: US / HK / A"),
+) -> dict:
+    """
+    持仓绩效归因分析。
+
+    基于已成交订单计算各标的的已实现盈亏、交易统计。
+    """
+    oms = _try_get_oms()
+    if oms is None:
+        return {"positions": [], "totals": {}}
+
+    all_orders = oms.list_orders(limit=10000)
+
+    # Filter filled orders
+    from app.oms.order import LiveOrderStatus, LiveOrderSide
+    filled = [
+        o for o in all_orders
+        if o.status == LiveOrderStatus.FILLED
+        and (market is None or o.market.upper() == market.upper())
+    ]
+
+    # Group by symbol
+    from collections import defaultdict
+    sym_data: dict = defaultdict(lambda: {
+        "symbol": "", "market": "",
+        "buy_qty": 0, "sell_qty": 0,
+        "buy_value": 0.0, "sell_value": 0.0,
+        "commission": 0.0,
+        "trade_count": 0,
+    })
+
+    for o in filled:
+        key = f"{o.market}:{o.symbol}"
+        d = sym_data[key]
+        d["symbol"]  = o.symbol
+        d["market"]  = o.market
+        d["trade_count"] += 1
+        d["commission"]  += o.commission
+        if o.side == LiveOrderSide.BUY:
+            d["buy_qty"]   += o.filled_qty
+            d["buy_value"] += (o.avg_fill_price or 0) * o.filled_qty
+        else:
+            d["sell_qty"]   += o.filled_qty
+            d["sell_value"] += (o.avg_fill_price or 0) * o.filled_qty
+
+    # Compute realized P&L and net position
+    # For partially closed positions: realized = sell_value - (buy_value / buy_qty) * sell_qty
+    attribution = []
+    for d in sym_data.values():
+        avg_buy = d["buy_value"] / d["buy_qty"] if d["buy_qty"] > 0 else 0.0
+        realized_qty = min(d["buy_qty"], d["sell_qty"])
+        realized_pnl = (d["sell_value"] - avg_buy * realized_qty) - d["commission"]
+        net_qty = d["buy_qty"] - d["sell_qty"]
+
+        attribution.append({
+            "symbol":       d["symbol"],
+            "market":       d["market"],
+            "buy_qty":      d["buy_qty"],
+            "sell_qty":     d["sell_qty"],
+            "net_qty":      net_qty,
+            "buy_value":    round(d["buy_value"], 2),
+            "sell_value":   round(d["sell_value"], 2),
+            "avg_buy_cost": round(avg_buy, 4),
+            "commission":   round(d["commission"], 4),
+            "realized_pnl": round(realized_pnl, 2),
+            "trade_count":  d["trade_count"],
+        })
+
+    attribution.sort(key=lambda x: x["realized_pnl"], reverse=True)
+
+    total_realized = sum(a["realized_pnl"] for a in attribution)
+    total_commission = sum(a["commission"] for a in attribution)
+    total_trades = sum(a["trade_count"] for a in attribution)
+
+    return {
+        "positions": attribution,
+        "totals": {
+            "realized_pnl": round(total_realized, 2),
+            "commission":   round(total_commission, 4),
+            "trade_count":  total_trades,
+            "symbol_count": len(attribution),
+        },
+    }

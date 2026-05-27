@@ -35,3 +35,36 @@ export function useCancelOrder() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   })
 }
+
+export interface AttributionItem {
+  symbol:       string
+  market:       string
+  buy_qty:      number
+  sell_qty:     number
+  net_qty:      number
+  buy_value:    number
+  sell_value:   number
+  avg_buy_cost: number
+  commission:   number
+  realized_pnl: number
+  trade_count:  number
+}
+
+export interface AttributionResult {
+  positions: AttributionItem[]
+  totals: {
+    realized_pnl:  number
+    commission:    number
+    trade_count:   number
+    symbol_count:  number
+  }
+}
+
+export function useAttribution(market?: Market) {
+  const qs = market ? `?market=${market}` : ""
+  return useQuery<AttributionResult>({
+    queryKey: ["attribution", market],
+    queryFn: () => api.get<AttributionResult>(`/api/v1/orders/attribution${qs}`),
+    refetchInterval: 15_000,
+  })
+}
