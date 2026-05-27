@@ -222,6 +222,34 @@ export interface Strategy {
   description: string
 }
 
+// ── 实盘策略 ──────────────────────────────────────────────────
+export type LiveStrategyState = "idle" | "running" | "stopped" | "error"
+
+export interface LiveStrategyInstance {
+  instance_id: string
+  strategy_name: string
+  symbol: string
+  market: string
+  frequency: string
+  params: Record<string, unknown>
+  state: LiveStrategyState
+  error: string | null
+  bars_processed: number
+  orders_placed: number
+  started_at: string | null
+  stopped_at: string | null
+}
+
+export interface StartStrategyRequest {
+  strategy_name: string
+  symbol: string
+  market: string
+  frequency: string
+  params: Record<string, unknown>
+  warmup_days: number
+  instance_id?: string
+}
+
 // ── 风控 ──────────────────────────────────────────────────────
 export interface RiskRule {
   rule_type: string

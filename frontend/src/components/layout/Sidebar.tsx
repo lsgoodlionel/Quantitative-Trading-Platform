@@ -18,9 +18,10 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/portfolio-optimizer", icon: "⬡", label: "组合优化" },
   { to: "/risk",      icon: "⚑",  label: "风控" },
   { to: "/factor",    icon: "λ",  label: "因子分析" },
-  { to: "/algolab",   icon: "∑",  label: "算法实验室" },
-  { to: "/alerts",    icon: "🔔", label: "价格预警" },
-  { to: "/settings",  icon: "⚯",  label: "设置" },
+  { to: "/algolab",       icon: "∑",  label: "算法实验室" },
+  { to: "/live-strategy", icon: "▶",  label: "实盘策略" },
+  { to: "/alerts",        icon: "🔔", label: "价格预警" },
+  { to: "/settings",      icon: "⚯",  label: "设置" },
 ]
 
 export function Sidebar() {

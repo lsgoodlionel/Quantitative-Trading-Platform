@@ -83,6 +83,54 @@ services:
     depends_on:
       - backend
 
+  # ── Celery Worker（策略 + 数据任务）───────────────────────────
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: qb_celery_worker
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME}
+      REDIS_URL:    redis://redis:6379/0
+      ENVIRONMENT:  development
+    volumes:
+      - ../backend:/app
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      celery -A app.tasks.celery_app worker
+      -Q data,strategy,default
+      --concurrency=4
+      --loglevel=info
+    profiles: ["celery"]
+
+  # ── Celery Beat（定时调度器）───────────────────────────────
+  celery-beat:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: qb_celery_beat
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME}
+      REDIS_URL:    redis://redis:6379/0
+      ENVIRONMENT:  development
+    volumes:
+      - ../backend:/app
+    depends_on:
+      - redis
+      - celery-worker
+    command: >
+      celery -A app.tasks.celery_app beat
+      --loglevel=info
+    profiles: ["celery"]
+
   # ── 监控（可选 profile）─────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v3.4.0
