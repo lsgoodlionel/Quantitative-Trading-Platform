@@ -17,7 +17,7 @@ router = APIRouter()
 
 class SubmitOrderRequest(BaseModel):
     symbol: str
-    market: str = Field(..., description="US / HK")
+    market: str = Field(..., description="US / HK / A")
     side: str = Field(..., description="BUY / SELL")
     qty: int = Field(..., ge=1)
     order_type: str = Field("MARKET", description="MARKET / LIMIT")

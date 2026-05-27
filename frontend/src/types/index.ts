@@ -24,20 +24,40 @@ export interface BacktestRequest {
 }
 
 export interface BacktestMetrics {
+  // 收益
   total_return_pct: number
   annual_return_pct: number
-  sharpe_ratio: number
-  sortino_ratio: number
-  max_drawdown_pct: number
-  calmar_ratio: number
-  win_rate_pct: number
-  profit_factor: number
-  total_trades: number
   volatility_pct: number
   trading_days: number
+  // 风险调整
+  sharpe_ratio: number
+  sortino_ratio: number
+  calmar_ratio: number
+  omega_ratio: number
+  // 回撤
+  max_drawdown_pct: number
+  max_drawdown_duration: number
+  // 交易统计
+  total_trades: number
+  win_rate_pct: number
+  profit_factor: number
+  expectancy: number
+  avg_win: number
+  avg_loss: number
+  avg_trade_return: number
+  sqn: number
+  // 连胜连败
+  max_consecutive_wins: number
+  max_consecutive_losses: number
+  // 基准
+  buy_hold_return_pct: number
 }
 
 export interface EquityPoint { time: string; value: number }
+
+export interface DrawdownPoint { time: string; value: number }
+export interface PnlBin { range: string; count: number; positive: boolean }
+export interface MonthlyReturns { [year: string]: { [month: string]: number } }
 
 export interface BacktestResult {
   backtest_id: string
@@ -50,8 +70,62 @@ export interface BacktestResult {
   final_value: number
   metrics: BacktestMetrics
   equity_curve: EquityPoint[]
+  drawdown_series: DrawdownPoint[]
+  monthly_returns: MonthlyReturns
+  pnl_distribution: PnlBin[]
   fills: Fill[]
   generated_at: string
+}
+
+export interface OptimizeRequest {
+  strategy_name: string
+  symbol: string
+  market: string
+  frequency: string
+  start_date: string
+  end_date: string
+  initial_cash: number
+  param_grid: Record<string, number[]>
+  optimize_target: string
+  max_combinations: number
+}
+
+export interface OptimizeResultItem {
+  params: Record<string, number>
+  score: number
+  total_return_pct: number
+  annual_return_pct: number
+  sharpe_ratio: number
+  max_drawdown_pct: number
+  total_trades: number
+}
+
+export interface OptimizeResult {
+  best_params: Record<string, number>
+  best_score: number
+  optimize_target: string
+  total_combinations: number
+  evaluated_combinations: number
+  results: OptimizeResultItem[]
+}
+
+export interface MonteCarloResult {
+  n_simulations: number
+  original_return_pct: number
+  original_sharpe: number
+  original_max_drawdown_pct: number
+  p5_return_pct: number
+  p25_return_pct: number
+  p50_return_pct: number
+  p75_return_pct: number
+  p95_return_pct: number
+  p5_sharpe: number
+  p95_sharpe: number
+  p5_max_drawdown_pct: number
+  p95_max_drawdown_pct: number
+  prob_positive: number
+  prob_beat_market: number
+  envelope: { time: string; p5: number; p25: number; p50: number; p75: number; p95: number }[]
 }
 
 // ── 订单 ──────────────────────────────────────────────────────

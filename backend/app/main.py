@@ -22,9 +22,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
     logger.info("Database connection pool ready")
 
+    # 初始化 OMS（纸面交易模式 — 无真实券商时自动启用）
+    from app.oms.manager import init_paper_order_manager
+    from app.core.redis import get_redis_pool
+    import redis.asyncio as aioredis
+    try:
+        redis_client = aioredis.Redis(connection_pool=get_redis_pool())
+        await redis_client.ping()
+    except Exception:
+        redis_client = None
+        logger.warning("Redis unavailable, OMS events will not be published")
+    await init_paper_order_manager(redis_client=redis_client)
+
     yield
 
     # 关闭时清理
+    from app.oms.manager import get_order_manager
+    try:
+        oms = get_order_manager()
+        await oms.stop()
+    except RuntimeError:
+        pass
     await engine.dispose()
     logger.info("QuantBot shutdown complete")
 

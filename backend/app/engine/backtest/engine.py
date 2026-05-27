@@ -147,13 +147,20 @@ class BacktestEngine:
             name="equity",
         )
 
-        trading_days_per_year = (
-            TRADING_DAYS_HK if cfg.market == Market.HK else TRADING_DAYS_US
-        )
+        from app.engine.backtest.metrics import TRADING_DAYS_A
+        if cfg.market == Market.HK:
+            trading_days_per_year = TRADING_DAYS_HK
+        elif cfg.market == Market.A:
+            trading_days_per_year = TRADING_DAYS_A
+        else:
+            trading_days_per_year = TRADING_DAYS_US
+
         metrics = compute_metrics(
             equity_curve=equity_curve,
             fills=all_fills,
             initial_cash=cfg.initial_cash,
+            bars_open=bars[0].open,
+            bars_close=bars[-1].close,
             trading_days_per_year=trading_days_per_year,
         )
 

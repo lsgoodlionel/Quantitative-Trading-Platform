@@ -122,7 +122,9 @@ class OrderManager:
         try:
             broker_order_id = await gw.submit_order(order)
             order.broker_order_id = broker_order_id
-            order.status = LiveOrderStatus.SUBMITTED
+            # Gateway may have already filled the order (e.g. PaperGateway market orders)
+            if order.status not in (LiveOrderStatus.FILLED, LiveOrderStatus.PARTIAL):
+                order.status = LiveOrderStatus.SUBMITTED
             order.submitted_at = datetime.now(timezone.utc)
         except Exception as e:
             order.status = LiveOrderStatus.REJECTED
@@ -306,4 +308,25 @@ def get_order_manager() -> OrderManager:
 def init_order_manager(redis_client=None) -> OrderManager:
     global _manager
     _manager = OrderManager(redis_client=redis_client)
+    return _manager
+
+
+async def init_paper_order_manager(redis_client=None) -> OrderManager:
+    """
+    初始化纸面交易 OMS（无需真实券商配置）。
+    为 US / HK / A 三个市场各注册一个 PaperGateway。
+    """
+    from app.gateway.paper_gateway import PaperGateway
+
+    global _manager
+    _manager = OrderManager(redis_client=redis_client)
+
+    currency_map = {"US": ("USD", 1_000_000.0), "HK": ("HKD", 5_000_000.0), "A": ("CNY", 1_000_000.0)}
+    for market, (currency, cash) in currency_map.items():
+        gw = PaperGateway(market=market, initial_cash=cash, currency=currency)
+        await gw.connect()
+        _manager.register_gateway(market, gw)
+
+    await _manager.start()
+    logger.info("Paper trading OMS initialized for markets: US / HK / A")
     return _manager
