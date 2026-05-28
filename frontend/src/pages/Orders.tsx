@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { useOrders, useCreateOrder, useCancelOrder } from "@/hooks/useOrders"
+import { useTradingMode } from "@/hooks/useBrokerConfig"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -263,6 +264,7 @@ export function Orders() {
   const { data: orders, isLoading } = useOrders()
   const { mutate: createOrder, isPending: creating } = useCreateOrder()
   const { mutate: cancelOrder } = useCancelOrder()
+  const { data: tradingMode } = useTradingMode()
   const { toast } = useToast()
 
   const [form, setForm] = useState<NewOrderForm>(DEFAULT_FORM)
@@ -313,6 +315,31 @@ export function Orders() {
 
   return (
     <AppShell title="订单中心">
+      {/* 交易模式横幅 */}
+      {tradingMode && (
+        <div className={`flex items-center gap-3 mb-4 px-4 py-2.5 rounded-lg border text-sm ${
+          tradingMode.paper_mode
+            ? "bg-[#1f2d45] border-[#388bfd]/30 text-[#58a6ff]"
+            : "bg-[#2a1515] border-[#f85149]/40 text-[#f85149]"
+        }`}>
+          <span className={`inline-block w-2 h-2 rounded-full ${
+            tradingMode.paper_mode ? "bg-[#58a6ff]" : "bg-[#f85149] animate-pulse"
+          }`} />
+          <span className="font-medium">
+            {tradingMode.paper_mode ? "📋 模拟盘交易" : "💰 实盘交易 — 真实资金"}
+          </span>
+          <span className="text-xs opacity-70">{tradingMode.mode_label}</span>
+          {!tradingMode.configured && (
+            <span className="text-xs opacity-60 ml-auto">券商未配置，订单仅作本地记录</span>
+          )}
+          {tradingMode.base_url && (
+            <span className="text-xs opacity-50 ml-auto font-mono truncate max-w-48">
+              {tradingMode.base_url}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* 统计卡片 */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
         {[

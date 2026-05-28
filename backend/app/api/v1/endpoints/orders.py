@@ -28,6 +28,7 @@ class SubmitOrderRequest(BaseModel):
 class OrderResponse(BaseModel):
     order_id: str
     broker_order_id: Optional[str] = None
+    paper_mode: bool = False           # True=模拟盘 False=实盘
     strategy_id: Optional[str] = None
     symbol: str
     market: str
@@ -67,6 +68,32 @@ def get_oms() -> OrderManager:
 
 
 # ── 端点 ─────────────────────────────────────────────────────
+
+@router.get("/trading-mode")
+async def get_trading_mode() -> dict:
+    """
+    返回当前美股交易模式（模拟盘 / 实盘）。
+    前端用于在订单页显示全局模式徽章。
+    """
+    try:
+        import redis.asyncio as aioredis
+        from app.core.config import settings
+        r = aioredis.from_url(settings.redis_url)
+        raw = await r.hgetall("broker_config:alpaca")
+        await r.aclose()
+        if not raw:
+            return {"configured": False, "paper_mode": True, "mode_label": "未配置"}
+        paper = raw.get(b"paper_mode", b"true").decode().lower() == "true"
+        base_url = raw.get(b"base_url", b"").decode()
+        return {
+            "configured": True,
+            "paper_mode": paper,
+            "mode_label": "模拟盘 (Paper)" if paper else "实盘 (Live)",
+            "base_url": base_url,
+        }
+    except Exception:
+        return {"configured": False, "paper_mode": True, "mode_label": "未知"}
+
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 async def submit_order(
@@ -159,6 +186,7 @@ def _to_response(order) -> OrderResponse:
         avg_fill_price=order.avg_fill_price,
         commission=order.commission,
         reject_reason=order.reject_reason,
+        paper_mode=getattr(order, "paper_mode", False),
         created_at=order.created_at.isoformat(),
         filled_at=order.filled_at.isoformat() if order.filled_at else None,
     )

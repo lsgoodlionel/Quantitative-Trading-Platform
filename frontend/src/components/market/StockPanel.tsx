@@ -2,6 +2,7 @@ import { useState, useMemo } from "react"
 import { Spinner } from "@/components/ui/Spinner"
 import { MarketStockItem } from "./MarketStockItem"
 import { useSymbolSearch } from "@/hooks/useMarketData"
+import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import type { Market, MarketOverview, MarketOverviewItem } from "@/types"
 
 // ── 市场 Tab 配置 ─────────────────────────────────────────────
@@ -97,6 +98,7 @@ export function StockPanel({
 }: StockPanelProps) {
   const [activeTab, setActiveTab] = useState<MarketTab>("US")
   const [searchQuery, setSearchQuery] = useState("")
+  const { data: spotData, dataUpdatedAt } = useSpotQuotes()
 
   const rawItems: MarketOverviewItem[] = overview?.[activeTab] ?? []
 
@@ -215,18 +217,46 @@ export function StockPanel({
         )}
       </div>
 
-      {/* 底部刷新说明 */}
+      {/* 底部数据源状态 */}
       <div className="px-3 py-2 border-t border-[#21262d]">
         {isLoading ? (
           <div className="flex items-center gap-1.5 text-[10px] text-[#6e7681]">
             <Spinner size="sm" />
             <span>加载中…</span>
           </div>
-        ) : (
-          <p className="text-[10px] text-[#6e7681]">
-            {showBackendResults ? "搜索全库股票池" : "数据每 1 分钟自动刷新"}
-          </p>
-        )}
+        ) : showBackendResults ? (
+          <p className="text-[10px] text-[#6e7681]">搜索全库股票池</p>
+        ) : (() => {
+          const spotList = spotData?.[activeTab as keyof typeof spotData] ?? []
+          const realtimeCount = spotList.filter(q => q.source === "realtime").length
+          const delayedCount  = spotList.filter(q => q.source === "delayed").length
+          const dailyCount    = spotList.filter(q => q.source === "daily").length
+          const liveCount = realtimeCount + delayedCount + dailyCount
+          const hasLive = liveCount > 0
+          const updatedTime = dataUpdatedAt
+            ? new Date(dataUpdatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+            : null
+          const sourceLabel = realtimeCount > 0
+            ? `实时行情 · ${realtimeCount} 支`
+            : delayedCount > 0 && dailyCount > 0
+              ? `延迟+日线 · ${liveCount} 支`
+              : delayedCount > 0
+                ? `延迟行情 · ${delayedCount} 支`
+                : dailyCount > 0
+                  ? `日线收盘 · ${dailyCount} 支`
+                  : "演示数据"
+          return (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${hasLive ? "bg-[#3fb950] animate-pulse" : "bg-[#6e7681]"}`} />
+                <span className="text-[10px] text-[#6e7681]">{sourceLabel}</span>
+              </div>
+              {updatedTime && (
+                <span className="text-[10px] text-[#3d444d]">{updatedTime}</span>
+              )}
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

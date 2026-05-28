@@ -154,6 +154,8 @@ async def test_alpaca_connection(
     paper = raw.get("paper_mode", "true").lower() == "true"
     try:
         import asyncio
+        import json as _json
+
         client = TradingClient(
             api_key=raw["api_key"],
             secret_key=raw["api_secret"],
@@ -167,4 +169,12 @@ async def test_alpaca_connection(
             buying_power=float(account.buying_power),
         )
     except Exception as e:
-        return TestConnectionResponse(ok=False, error=str(e))
+        err_str = str(e)
+        # Try to extract a human-readable message from Alpaca API error JSON
+        try:
+            parsed = _json.loads(err_str)
+            if isinstance(parsed, dict) and "message" in parsed:
+                err_str = parsed["message"]
+        except Exception:
+            pass
+        return TestConnectionResponse(ok=False, error=err_str)

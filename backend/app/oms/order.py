@@ -56,6 +56,8 @@ class LiveOrder:
     commission: float = 0.0
     reject_reason: Optional[str] = None
 
+    paper_mode: bool = False              # 模拟盘 True / 实盘 False
+
     created_at: datetime = field(default_factory=datetime.utcnow)
     submitted_at: Optional[datetime] = None
     filled_at: Optional[datetime] = None
@@ -89,6 +91,7 @@ class LiveOrder:
             "avg_fill_price": self.avg_fill_price,
             "commission": self.commission,
             "reject_reason": self.reject_reason,
+            "paper_mode": self.paper_mode,
             "created_at": self.created_at.isoformat(),
             "filled_at": self.filled_at.isoformat() if self.filled_at else None,
         }

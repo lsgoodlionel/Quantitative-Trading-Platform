@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { CandleChart } from "@/components/charts/CandleChart"
 import { useBars, useWatchlistLatest, useMarketOverview } from "@/hooks/useMarketData"
+import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import { useIndicators, type IndicatorKey } from "@/hooks/useIndicators"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
@@ -725,6 +726,33 @@ export function Market() {
   const [panelMarket, setPanelMarket] = useState<Market>(MARKET_CONFIGS[0].value)
 
   const { data: overview, isLoading: overviewLoading } = useMarketOverview()
+  const { data: spotData } = useSpotQuotes()
+
+  // Merge real-time spot prices over the market overview base data
+  const mergedOverview = useMemo(() => {
+    if (!overview) return overview
+    type OvItem = (typeof overview.A)[number]
+    type SpotItem = NonNullable<typeof spotData>["A"][number]
+    const mergeMarket = (items: OvItem[], spotList: SpotItem[] | undefined) => {
+      if (!spotList) return items
+      const spotMap = new Map(spotList.map(q => [q.symbol, q]))
+      return items.map(item => {
+        const spot = spotMap.get(item.symbol)
+        if (!spot || spot.source === "demo" || spot.price == null) return item
+        return {
+          ...item,
+          price: spot.price,
+          prev_close: spot.prev_close ?? item.prev_close,
+          change_pct: spot.change_pct ?? item.change_pct,
+        }
+      })
+    }
+    return {
+      A:  mergeMarket(overview.A,  spotData?.A),
+      HK: mergeMarket(overview.HK, spotData?.HK),
+      US: mergeMarket(overview.US, spotData?.US),
+    }
+  }, [overview, spotData])
 
   const handlePanelSelect = useCallback((symbol: string, market: Market) => {
     setPanelSymbol(symbol)
@@ -736,7 +764,7 @@ export function Market() {
       <div className="flex h-full -m-4 lg:-m-6 overflow-hidden">
         {/* 左栏：市场股票列表 */}
         <StockPanel
-          overview={overview}
+          overview={mergedOverview}
           isLoading={overviewLoading}
           selectedSymbol={panelSymbol}
           selectedMarket={panelMarket}

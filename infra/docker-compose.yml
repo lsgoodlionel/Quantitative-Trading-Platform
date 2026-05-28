@@ -51,6 +51,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME}
       REDIS_URL:    redis://redis:6379/0
       ENVIRONMENT:  development
+      # Futu OpenD 运行在宿主机 — Docker Desktop macOS/Windows 使用 host.docker.internal
+      FUTU_HOST:    ${FUTU_HOST:-host.docker.internal}
+      FUTU_PORT:    ${FUTU_PORT:-11111}
     ports:
       - "8000:8000"
     volumes:

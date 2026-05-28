@@ -55,3 +55,19 @@ export function useTestAlpacaConnection() {
     mutationFn: () => api.post<TestConnectionResponse>("/api/v1/broker-config/alpaca/test"),
   })
 }
+
+export interface TradingMode {
+  configured: boolean
+  paper_mode: boolean
+  mode_label: string
+  base_url?: string
+}
+
+/** 全局交易模式：模拟盘 / 实盘 */
+export function useTradingMode() {
+  return useQuery<TradingMode>({
+    queryKey: ["trading-mode"],
+    queryFn: () => api.get<TradingMode>("/api/v1/orders/trading-mode"),
+    staleTime: 1000 * 30,
+  })
+}

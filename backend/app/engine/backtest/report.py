@@ -146,7 +146,7 @@ def _build_pnl_histogram(pnls: list[float], bins: int = 20) -> list[dict]:
         result.append({
             "range": label,
             "count": int(count),
-            "positive": edges[i] >= 0,
+            "positive": bool(edges[i] >= 0),  # cast numpy.bool_ → Python bool
         })
     return result
 
