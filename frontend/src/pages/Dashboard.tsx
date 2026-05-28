@@ -11,6 +11,8 @@ import { useMarketOverview } from "@/hooks/useMarketData"
 import { Spinner } from "@/components/ui/Spinner"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { PnlCell } from "@/components/ui/PnlCell"
+import { TradingWorkflow } from "@/components/workflow/TradingWorkflow"
+import { PAGE_HELP } from "@/data/pageHelp"
 import type { Market, Position, LiveOrder, MarketOverviewItem } from "@/types"
 
 // ── Constants ──────────────────────────────────────────────────
@@ -506,7 +508,7 @@ export function Dashboard() {
   const cash = account?.cash ?? 0
 
   return (
-    <AppShell title="仪表盘">
+    <AppShell title="仪表盘" help={PAGE_HELP.dashboard}>
 
       {/* ── Market Selector ── */}
       <div className="flex gap-1 mb-5 bg-[#161b22] rounded-lg p-1 w-fit border border-[#21262d]">
@@ -614,7 +616,7 @@ export function Dashboard() {
       </div>
 
       {/* ── Bottom Row: Positions + Activity ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 
         {/* Positions table */}
         <div className="card">
@@ -636,6 +638,9 @@ export function Dashboard() {
           <ActivityFeed orders={recentOrders} currency={cfg.currency} />
         </div>
       </div>
+
+      {/* ── 智能交易引导工作流 ── */}
+      <TradingWorkflow />
 
     </AppShell>
   )

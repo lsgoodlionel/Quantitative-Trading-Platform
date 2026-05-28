@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { format, subYears } from "date-fns"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { usePortfolioOptimize } from "@/hooks/usePortfolio"
 import {
@@ -276,7 +277,7 @@ export function PortfolioOptimizer() {
   }
 
   return (
-    <AppShell title="组合优化器">
+    <AppShell title="组合优化器" help={PAGE_HELP["portfolio-optimizer"]}>
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* 配置面板 */}
         <form onSubmit={handleSubmit} className="xl:col-span-1 card h-fit space-y-4">

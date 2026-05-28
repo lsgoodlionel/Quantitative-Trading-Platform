@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { EquityCurve } from "@/components/charts/EquityCurve"
 import { DrawdownChart } from "@/components/charts/DrawdownChart"
 import { MonthlyHeatmap } from "@/components/charts/MonthlyHeatmap"
@@ -795,7 +796,7 @@ export function Backtest() {
   ]
 
   return (
-    <AppShell title="回测">
+    <AppShell title="回测" help={PAGE_HELP.backtest}>
       {/* 主 Tab */}
       <div className="flex gap-1 mb-5 border-b border-[#21262d]">
         {TABS.map(({ key, label }) => (

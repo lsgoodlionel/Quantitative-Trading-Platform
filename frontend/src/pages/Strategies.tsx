@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { useStrategies } from "@/hooks/useBacktest"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
@@ -313,7 +314,7 @@ export function Strategies() {
   })
 
   return (
-    <AppShell title="策略管理">
+    <AppShell title="策略管理" help={PAGE_HELP["strategies"]}>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">

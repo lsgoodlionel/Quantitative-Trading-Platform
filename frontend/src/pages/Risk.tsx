@@ -3,6 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { useRiskConfig, useRiskSummary, useUpdateRiskConfig, useVaRAnalysis } from "@/hooks/useRisk"
 import { usePositions, useAccount } from "@/hooks/usePositions"
 import { Spinner } from "@/components/ui/Spinner"
@@ -247,7 +248,7 @@ export function Risk() {
   }
 
   return (
-    <AppShell title="风控配置">
+    <AppShell title="风控配置" help={PAGE_HELP["risk"]}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Rules */}
         <div className="lg:col-span-2">

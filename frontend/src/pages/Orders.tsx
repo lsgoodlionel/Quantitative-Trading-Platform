@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { useOrders, useCreateOrder, useCancelOrder } from "@/hooks/useOrders"
 import { useTradingMode } from "@/hooks/useBrokerConfig"
 import { Spinner } from "@/components/ui/Spinner"
@@ -314,7 +315,7 @@ export function Orders() {
   const stats = calcOrderStats(allOrders)
 
   return (
-    <AppShell title="订单中心">
+    <AppShell title="订单中心" help={PAGE_HELP["orders"]}>
       {/* 交易模式横幅 */}
       {tradingMode && (
         <div className={`flex items-center gap-3 mb-4 px-4 py-2.5 rounded-lg border text-sm ${

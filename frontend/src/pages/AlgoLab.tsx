@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import {
@@ -694,7 +695,7 @@ export function AlgoLab() {
   const [tab, setTab] = useState<AlgoTab>("gbm")
 
   return (
-    <AppShell title="算法实验室">
+    <AppShell title="算法实验室" help={PAGE_HELP.algolab}>
       {/* Tab Bar */}
       <div className="flex flex-wrap gap-2 mb-6 border-b border-[#21262d] pb-4">
         {TABS.map(t => (

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { useToast } from "@/components/ui/Toast"
@@ -357,7 +358,7 @@ export function LiveStrategy() {
   }
 
   return (
-    <AppShell title="实盘策略">
+    <AppShell title="实盘策略" help={PAGE_HELP["live-strategy"]}>
       {/* 统计概览 */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[

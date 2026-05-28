@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import {
@@ -343,7 +344,7 @@ export function AlertsPage() {
   const paused   = alerts.filter(a => !a.is_active && !a.is_triggered)
 
   return (
-    <AppShell title="价格预警">
+    <AppShell title="价格预警" help={PAGE_HELP.alerts}>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left: Create + Check */}
         <div className="xl:col-span-1 space-y-4">

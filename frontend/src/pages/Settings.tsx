@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { useAuthStore } from "@/stores/auth"
 import { Spinner } from "@/components/ui/Spinner"
 import {
@@ -458,7 +459,7 @@ export function Settings() {
   const logout = useAuthStore((s) => s.logout)
 
   return (
-    <AppShell title="系统设置">
+    <AppShell title="系统设置" help={PAGE_HELP["settings"]}>
       <div className="max-w-2xl space-y-6">
         {/* Account */}
         <Section title="账号信息">

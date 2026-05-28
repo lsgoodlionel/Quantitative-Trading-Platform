@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { CandleChart } from "@/components/charts/CandleChart"
 import { useBars, useWatchlistLatest, useMarketOverview } from "@/hooks/useMarketData"
 import { useSpotQuotes } from "@/hooks/useSpotQuotes"
@@ -760,7 +761,7 @@ export function Market() {
   }, [])
 
   return (
-    <AppShell title="行情">
+    <AppShell title="行情" help={PAGE_HELP.market}>
       <div className="flex h-full -m-4 lg:-m-6 overflow-hidden">
         {/* 左栏：市场股票列表 */}
         <StockPanel

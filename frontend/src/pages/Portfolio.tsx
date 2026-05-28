@@ -5,6 +5,7 @@ import {
   PieChart, Pie, Cell,
 } from "recharts"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { useAccount, usePositions } from "@/hooks/usePositions"
 import { useCreateOrder, useAttribution } from "@/hooks/useOrders"
 import { useToast } from "@/components/ui/Toast"
@@ -60,7 +61,7 @@ export function Portfolio() {
   }
 
   return (
-    <AppShell title="持仓分析">
+    <AppShell title="持仓分析" help={PAGE_HELP["portfolio"]}>
       {/* 市场切换 */}
       <div className="flex items-center gap-2 mb-6">
         {MARKET_CFGS.map((m) => (

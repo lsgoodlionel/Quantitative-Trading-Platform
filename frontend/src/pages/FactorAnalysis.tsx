@@ -6,6 +6,7 @@ import {
   Cell,
 } from "recharts"
 import { AppShell } from "@/components/layout/AppShell"
+import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import { useFactorList, useFactorAnalysis } from "@/hooks/useFactorAnalysis"
@@ -252,7 +253,7 @@ export function FactorAnalysis() {
   const qtlData = result?.quantile_returns[String(selectedPeriod)] ?? []
 
   return (
-    <AppShell title="因子分析">
+    <AppShell title="因子分析" help={PAGE_HELP.factor}>
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
         {/* ── Config Panel ── */}

@@ -41,15 +41,20 @@ export default {
         "2xs": ["0.65rem", "0.9rem"],
       },
       animation: {
-        "fade-in": "fadeIn 150ms ease-out",
-        "slide-in": "slideIn 200ms ease-out",
+        "fade-in":        "fadeIn 150ms ease-out",
+        "slide-in":       "slideIn 200ms ease-out",
+        "slide-in-right": "slideInRight 260ms cubic-bezier(0.16, 1, 0.3, 1)",
         pulse: "pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
       },
       keyframes: {
         fadeIn: { from: { opacity: "0" }, to: { opacity: "1" } },
         slideIn: {
           from: { opacity: "0", transform: "translateY(4px)" },
-          to: { opacity: "1", transform: "translateY(0)" },
+          to:   { opacity: "1", transform: "translateY(0)" },
+        },
+        slideInRight: {
+          from: { opacity: "0", transform: "translateX(100%)" },
+          to:   { opacity: "1", transform: "translateX(0)" },
         },
       },
     },
