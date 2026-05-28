@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { Bar, Market, Frequency } from "@/types"
+import type { Bar, Market, Frequency, MarketOverview } from "@/types"
 
 interface BarsParams {
   symbol: string
@@ -53,6 +53,32 @@ export function useLatestBar(
     enabled: enabled && !!symbol,
     refetchInterval: 30_000,   // 每 30 秒刷新一次价格
     staleTime: 25_000,
+  })
+}
+
+/** 获取市场概览（A股/港股/美股列表带价格涨跌幅），1分钟刷新 */
+export function useMarketOverview() {
+  return useQuery<MarketOverview>({
+    queryKey: ["market-overview"],
+    queryFn: () => api.get<MarketOverview>("/api/v1/bars/market-overview"),
+    refetchInterval: 60_000,
+    staleTime: 50_000,
+  })
+}
+
+/** 搜索股票代码/名称（使用后端 symbol_dict + CN 名称匹配） */
+export function useSymbolSearch(query: string, market: string | null) {
+  return useQuery({
+    queryKey: ["symbol-search", query, market],
+    queryFn: () => {
+      const qs = new URLSearchParams({ q: query })
+      if (market) qs.set("market", market)
+      return api.get<{ symbol: string; market: string; name: string; name_zh: string | null }[]>(
+        `/api/v1/bars/symbols/search?${qs}`,
+      )
+    },
+    enabled: query.trim().length >= 1,
+    staleTime: 1000 * 60 * 5, // 5 分钟
   })
 }
 

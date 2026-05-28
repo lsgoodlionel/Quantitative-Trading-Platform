@@ -29,11 +29,11 @@
 
 @layer components {
   .card {
-    @apply bg-surface-1 border border-border rounded-lg;
+    @apply bg-surface-1 border border-border rounded-lg p-4;
   }
 
   .card-header {
-    @apply px-4 py-3 border-b border-border flex items-center justify-between;
+    @apply -mx-4 -mt-4 px-4 py-3 mb-4 border-b border-border flex items-center justify-between;
   }
 
   .tag-up   { @apply text-up   font-mono text-sm; }

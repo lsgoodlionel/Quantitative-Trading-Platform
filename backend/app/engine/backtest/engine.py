@@ -110,6 +110,9 @@ class BacktestEngine:
         strategy.on_start(init_ctx)
 
         for i, bar in enumerate(bars):
+            # A股 T+1: 新交易日开始时解除前一日买入的限制
+            broker.advance_day()
+
             # 先撮合（用当前 bar open 成交上一根 bar 的挂单）
             new_fills = broker.process_bar(bar)
             for fill in new_fills:

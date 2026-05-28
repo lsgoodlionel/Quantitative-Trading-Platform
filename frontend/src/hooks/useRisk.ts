@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import type { RiskConfig, RiskViolation } from "@/types"
 
+// Field names match what backend risk/engine.daily_summary() actually returns
 interface RiskSummary {
-  daily_orders_submitted: number
-  peak_equity: number
-  current_equity: number | null
-  daily_realized_pnl: number
-  violations: RiskViolation[]
+  date: string
+  orders_today: number
+  realized_pnl_today: number
+  peak_portfolio_value: number
+  violations?: RiskViolation[]
 }
 
 interface PreTradeCheckRequest {

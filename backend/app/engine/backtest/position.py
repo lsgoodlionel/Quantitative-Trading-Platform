@@ -26,11 +26,16 @@ class Position:
     不可变规则: Position 本身可变（因为持仓会增减），
     但每次操作返回新的 Position 副本，或直接更新 qty/avg_cost。
     这里采用类内状态更新方式，因为持仓本质上是一个持续演化的账本。
+
+    A股 T+1 规则：今日买入的股票当日不可卖出（non_closable）。
+    每个新交易日开始时通过 advance_day() 清空 non_closable。
+    参考: refs/rqalpha/rqalpha/mod/rqalpha_mod_sys_accounts/position_model.py
     """
 
     symbol: str
     _lots: deque[_Lot] = field(default_factory=deque)
     realized_pnl: float = 0.0
+    _non_closable: int = field(default=0)  # T+1: 今日买入尚不可卖出的数量
 
     @property
     def qty(self) -> int:
@@ -48,10 +53,21 @@ class Position:
     def is_empty(self) -> bool:
         return self.qty == 0
 
-    def add(self, qty: int, price: float, commission: float = 0.0) -> None:
-        """开仓/加仓：将新买入加入 FIFO 队列。"""
+    @property
+    def closable_qty(self) -> int:
+        """可卖出数量（扣除 T+1 限制）。"""
+        return max(0, self.qty - self._non_closable)
+
+    def advance_day(self) -> None:
+        """新交易日开始：解除 T+1 限制（昨日买入今日可卖）。"""
+        self._non_closable = 0
+
+    def add(self, qty: int, price: float, commission: float = 0.0, t_plus: bool = False) -> None:
+        """开仓/加仓：将新买入加入 FIFO 队列。t_plus=True 时启用T+1限制。"""
         cost_per_share = price + commission / qty if qty > 0 else price
         self._lots.append(_Lot(qty=qty, cost=cost_per_share))
+        if t_plus:
+            self._non_closable += qty
 
     def reduce(self, qty: int, price: float, commission: float = 0.0) -> float:
         """
@@ -103,8 +119,13 @@ class PortfolioPositions:
             self._positions[symbol] = Position(symbol=symbol)
         return self._positions[symbol]
 
-    def buy(self, symbol: str, qty: int, price: float, commission: float = 0.0) -> None:
-        self.get(symbol).add(qty, price, commission)
+    def advance_day(self) -> None:
+        """新交易日开始：解除所有持仓的 T+1 限制。"""
+        for pos in self._positions.values():
+            pos.advance_day()
+
+    def buy(self, symbol: str, qty: int, price: float, commission: float = 0.0, t_plus: bool = False) -> None:
+        self.get(symbol).add(qty, price, commission, t_plus=t_plus)
 
     def sell(self, symbol: str, qty: int, price: float, commission: float = 0.0) -> float:
         return self.get(symbol).reduce(qty, price, commission)

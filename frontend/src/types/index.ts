@@ -250,6 +250,23 @@ export interface StartStrategyRequest {
   instance_id?: string
 }
 
+// ── 市场概览 ──────────────────────────────────────────────────
+export interface MarketOverviewItem {
+  symbol: string
+  market: string
+  name: string
+  name_zh: string | null
+  price: number | null
+  prev_close: number | null
+  change_pct: number | null
+}
+
+export interface MarketOverview {
+  A: MarketOverviewItem[]
+  HK: MarketOverviewItem[]
+  US: MarketOverviewItem[]
+}
+
 // ── 风控 ──────────────────────────────────────────────────────
 export interface RiskRule {
   rule_type: string

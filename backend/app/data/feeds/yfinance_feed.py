@@ -149,5 +149,12 @@ class YFinanceDataFeed(DataFeed):
         return False
 
     async def search_symbols(self, query: str) -> list[SymbolInfo]:
-        """yfinance 无搜索 API，返回空列表。"""
-        return []
+        """使用本地词典搜索美股/港股。"""
+        from app.data.symbol_dict import search_by_cn_name
+
+        results = search_by_cn_name(query, self.market)
+        return [
+            SymbolInfo(symbol=sym, name=cn, name_zh=cn, market=m)
+            for sym, m, cn in results
+            if m == self.market
+        ]

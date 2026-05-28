@@ -11,13 +11,15 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: "0.0.0.0",
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        // Docker 容器内用 backend 服务名；本地裸跑用 localhost
+        target: process.env.BACKEND_URL ?? "http://localhost:8000",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://localhost:8000",
+        target: process.env.WS_URL ?? "ws://localhost:8000",
         ws: true,
       },
     },

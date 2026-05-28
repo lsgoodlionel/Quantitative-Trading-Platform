@@ -7,10 +7,11 @@ import { AppShell } from "@/components/layout/AppShell"
 import { useAccount, usePositions } from "@/hooks/usePositions"
 import { useOrders } from "@/hooks/useOrders"
 import { useRiskSummary } from "@/hooks/useRisk"
+import { useMarketOverview } from "@/hooks/useMarketData"
 import { Spinner } from "@/components/ui/Spinner"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { PnlCell } from "@/components/ui/PnlCell"
-import type { Market, Position, LiveOrder } from "@/types"
+import type { Market, Position, LiveOrder, MarketOverviewItem } from "@/types"
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -150,11 +151,11 @@ function PositionDonut({ positions, cash, currency, totalValue }: PositionDonutP
 // ── Risk Panel ─────────────────────────────────────────────────
 
 interface RiskSummary {
-  daily_orders_submitted: number
-  peak_equity: number
-  current_equity: number | null
-  daily_realized_pnl: number
-  violations: { rule_type: string; severity: string; message: string }[]
+  date: string
+  orders_today: number
+  realized_pnl_today: number
+  peak_portfolio_value: number
+  violations?: { rule_type: string; severity: string; message: string }[]
 }
 
 function RiskPanel({ summary }: { summary: RiskSummary | undefined }) {
@@ -177,21 +178,21 @@ function RiskPanel({ summary }: { summary: RiskSummary | undefined }) {
         <div className="bg-[#0d1117] rounded-lg px-3 py-2">
           <p className="text-xs text-[#8b949e]">今日订单</p>
           <p className="font-mono text-base font-semibold text-[#e6edf3]">
-            {summary.daily_orders_submitted}
+            {summary.orders_today}
           </p>
         </div>
         <div className="bg-[#0d1117] rounded-lg px-3 py-2">
           <p className="text-xs text-[#8b949e]">日内盈亏</p>
-          <p className={`font-mono text-base font-semibold ${pnlColor(summary.daily_realized_pnl)}`}>
-            {pnlSign(summary.daily_realized_pnl)}${summary.daily_realized_pnl.toFixed(2)}
+          <p className={`font-mono text-base font-semibold ${pnlColor(summary.realized_pnl_today)}`}>
+            {pnlSign(summary.realized_pnl_today)}${summary.realized_pnl_today.toFixed(2)}
           </p>
         </div>
       </div>
 
       {/* Violations */}
-      {summary.violations?.length > 0 && (
+      {(summary.violations?.length ?? 0) > 0 && (
         <div className="flex flex-col gap-1 mt-1">
-          {summary.violations.slice(0, 3).map((v, i) => (
+          {summary.violations!.slice(0, 3).map((v, i) => (
             <div key={i} className="flex items-start gap-2 text-xs bg-[#2a1b1b] rounded px-2 py-1.5">
               <span className="text-[#f85149] mt-0.5">⚑</span>
               <span className="text-[#f85149] leading-tight">{v.message}</span>
@@ -357,6 +358,127 @@ function PositionsTable({ positions, currency }: { positions: Position[]; curren
   )
 }
 
+// ── Market Movers ──────────────────────────────────────────────
+
+const MARKET_ACCENT: Record<string, string> = {
+  A:  "#e3b341",
+  HK: "#bc8cff",
+  US: "#58a6ff",
+}
+
+const MARKET_FLAG: Record<string, string> = {
+  A: "🇨🇳", HK: "🇭🇰", US: "🇺🇸",
+}
+
+const MARKET_LABEL: Record<string, string> = {
+  A: "A股", HK: "港股", US: "美股",
+}
+
+interface MoverRowProps { item: MarketOverviewItem; rank: number; isGainer: boolean }
+
+function MoverRow({ item, rank, isGainer }: MoverRowProps) {
+  const pct = item.change_pct
+  const price = item.price
+  return (
+    <div className="flex items-center gap-2 py-1.5 border-b border-[#21262d]/40 last:border-0">
+      <span className="text-[#6e7681] text-[10px] w-4 shrink-0">{rank}</span>
+      <div className="flex-1 min-w-0">
+        <p className="font-mono text-xs text-[#e6edf3] truncate">{item.name_zh ?? item.symbol}</p>
+        <p className="text-[10px] text-[#6e7681] font-mono">{item.symbol}</p>
+      </div>
+      <div className="text-right shrink-0">
+        {price != null && (
+          <p className="text-xs font-mono text-[#8b949e]">{price.toFixed(2)}</p>
+        )}
+        {pct != null && (
+          <p className={`text-xs font-mono font-semibold ${isGainer ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+            {isGainer ? "+" : ""}{pct.toFixed(2)}%
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface MarketSectionProps { market: string; items: MarketOverviewItem[] }
+
+function MarketSection({ market, items }: MarketSectionProps) {
+  const accent = MARKET_ACCENT[market] ?? "#58a6ff"
+  const withPct = items.filter((i) => i.change_pct != null)
+  const sorted = [...withPct].sort((a, b) => (b.change_pct ?? 0) - (a.change_pct ?? 0))
+  const gainers = sorted.filter((i) => (i.change_pct ?? 0) > 0).slice(0, 3)
+  const losers  = sorted.filter((i) => (i.change_pct ?? 0) < 0).reverse().slice(0, 3)
+
+  const upCount   = withPct.filter((i) => (i.change_pct ?? 0) > 0).length
+  const downCount = withPct.filter((i) => (i.change_pct ?? 0) < 0).length
+
+  return (
+    <div className="card flex-1 min-w-0">
+      {/* Header */}
+      <div className="card-header mb-3">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{MARKET_FLAG[market]}</span>
+          <h3 className="text-sm font-semibold text-[#e6edf3]">{MARKET_LABEL[market]}</h3>
+        </div>
+        <div className="flex items-center gap-2 text-[10px]">
+          <span className="text-[#3fb950]">↑{upCount}</span>
+          <span className="text-[#f85149]">↓{downCount}</span>
+        </div>
+      </div>
+
+      {/* Gainers */}
+      {gainers.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-[#3fb950] mb-1 font-medium flex items-center gap-1">
+            <span style={{ color: accent }}>▲</span> 涨幅榜
+          </p>
+          {gainers.map((item, i) => (
+            <MoverRow key={item.symbol} item={item} rank={i + 1} isGainer />
+          ))}
+        </div>
+      )}
+
+      {/* Losers */}
+      {losers.length > 0 && (
+        <div>
+          <p className="text-[10px] text-[#f85149] mb-1 font-medium">▼ 跌幅榜</p>
+          {losers.map((item, i) => (
+            <MoverRow key={item.symbol} item={item} rank={i + 1} isGainer={false} />
+          ))}
+        </div>
+      )}
+
+      {gainers.length === 0 && losers.length === 0 && (
+        <p className="text-[10px] text-[#6e7681] text-center py-4">暂无行情数据</p>
+      )}
+    </div>
+  )
+}
+
+function MarketMovers() {
+  const { data: overview, isLoading } = useMarketOverview()
+
+  return (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <h2 className="text-sm font-semibold text-[#e6edf3]">市场热点</h2>
+        <span className="text-[10px] text-[#6e7681] bg-[#1c2128] px-1.5 py-0.5 rounded border border-[#30363d]">
+          1分钟刷新
+        </span>
+      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-6"><Spinner /></div>
+      ) : overview ? (
+        <div className="flex gap-4">
+          {(["A", "HK", "US"] as const).map((mkt) => (
+            <MarketSection key={mkt} market={mkt} items={overview[mkt] ?? []} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 // ── Main Dashboard ─────────────────────────────────────────────
 
 export function Dashboard() {
@@ -434,16 +556,16 @@ export function Dashboard() {
             />
             <StatCard
               label="今日提交"
-              value={String(riskSummary?.daily_orders_submitted ?? "—")}
+              value={riskSummary ? String(riskSummary.orders_today) : "—"}
               sub={
                 riskSummary
-                  ? riskSummary.violations?.length > 0
-                    ? `⚑ ${riskSummary.violations.length} 项违规`
+                  ? (riskSummary.violations?.length ?? 0) > 0
+                    ? `⚑ ${riskSummary.violations!.length} 项违规`
                     : "风控正常"
                   : undefined
               }
               valueClass={
-                riskSummary?.violations?.length
+                (riskSummary?.violations?.length ?? 0) > 0
                   ? "text-[#f85149]"
                   : "text-[#e6edf3]"
               }
@@ -451,6 +573,9 @@ export function Dashboard() {
           </>
         )}
       </div>
+
+      {/* ── Market Movers ── */}
+      <MarketMovers />
 
       {/* ── Middle Row: Equity + Composition + Risk ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

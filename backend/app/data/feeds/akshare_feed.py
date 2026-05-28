@@ -153,8 +153,24 @@ class AkShareDataFeed(DataFeed):
         return False
 
     async def search_symbols(self, query: str) -> list[SymbolInfo]:
-        """A 股代码搜索（简单列表匹配）。"""
-        def _search() -> list[SymbolInfo]:
+        """
+        A 股代码搜索。
+        优先使用本地 symbol_dict（涵盖 200+ 只主要 A 股），
+        若 akshare 可用则补充搜索全量股票池。
+        参考: refs/OpenBB/openbb_platform/providers/finviz/openbb_finviz/models/equity_screener.py
+        """
+        from app.data.symbol_dict import search_by_cn_name
+
+        # 1. 本地词典优先（低延迟）
+        local = [
+            SymbolInfo(symbol=sym, name=cn, name_zh=cn, market=Market.A)
+            for sym, _, cn in search_by_cn_name(query, Market.A)
+        ]
+        if local:
+            return local[:20]
+
+        # 2. akshare 补充搜索（如已安装）
+        def _akshare_search() -> list[SymbolInfo]:
             try:
                 import akshare as ak
             except ImportError:
@@ -174,4 +190,4 @@ class AkShareDataFeed(DataFeed):
                 return []
 
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _search)
+        return await loop.run_in_executor(None, _akshare_search)

@@ -56,8 +56,25 @@ class SymbolSearchResult(BaseModel):
     symbol: str
     market: str
     name: str
+    name_zh: str | None = None
     exchange: str | None = None
     currency: str | None = None
+
+
+class MarketOverviewItem(BaseModel):
+    symbol: str
+    market: str
+    name: str
+    name_zh: str | None = None
+    price: float | None = None
+    prev_close: float | None = None
+    change_pct: float | None = None  # 涨跌幅 %
+
+
+class MarketOverviewResponse(BaseModel):
+    A: list[MarketOverviewItem]
+    HK: list[MarketOverviewItem]
+    US: list[MarketOverviewItem]
 
 
 # --- Dependency ---
@@ -118,17 +135,66 @@ async def search_symbols(
     market: Annotated[Market | None, Query()] = None,
     svc: DataService = Depends(get_service),
 ) -> list[SymbolSearchResult]:
+    from app.data.symbol_dict import get_cn_name
+
     symbols = await svc.search_symbols(q, market)
     return [
         SymbolSearchResult(
             symbol=s.symbol,
             market=s.market.value,
             name=s.name,
+            name_zh=s.name_zh or get_cn_name(s.symbol, s.market),
             exchange=s.exchange,
             currency=s.currency,
         )
         for s in symbols
     ]
+
+
+@router.get("/market-overview", response_model=MarketOverviewResponse)
+async def get_market_overview(svc: DataService = Depends(get_service)) -> MarketOverviewResponse:
+    """
+    返回三大市场预设股票列表，含最新价格和涨跌幅。
+    用于行情页三板块展示。
+    """
+    import asyncio as _asyncio
+
+    from app.data.symbol_dict import A_PANEL, HK_PANEL, US_PANEL
+
+    async def _fetch_item(symbol: str, market_enum: Market, cn_name: str) -> MarketOverviewItem:
+        try:
+            bar = await svc.get_latest_bar(symbol, market_enum, Frequency.DAY_1)
+            if bar:
+                chg = ((bar.close - bar.open) / bar.open * 100) if bar.open else None
+                return MarketOverviewItem(
+                    symbol=symbol,
+                    market=market_enum.value,
+                    name=cn_name,
+                    name_zh=cn_name,
+                    price=round(bar.close, 3),
+                    prev_close=round(bar.open, 3),
+                    change_pct=round(chg, 2) if chg is not None else None,
+                )
+        except Exception:
+            pass
+        return MarketOverviewItem(
+            symbol=symbol,
+            market=market_enum.value,
+            name=cn_name,
+            name_zh=cn_name,
+        )
+
+    a_tasks = [_fetch_item(s, Market.A, cn) for s, cn in A_PANEL]
+    hk_tasks = [_fetch_item(s, Market.HK, cn) for s, cn in HK_PANEL]
+    us_tasks = [_fetch_item(s, Market.US, cn) for s, cn in US_PANEL]
+
+    a_items, hk_items, us_items = await _asyncio.gather(
+        _asyncio.gather(*a_tasks),
+        _asyncio.gather(*hk_tasks),
+        _asyncio.gather(*us_tasks),
+    )
+
+    return MarketOverviewResponse(A=list(a_items), HK=list(hk_items), US=list(us_items))
 
 
 @router.get("/indicators")

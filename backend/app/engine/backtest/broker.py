@@ -72,7 +72,14 @@ class SimulatedBroker:
     - 市价单在下一根 bar 开盘价成交（next-bar open fill）
     - 成交价经过滑点模型调整
     - 成交产生 Fill 事件，更新持仓和现金
+
+    A股特规 (参考 refs/rqalpha/):
+    - T+1: 当日买入的股票当日不可卖出
+    - 涨跌停: ±10% 限制，超过限价的订单拒绝成交
     """
+
+    # A股涨跌停比率（普通股票）
+    A_PRICE_LIMIT_PCT = 0.10
 
     def __init__(
         self,
@@ -89,6 +96,7 @@ class SimulatedBroker:
         self._positions = PortfolioPositions()
         self._pending: list[Order] = []
         self._fills: list[Fill] = []
+        self._is_a_share = market == Market.A
 
     # ── 账户状态 ──────────────────────────────────────────────
 
@@ -107,6 +115,13 @@ class SimulatedBroker:
     def portfolio_value(self, prices: dict[str, float]) -> float:
         return self._cash + self._positions.total_market_value(prices)
 
+    # ── 账户状态 (T+1) ────────────────────────────────────────
+
+    def advance_day(self) -> None:
+        """新交易日开始：解除 A股 T+1 限制（昨日买入今日可卖）。"""
+        if self._is_a_share:
+            self._positions.advance_day()
+
     # ── 下单 ─────────────────────────────────────────────────
 
     def submit_order(self, order: Order) -> Order:
@@ -116,13 +131,25 @@ class SimulatedBroker:
             order.reject_reason = "qty must be positive"
             return order
 
-        pos_qty = self._positions.get(order.symbol).qty
-        if order.side == OrderSide.SELL and order.qty > pos_qty:
-            order.status = OrderStatus.REJECTED
-            order.reject_reason = (
-                f"insufficient position: need {order.qty}, have {pos_qty}"
-            )
-            return order
+        position = self._positions.get(order.symbol)
+
+        if order.side == OrderSide.SELL:
+            if self._is_a_share:
+                # A股 T+1: 只能卖出可卖出的股票（非当日买入部分）
+                available = position.closable_qty
+                if order.qty > available:
+                    order.status = OrderStatus.REJECTED
+                    order.reject_reason = (
+                        f"A股T+1限制: 可卖 {available} 股，请求卖 {order.qty} 股"
+                    )
+                    return order
+            else:
+                if order.qty > position.qty:
+                    order.status = OrderStatus.REJECTED
+                    order.reject_reason = (
+                        f"insufficient position: need {order.qty}, have {position.qty}"
+                    )
+                    return order
 
         self._pending.append(order)
         return order
@@ -174,9 +201,37 @@ class SimulatedBroker:
         self._pending = remaining
         return new_fills
 
+    def _check_price_limit(self, bar: Bar) -> tuple[float | None, float | None]:
+        """
+        A股涨跌停限制：根据前收价计算涨停价和跌停价。
+        返回 (limit_up, limit_down) 或 (None, None) 若无法判断。
+
+        简化版本：使用 bar.prev_close 字段（若有），否则跳过检查。
+        参考: refs/rqalpha/ 价格限制逻辑
+        """
+        if not self._is_a_share or not hasattr(bar, "prev_close") or bar.prev_close is None:
+            return None, None
+        prev_close = bar.prev_close
+        limit_up   = round(prev_close * (1 + self.A_PRICE_LIMIT_PCT), 2)
+        limit_down = round(prev_close * (1 - self.A_PRICE_LIMIT_PCT), 2)
+        return limit_up, limit_down
+
     def _try_fill(self, order: Order, bar: Bar) -> Fill | None:
         fill_price_raw = bar.open
         fill_price = self._slippage.apply(fill_price_raw, order.side.value, bar)
+
+        # A股涨跌停检查：开盘价超过涨跌停则无法成交
+        if self._is_a_share:
+            limit_up, limit_down = self._check_price_limit(bar)
+            if limit_up is not None and limit_down is not None:
+                if fill_price > limit_up + 0.001:
+                    order.status = OrderStatus.REJECTED
+                    order.reject_reason = f"涨停无法成交: 开盘 {fill_price:.2f} > 涨停 {limit_up:.2f}"
+                    return None
+                if fill_price < limit_down - 0.001:
+                    order.status = OrderStatus.REJECTED
+                    order.reject_reason = f"跌停无法成交: 开盘 {fill_price:.2f} < 跌停 {limit_down:.2f}"
+                    return None
 
         comm_result = self._commission.calculate(fill_price, order.qty, order.side.value)
         total_cost = comm_result.total
@@ -197,7 +252,11 @@ class SimulatedBroker:
                 total_outflow = fill_price * order.qty + total_cost
 
             self._cash -= total_outflow
-            self._positions.buy(order.symbol, order.qty, fill_price, total_cost)
+            # A股买入标记为 T+1 不可当日卖出
+            self._positions.buy(
+                order.symbol, order.qty, fill_price, total_cost,
+                t_plus=self._is_a_share,
+            )
             realized_pnl = 0.0
         else:
             realized_pnl = self._positions.sell(

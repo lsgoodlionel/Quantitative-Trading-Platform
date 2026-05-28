@@ -289,17 +289,17 @@ export function Risk() {
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-[#8b949e]">提交订单数</span>
-                  <span className="font-mono text-[#e6edf3]">{summary.daily_orders_submitted}</span>
+                  <span className="font-mono text-[#e6edf3]">{summary.orders_today}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#8b949e]">今日实现盈亏</span>
-                  <span className={`font-mono ${summary.daily_realized_pnl >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}`}>
-                    {summary.daily_realized_pnl >= 0 ? "+" : ""}${summary.daily_realized_pnl.toFixed(2)}
+                  <span className={`font-mono ${summary.realized_pnl_today >= 0 ? "text-[#3fb950]" : "text-[#f85149]"}`}>
+                    {summary.realized_pnl_today >= 0 ? "+" : ""}${summary.realized_pnl_today.toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#8b949e]">权益峰值</span>
-                  <span className="font-mono text-[#e6edf3]">${summary.peak_equity.toLocaleString()}</span>
+                  <span className="font-mono text-[#e6edf3]">${summary.peak_portfolio_value.toLocaleString()}</span>
                 </div>
               </div>
             ) : (
@@ -308,13 +308,13 @@ export function Risk() {
           </div>
 
           {/* Violations */}
-          {summary && summary.violations.length > 0 && (
+          {summary && (summary.violations?.length ?? 0) > 0 && (
             <div className="card border-[#f85149]/20">
               <h3 className="text-sm font-semibold text-[#f85149] mb-3">
-                ⚠ 近期告警 ({summary.violations.length})
+                ⚠ 近期告警 ({summary.violations!.length})
               </h3>
               <div className="space-y-2">
-                {summary.violations.slice(0, 5).map((v, i) => (
+                {summary.violations!.slice(0, 5).map((v, i) => (
                   <div key={i} className="text-xs bg-[#2a1b1b] border border-[#f85149]/20 rounded px-3 py-2">
                     <p className="text-[#f85149] font-medium">{RULE_LABELS[v.rule_type] ?? v.rule_type}</p>
                     <p className="text-[#8b949e] mt-0.5">{v.message}</p>
@@ -325,7 +325,7 @@ export function Risk() {
             </div>
           )}
 
-          {summary && summary.violations.length === 0 && (
+          {summary && (summary.violations?.length ?? 0) === 0 && (
             <div className="card border-[#3fb950]/20 bg-[#162a1e]/20">
               <p className="text-[#3fb950] text-sm text-center py-2">✓ 无风控告警</p>
             </div>

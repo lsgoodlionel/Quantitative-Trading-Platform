@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { CandleChart } from "@/components/charts/CandleChart"
-import { useBars, useWatchlistLatest } from "@/hooks/useMarketData"
+import { useBars, useWatchlistLatest, useMarketOverview } from "@/hooks/useMarketData"
 import { useIndicators, type IndicatorKey } from "@/hooks/useIndicators"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
+import { StockPanel } from "@/components/market/StockPanel"
 import type { Market, Frequency } from "@/types"
 import { format, subMonths, subYears } from "date-fns"
 import {
@@ -72,20 +73,20 @@ const DEFAULT_WATCHLIST: { symbol: string; market: Market; name: string }[] = [
 
 // ── 技术指标配置 ──────────────────────────────────────────────
 const INDICATOR_OPTIONS: { key: IndicatorKey; label: string; group: string }[] = [
-  { key: "rsi",       label: "RSI",        group: "震荡" },
-  { key: "macd",      label: "MACD",       group: "震荡" },
-  { key: "stoch",     label: "KDJ",        group: "震荡" },
-  { key: "cci",       label: "CCI",        group: "震荡" },
-  { key: "williams_r",label: "威廉斯%R",    group: "震荡" },
-  { key: "mfi",       label: "MFI",        group: "震荡" },
-  { key: "roc",       label: "ROC",        group: "震荡" },
-  { key: "adx",       label: "ADX",        group: "趋势" },
-  { key: "atr",       label: "ATR",        group: "波动" },
-  { key: "bb",        label: "布林带",      group: "叠加" },
-  { key: "donchian",  label: "唐奇安",      group: "叠加" },
-  { key: "keltner",   label: "凯尔特纳",    group: "叠加" },
-  { key: "obv",       label: "OBV",        group: "量价" },
-  { key: "vwap",      label: "VWAP",       group: "叠加" },
+  { key: "rsi",       label: "RSI",       group: "震荡" },
+  { key: "macd",      label: "MACD",      group: "震荡" },
+  { key: "stoch",     label: "KDJ",       group: "震荡" },
+  { key: "cci",       label: "CCI",       group: "震荡" },
+  { key: "williams_r",label: "威廉斯%R",   group: "震荡" },
+  { key: "mfi",       label: "MFI",       group: "震荡" },
+  { key: "roc",       label: "ROC",       group: "震荡" },
+  { key: "adx",       label: "ADX",       group: "趋势" },
+  { key: "atr",       label: "ATR",       group: "波动" },
+  { key: "bb",        label: "布林带",     group: "叠加" },
+  { key: "donchian",  label: "唐奇安",     group: "叠加" },
+  { key: "keltner",   label: "凯尔特纳",   group: "叠加" },
+  { key: "obv",       label: "OBV",       group: "量价" },
+  { key: "vwap",      label: "VWAP",      group: "叠加" },
 ]
 
 function today() { return format(new Date(), "yyyy-MM-dd") }
@@ -158,15 +159,15 @@ function IndicatorPanel({ indicatorData, times, selectedIndicator }: IndicatorPa
     )
   }
 
-  // CCI / Williams %R / ROC / MFI / ADX / ATR
+  // CCI / Williams %R / ROC / MFI / ADX / ATR / OBV
   const singleLineMap: Record<string, { key: string; label: string; color: string }> = {
-    cci:       { key: "cci",       label: "CCI",     color: "#bc8cff" },
-    williams_r:{ key: "williams_r",label: "W%R",     color: "#ff9f43" },
-    roc:       { key: "roc",       label: "ROC",     color: "#54a0ff" },
-    mfi:       { key: "mfi",       label: "MFI",     color: "#00d2d3" },
-    adx:       { key: "adx",       label: "ADX",     color: "#e3b341" },
-    atr:       { key: "atr",       label: "ATR",     color: "#8b949e" },
-    obv:       { key: "obv",       label: "OBV",     color: "#3fb950" },
+    cci:        { key: "cci",        label: "CCI",  color: "#bc8cff" },
+    williams_r: { key: "williams_r", label: "W%R",  color: "#ff9f43" },
+    roc:        { key: "roc",        label: "ROC",  color: "#54a0ff" },
+    mfi:        { key: "mfi",        label: "MFI",  color: "#00d2d3" },
+    adx:        { key: "adx",        label: "ADX",  color: "#e3b341" },
+    atr:        { key: "atr",        label: "ATR",  color: "#8b949e" },
+    obv:        { key: "obv",        label: "OBV",  color: "#3fb950" },
   }
   const single = singleLineMap[selectedIndicator]
   if (single && hasData(single.key)) {
@@ -206,11 +207,17 @@ function IndicatorPanel({ indicatorData, times, selectedIndicator }: IndicatorPa
   return <div className="text-[#6e7681] text-xs text-center py-4">正在加载指标数据…</div>
 }
 
-// ── Tab: 行情查询 ─────────────────────────────────────────────
-function QueryTab() {
-  const [marketCfg, setMarketCfg] = useState<MarketConfig>(MARKET_CONFIGS[0])
-  const [symbol, setSymbol] = useState(MARKET_CONFIGS[0].defaultSymbol)
-  const [frequency, setFrequency] = useState<Frequency>(MARKET_CONFIGS[0].defaultFreq)
+// ── 行情查询面板（受外部 symbol/market 控制） ─────────────────
+interface QueryPanelProps {
+  initialSymbol: string
+  initialMarket: Market
+}
+
+function QueryPanel({ initialSymbol, initialMarket }: QueryPanelProps) {
+  const initialCfg = MARKET_CONFIGS.find(c => c.value === initialMarket) ?? MARKET_CONFIGS[0]
+  const [marketCfg, setMarketCfg] = useState<MarketConfig>(initialCfg)
+  const [symbol, setSymbol] = useState(initialSymbol)
+  const [frequency, setFrequency] = useState<Frequency>(initialCfg.defaultFreq)
   const [startDate, setStartDate] = useState(sixMonthsAgo())
   const [endDate, setEndDate] = useState(today())
   const [query, setQuery] = useState<null | {
@@ -230,7 +237,7 @@ function QueryTab() {
           end: query.end_date,
           indicators: [selectedIndicator],
         }
-      : null
+      : null,
   )
 
   function handleMarketChange(market: Market) {
@@ -260,7 +267,6 @@ function QueryTab() {
     <div>
       {/* Toolbar */}
       <form onSubmit={handleSearch} className="flex flex-wrap gap-3 mb-5 items-end">
-        {/* 市场 */}
         <div>
           <label className="label">市场</label>
           <select
@@ -274,7 +280,6 @@ function QueryTab() {
           </select>
         </div>
 
-        {/* 代码 */}
         <div>
           <label className="label">
             标的代码
@@ -291,7 +296,6 @@ function QueryTab() {
           />
         </div>
 
-        {/* 周期 */}
         <div>
           <label className="label">周期</label>
           <select
@@ -305,7 +309,6 @@ function QueryTab() {
           </select>
         </div>
 
-        {/* 快捷日期 */}
         <div className="flex gap-1.5 self-end">
           {[
             { label: "3月", fn: () => format(subMonths(new Date(), 3), "yyyy-MM-dd") },
@@ -323,7 +326,6 @@ function QueryTab() {
           ))}
         </div>
 
-        {/* 日期范围 */}
         <div>
           <label className="label">开始</label>
           <input
@@ -392,7 +394,6 @@ function QueryTab() {
       {/* 技术指标面板 */}
       {bars.length > 0 && (
         <div className="card mt-4">
-          {/* 指标选择器 */}
           <div className="flex flex-wrap gap-1.5 mb-3">
             {INDICATOR_OPTIONS.map((opt) => (
               <button
@@ -408,7 +409,6 @@ function QueryTab() {
               </button>
             ))}
           </div>
-          {/* 指标图 */}
           {indData ? (
             <IndicatorPanel
               indicatorData={indData as Record<string, (number | null)[]>}
@@ -498,9 +498,18 @@ function WatchRow({ item, price, isSelected, onSelect, onRemove }: WatchRowProps
 }
 
 // ── Tab: 自选行情 ─────────────────────────────────────────────
-function WatchlistTab() {
+interface WatchlistTabProps {
+  initialSymbol: string
+  initialMarket: Market
+}
+
+function WatchlistTab({ initialSymbol, initialMarket }: WatchlistTabProps) {
+  const initialItem = DEFAULT_WATCHLIST.find(
+    w => w.symbol === initialSymbol && w.market === initialMarket,
+  ) ?? DEFAULT_WATCHLIST[0]
+
   const [watchlist, setWatchlist] = useState<WatchItem[]>(DEFAULT_WATCHLIST)
-  const [selected, setSelected] = useState<WatchItem>(DEFAULT_WATCHLIST[0])
+  const [selected, setSelected] = useState<WatchItem>(initialItem)
   const [addSymbol, setAddSymbol] = useState("")
   const [addMarket, setAddMarket] = useState<Market>("US")
   const [addName, setAddName] = useState("")
@@ -509,16 +518,15 @@ function WatchlistTab() {
     symbol: string; market: Market; frequency: Frequency
     start_date: string; end_date: string
   }>({
-    symbol: DEFAULT_WATCHLIST[0].symbol,
-    market: DEFAULT_WATCHLIST[0].market,
+    symbol: initialItem.symbol,
+    market: initialItem.market,
     frequency: "1d",
     start_date: sixMonthsAgo(),
     end_date: today(),
   })
 
-  // 批量获取最新价格
   const { data: prices } = useWatchlistLatest(
-    watchlist.map(({ symbol, market }) => ({ symbol, market }))
+    watchlist.map(({ symbol, market }) => ({ symbol, market })),
   )
 
   const handleSelect = useCallback((item: WatchItem) => {
@@ -574,7 +582,6 @@ function WatchlistTab() {
           </button>
         </div>
 
-        {/* 添加自选表单 */}
         {showAdd && (
           <div className="card p-3 space-y-2">
             <select
@@ -606,7 +613,6 @@ function WatchlistTab() {
           </div>
         )}
 
-        {/* 自选列表 */}
         <div className="flex-1 overflow-y-auto space-y-0.5 min-h-0">
           {watchlist.map((item) => (
             <WatchRow
@@ -623,7 +629,6 @@ function WatchlistTab() {
           )}
         </div>
 
-        {/* 刷新说明 */}
         <p className="text-[10px] text-[#6e7681] text-center">
           价格每 30 秒自动刷新
         </p>
@@ -631,7 +636,6 @@ function WatchlistTab() {
 
       {/* 右侧: K 线图 */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* 标题 + 价格 */}
         <div className="flex flex-wrap items-baseline gap-4 mb-2">
           <div>
             <span className="font-mono font-bold text-[#e6edf3]">{selected.symbol}</span>
@@ -654,7 +658,6 @@ function WatchlistTab() {
               )}
             </>
           )}
-          {/* 周期选择 */}
           <div className="ml-auto flex gap-1">
             {selectedCfg.allowedFreqs.filter((f) => ["1d", "1w"].includes(f)).map((f) => (
               <button
@@ -672,7 +675,6 @@ function WatchlistTab() {
           </div>
         </div>
 
-        {/* MA 图例 */}
         {bars.length > 0 && (
           <div className="flex gap-4 mb-1 text-xs text-[#6e7681]">
             <span><span className="inline-block w-3 h-0.5 bg-[#f0a500] mr-1 align-middle" />MA5</span>
@@ -681,7 +683,6 @@ function WatchlistTab() {
           </div>
         )}
 
-        {/* 图表 */}
         <div className="card p-0 overflow-hidden flex-1 min-h-0">
           {chartLoading ? (
             <div className="flex items-center justify-center h-full">
@@ -694,7 +695,6 @@ function WatchlistTab() {
           )}
         </div>
 
-        {/* OHLCV 快览 */}
         {last && (
           <div className="flex flex-wrap gap-3 mt-3">
             {[
@@ -716,34 +716,64 @@ function WatchlistTab() {
 }
 
 // ── 主页面 ────────────────────────────────────────────────────
-type Tab = "query" | "watchlist"
+type PageTab = "query" | "watchlist"
 
 export function Market() {
-  const [tab, setTab] = useState<Tab>("query")
+  const [tab, setTab] = useState<PageTab>("query")
+  // 左栏选中的标的（跨 tab 共享）
+  const [panelSymbol, setPanelSymbol] = useState(MARKET_CONFIGS[0].defaultSymbol)
+  const [panelMarket, setPanelMarket] = useState<Market>(MARKET_CONFIGS[0].value)
+
+  const { data: overview, isLoading: overviewLoading } = useMarketOverview()
+
+  const handlePanelSelect = useCallback((symbol: string, market: Market) => {
+    setPanelSymbol(symbol)
+    setPanelMarket(market)
+  }, [])
 
   return (
     <AppShell title="行情">
-      {/* Tab 切换 */}
-      <div className="flex gap-1 mb-5 border-b border-[#21262d]">
-        {[
-          { key: "query" as Tab, label: "📊 行情查询" },
-          { key: "watchlist" as Tab, label: "⭐ 自选行情" },
-        ].map(({ key, label }) => (
-          <button
-            key={key}
-            className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
-              tab === key
-                ? "border-[#58a6ff] text-[#58a6ff]"
-                : "border-transparent text-[#6e7681] hover:text-[#e6edf3]"
-            }`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <div className="flex h-full -m-4 lg:-m-6 overflow-hidden">
+        {/* 左栏：市场股票列表 */}
+        <StockPanel
+          overview={overview}
+          isLoading={overviewLoading}
+          selectedSymbol={panelSymbol}
+          selectedMarket={panelMarket}
+          onSelect={handlePanelSelect}
+        />
 
-      {tab === "query" ? <QueryTab /> : <WatchlistTab />}
+        {/* 右栏：图表区域 */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Tab 切换 */}
+          <div className="flex gap-1 px-4 lg:px-6 pt-4 lg:pt-6 border-b border-[#21262d]">
+            {[
+              { key: "query" as PageTab, label: "📊 行情查询" },
+              { key: "watchlist" as PageTab, label: "⭐ 自选行情" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                className={`px-4 py-2 text-sm border-b-2 transition-colors -mb-px ${
+                  tab === key
+                    ? "border-[#58a6ff] text-[#58a6ff]"
+                    : "border-transparent text-[#6e7681] hover:text-[#e6edf3]"
+                }`}
+                onClick={() => setTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tab 内容 */}
+          <div className="flex-1 overflow-auto p-4 lg:p-6">
+            {tab === "query"
+              ? <QueryPanel key={`${panelMarket}:${panelSymbol}`} initialSymbol={panelSymbol} initialMarket={panelMarket} />
+              : <WatchlistTab key={`${panelMarket}:${panelSymbol}`} initialSymbol={panelSymbol} initialMarket={panelMarket} />
+            }
+          </div>
+        </div>
+      </div>
     </AppShell>
   )
 }

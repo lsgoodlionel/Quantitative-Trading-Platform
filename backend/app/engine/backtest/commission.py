@@ -141,10 +141,64 @@ class HKCommissionModel(CommissionModel):
         )
 
 
+A_STAMP_DUTY_RATE = 0.001           # 印花税 0.1%（仅卖出）
+A_TRANSFER_FEE_RATE = 0.00002       # 过户费（上交所股票，买卖双方）
+A_REGULATORY_FEE_RATE = 0.0000487   # 证监会监管费
+
+
+class AShareCommissionModel(CommissionModel):
+    """
+    A股佣金模型（沪深两市）。
+
+    参考: refs/rqalpha/rqalpha/mod/rqalpha_mod_sys_accounts/
+    费用结构:
+    - 券商佣金: 0.025% 双边，最低 5 元
+    - 印花税: 0.1% 仅卖出
+    - 过户费: 0.002% 买卖双边（主要针对上交所股票）
+    - 证监会监管费: 0.00487/万，双边
+    """
+
+    _market = Market.A
+
+    def __init__(
+        self,
+        commission_rate: float = 0.00025,  # 0.025%
+        min_commission: float = 5.0,        # 最低 5 元
+    ) -> None:
+        self._commission_rate = commission_rate
+        self._min_commission = min_commission
+
+    @property
+    def market(self) -> Market:
+        return self._market
+
+    def calculate(self, price: float, qty: int, direction: str) -> CommissionResult:
+        trade_value = price * qty
+
+        commission = max(self._min_commission, trade_value * self._commission_rate)
+
+        # 印花税：仅卖出时收
+        stamp_duty = trade_value * A_STAMP_DUTY_RATE if direction == "SELL" else 0.0
+        # 过户费（双边）
+        transfer_fee = trade_value * A_TRANSFER_FEE_RATE
+        # 监管费（双边）
+        regulatory_fee = trade_value * A_REGULATORY_FEE_RATE
+        fees = stamp_duty + transfer_fee + regulatory_fee
+
+        total = commission + fees
+        return CommissionResult(
+            commission=round(commission, 4),
+            fees=round(fees, 4),
+            total=round(total, 4),
+        )
+
+
 def get_commission_model(market: Market) -> CommissionModel:
     """工厂函数：根据市场返回对应佣金模型。"""
     if market == Market.US:
         return USCommissionModel()
     if market == Market.HK:
         return HKCommissionModel()
+    if market == Market.A:
+        return AShareCommissionModel()
     raise ValueError(f"No commission model for market: {market}")
