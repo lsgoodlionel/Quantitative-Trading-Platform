@@ -1,10 +1,11 @@
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import type {
   WorkflowState, WorkflowStep, WorkflowData, StrategyOption, BacktestVerdict,
 } from "./workflowTypes"
 import {
   initWorkflowData, classifyCondition, buildStrategyOptions,
 } from "./workflowTypes"
+import { StepParamAdjust } from "./StepParamAdjust"
 import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import { useRunBacktest } from "@/hooks/useBacktest"
 import { useKelly } from "@/hooks/useQuant"
@@ -501,6 +502,10 @@ export function TradingWorkflow() {
     data: initWorkflowData(),
   })
 
+  // Ref to always access latest workflow data in async callbacks (avoids stale closure)
+  const dataRef = useRef<WorkflowData>(state.data)
+  useEffect(() => { dataRef.current = state.data }, [state.data])
+
   const { data: spotData } = useSpotQuotes(state.phase === "running")
   const runBacktest = useRunBacktest()
   const calcKelly   = useKelly()
@@ -523,7 +528,7 @@ export function TradingWorkflow() {
     }))
     updateStep(0, { status: "done", summary: `${symbol} (${market})` })
 
-    // 自动执行 Step 2: 行情快照（从已有的 spotData 查找，或等待）
+    // 自动执行 Step 2: 行情快照
     setState(s => ({
       ...s,
       currentStepIndex: 1,
@@ -545,7 +550,7 @@ export function TradingWorkflow() {
         ...s,
         currentStepIndex: 2,
         steps: s.steps.map((st, i) => {
-          if (i === 1) return { ...st, status: "done", summary: found ? `¥${found.price?.toFixed(2) ?? "—"}  ${found.change_pct != null ? (found.change_pct > 0 ? "+" : "") + found.change_pct.toFixed(2) + "%" : ""}` : "数据获取中" }
+          if (i === 1) return { ...st, status: "done", summary: found ? `${found.price?.toFixed(2) ?? "—"}  ${found.change_pct != null ? (found.change_pct > 0 ? "+" : "") + found.change_pct.toFixed(2) + "%" : ""}` : "数据获取中" }
           if (i === 2) return { ...st, status: "running" }
           return st
         }),
@@ -570,9 +575,12 @@ export function TradingWorkflow() {
   }, [spotData, updateStep])
 
   // ── Step 4: 用户确认策略 → 自动运行回测 ───────────────────
+  // NOTE: Uses dataRef (not state) to avoid stale closure in async context
   const handleStrategyConfirm = useCallback(async (strategy: StrategyOption) => {
-    updateStep(3, { status: "done", summary: strategy.name })
+    // Capture symbol/market from ref before any state transitions
+    const { symbol, market } = dataRef.current
 
+    updateStep(3, { status: "done", summary: strategy.name })
     setState(s => ({
       ...s,
       currentStepIndex: 4,
@@ -583,8 +591,8 @@ export function TradingWorkflow() {
     try {
       const result = await runBacktest.mutateAsync({
         strategy_name: strategy.id,
-        symbol:        state.data.symbol,
-        market:        state.data.market as Market,
+        symbol,
+        market:        market as Market,
         start_date:    yearsAgoStr(2),
         end_date:      todayStr(),
         initial_cash:  100_000,
@@ -612,12 +620,14 @@ export function TradingWorkflow() {
         }),
         data: { ...s.data, backtestResult: result, backtestVerdict: verdict },
       }))
-    } catch {
-      updateStep(4, { status: "error", errorMsg: "回测失败，请检查标的或时间范围" })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "回测失败，请检查标的或时间范围"
+      updateStep(4, { status: "error", errorMsg: msg })
     }
-  }, [state, runBacktest, updateStep])
+  }, [runBacktest, updateStep])
 
   // ── Step 6: 回测评估决策 ────────────────────────────────────
+  // NOTE: Uses dataRef to avoid stale closure
   const handleBacktestDecision = useCallback(async (action: "accept" | "retry" | "change_strategy") => {
     if (action === "change_strategy") {
       setState(s => ({
@@ -655,8 +665,8 @@ export function TradingWorkflow() {
     }))
 
     try {
-      const bt = state.data.backtestResult!
-      const winRate  = (bt.metrics.win_rate_pct / 100) || 0.5
+      const bt = dataRef.current.backtestResult!
+      const winRate  = Math.min(Math.max((bt.metrics.win_rate_pct / 100), 0.01), 0.99)
       const avgWin   = bt.metrics.profit_factor > 0 ? bt.metrics.profit_factor * 100 : 150
       const avgLoss  = 100
 
@@ -672,10 +682,11 @@ export function TradingWorkflow() {
         }),
         data: { ...s.data, kellyResult: kelly, recommendedPositionPct: kelly.half_kelly },
       }))
-    } catch {
-      updateStep(6, { status: "error", errorMsg: "Kelly计算失败" })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Kelly计算失败"
+      updateStep(6, { status: "error", errorMsg: msg })
     }
-  }, [state, calcKelly, updateStep])
+  }, [calcKelly, updateStep])
 
   // ── Step 8: 仓位确认 ────────────────────────────────────────
   const handlePositionConfirm = useCallback((pctVal: number) => {
@@ -813,35 +824,56 @@ export function TradingWorkflow() {
 
         {/* 步骤内容区 */}
         {step?.status === "running" && (
-          <div className="flex items-center gap-3 py-4 text-sm text-[#8b949e]">
+          <div className="flex items-center gap-3 py-6 text-sm text-[#8b949e]">
             <Spinner />
             <span>正在自动执行，请稍候...</span>
           </div>
         )}
 
         {step?.status === "error" && (
-          <div className="bg-[#2a1a1a] border border-[#f85149]/40 rounded-lg p-3 text-xs text-[#f85149]">
-            ✗ {step.errorMsg ?? "执行出错，请重试"}
+          <div className="space-y-3">
+            <div className="bg-[#2a1a1a] border border-[#f85149]/40 rounded-lg p-3 text-xs text-[#f85149]">
+              ✗ {step.errorMsg ?? "执行出错，请重试"}
+            </div>
+            <div className="flex gap-2">
+              {step.id === "backtest" && data.selectedStrategy && (
+                <button
+                  onClick={() => handleStrategyConfirm(data.selectedStrategy!)}
+                  className="flex-1 py-2 rounded-lg bg-[#1f3d5e] text-[#58a6ff] text-xs border border-[#58a6ff]/30 hover:bg-[#1f3d5e]/80 transition-colors"
+                >
+                  ↺ 重新回测
+                </button>
+              )}
+              <button
+                onClick={handleReset}
+                className="flex-1 py-2 rounded-lg border border-[#30363d] text-[#8b949e] text-xs hover:bg-[#21262d] transition-colors"
+              >
+                重置流程
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Step 1: 重置状态下显示输入（理论上不会触发，phase=running时直接进step 2） */}
-
-        {/* Step 2-3: 已完成，显示快照+分析摘要 */}
-        {state.currentStepIndex >= 3 && (data.spotQuote || data.condition) && (
-          <div className="mb-3">
-            <QuoteAnalysisCard data={data} />
-          </div>
-        )}
-
-        {/* Step 4: 策略选择 */}
+        {/* Step 4: 策略选择（含行情概要）*/}
         {step?.id === "strategy" && step.status === "waiting_decision" && (
-          <StepStrategySelect options={data.strategyOptions} onConfirm={handleStrategyConfirm} />
+          <div className="space-y-3">
+            <QuoteAnalysisCard data={data} />
+            <StepStrategySelect options={data.strategyOptions} onConfirm={handleStrategyConfirm} />
+          </div>
         )}
 
-        {/* Step 5: 回测运行中 — 已由 running 状态处理 */}
+        {/* Step 5: 参数调整（点击「调整参数」后的 retry 路径）*/}
+        {step?.id === "backtest" && step.status === "waiting_decision" && data.selectedStrategy && (
+          <StepParamAdjust
+            strategy={data.selectedStrategy}
+            backtestResult={data.backtestResult}
+            verdict={data.backtestVerdict}
+            onRetry={handleStrategyConfirm}
+            onChangeStrategy={() => handleBacktestDecision("change_strategy")}
+          />
+        )}
 
-        {/* Step 6: 回测评估 */}
+        {/* Step 6: 回测评估 — 决策步骤，需用户操作 */}
         {step?.id === "review" && step.status === "waiting_decision" && data.backtestResult && data.backtestVerdict && (
           <StepBacktestReview
             result={data.backtestResult}

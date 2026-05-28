@@ -18,14 +18,27 @@ StrategyStatus = Literal["draft", "backtesting", "paper", "live", "stopped", "er
 # 内置预设策略列表 — Phase 2 实现具体策略类
 # name = snake_case 策略 ID（前端路由用）; description = 中文显示名
 PRESET_STRATEGIES = [
-    {"name": "double_ma",          "description": "双均线趋势 — 短期均线穿越长期均线触发买卖信号"},
-    {"name": "bollinger",          "description": "布林带均值回归 — 价格触碰通道边界时反向交易"},
-    {"name": "macd",               "description": "MACD 动量 — 利用 MACD 柱与信号线交叉捕捉趋势"},
-    {"name": "rsi_mean_reversion", "description": "RSI 均值回归 — 超买超卖区域的反向修复策略"},
-    {"name": "momentum_rotation",  "description": "动量轮动 ETF — 持有近期表现最强的 ETF 组合"},
-    {"name": "grid_trading",       "description": "网格交易 — 在价格区间内自动挂出买卖网格订单"},
-    {"name": "pairs_trading",      "description": "配对统计套利 — 基于协整关系的多空配对策略"},
-    {"name": "multi_factor",       "description": "多因子选股 — 综合价值/动量/质量因子排名选股"},
+    # ── 趋势跟踪类 ────────────────────────────────────────────
+    {"name": "double_ma",         "description": "双均线趋势 — 短期均线穿越长期均线触发买卖信号",         "category": "trend"},
+    {"name": "triple_ma",         "description": "三均线顺势 — 快/中/慢三线排列确认趋势，过滤噪声更强",   "category": "trend"},
+    {"name": "macd",              "description": "MACD 动量 — 利用 MACD 柱与信号线交叉捕捉趋势",        "category": "trend"},
+    {"name": "supertrend",        "description": "Supertrend — ATR 自适应趋势线，方向翻转时买卖",       "category": "trend"},
+    {"name": "adx_trend",         "description": "ADX 趋势过滤 — 只在趋势强度足够时才执行均线信号",      "category": "trend"},
+    # ── 均值回归类 ────────────────────────────────────────────
+    {"name": "bollinger",         "description": "布林带均值回归 — 价格触碰通道边界时反向交易",          "category": "mean_reversion"},
+    {"name": "rsi_mean_reversion","description": "RSI 均值回归 — 超买超卖区域的反向修复策略",           "category": "mean_reversion"},
+    {"name": "stochastic",        "description": "随机指标 KD — %K 从超卖区上穿 %D 触发买卖信号",      "category": "mean_reversion"},
+    {"name": "vwap_reversion",    "description": "VWAP 回归 — 价格偏离成交量均价后逆向交易",           "category": "mean_reversion"},
+    # ── 突破类 ────────────────────────────────────────────────
+    {"name": "donchian_breakout", "description": "唐奇安突破 — 海龟交易法则，创 N 日新高买入",          "category": "breakout"},
+    {"name": "keltner_breakout",  "description": "凯尔特纳突破 — ATR 通道突破，假突破率低于布林带",      "category": "breakout"},
+    {"name": "atr_breakout",      "description": "ATR 波动率突破 — 基于真实波幅的动态突破阈值",         "category": "breakout"},
+    # ── 动量类 ────────────────────────────────────────────────
+    {"name": "momentum",          "description": "价格动量 — 基于过去 N 日收益率的趋势延续效应",        "category": "momentum"},
+    # ── 复合/高级类 ───────────────────────────────────────────
+    {"name": "multi_factor",      "description": "多因子综合 — 动量+RSI+MACD 三因子加权评分进出场",     "category": "complex"},
+    {"name": "grid_trading",      "description": "网格交易 — 震荡行情等间距自动挂单，低买高卖",         "category": "complex"},
+    {"name": "pairs_trading",     "description": "配对套利 — 基于协整关系的多空配对统计套利",           "category": "complex"},
 ]
 
 _PRESET_NAMES = {p["name"] for p in PRESET_STRATEGIES}
