@@ -271,54 +271,57 @@ def supertrend(
     """
     Supertrend 指标。
     返回 (supertrend_line, direction)，direction=1 上升趋势，=-1 下降趋势。
+
+    使用 numpy 数组进行迭代（兼容 pandas 3.x Copy-on-Write）。
     """
-    high = _high(df)
-    low = _low(df)
-    close = _close(df)
-    atr_val = atr(df, period)
+    import numpy as np
 
-    hl2 = (high + low) / 2
-    basic_upper = hl2 + multiplier * atr_val
-    basic_lower = hl2 - multiplier * atr_val
+    high = _high(df).to_numpy(dtype=float)
+    low = _low(df).to_numpy(dtype=float)
+    close = _close(df).to_numpy(dtype=float)
+    atr_arr = atr(df, period).to_numpy(dtype=float)
 
-    # 迭代计算（需逐行，使用 Python 循环）
+    hl2 = (high + low) / 2.0
+    basic_upper = hl2 + multiplier * atr_arr
+    basic_lower = hl2 - multiplier * atr_arr
+
     n = len(close)
     final_upper = basic_upper.copy()
     final_lower = basic_lower.copy()
-    supertrend_line = pd.Series(float("nan"), index=close.index)
-    direction = pd.Series(0, index=close.index)
+    st_line = np.full(n, np.nan)
+    direction = np.ones(n, dtype=int)   # default bullish
 
     for i in range(1, n):
-        prev_close = close.iloc[i - 1]
-        prev_upper = final_upper.iloc[i - 1]
-        prev_lower = final_lower.iloc[i - 1]
+        prev_close = close[i - 1]
+        prev_upper = final_upper[i - 1]
+        prev_lower = final_lower[i - 1]
 
-        cur_upper = basic_upper.iloc[i]
-        cur_lower = basic_lower.iloc[i]
+        # Ratchet lower band upward only
+        final_lower[i] = basic_lower[i] if (
+            np.isnan(prev_lower)
+            or basic_lower[i] > prev_lower
+            or prev_close < prev_lower
+        ) else prev_lower
 
-        if cur_lower > prev_lower or prev_close < prev_lower:
-            final_lower.iloc[i] = cur_lower
+        # Ratchet upper band downward only
+        final_upper[i] = basic_upper[i] if (
+            np.isnan(prev_upper)
+            or basic_upper[i] < prev_upper
+            or prev_close > prev_upper
+        ) else prev_upper
+
+        prev_dir = direction[i - 1]
+        if prev_dir == 1 and close[i] < final_lower[i]:
+            direction[i] = -1
+        elif prev_dir == -1 and close[i] > final_upper[i]:
+            direction[i] = 1
         else:
-            final_lower.iloc[i] = prev_lower
+            direction[i] = prev_dir
 
-        if cur_upper < prev_upper or prev_close > prev_upper:
-            final_upper.iloc[i] = cur_upper
-        else:
-            final_upper.iloc[i] = prev_upper
+        st_line[i] = final_lower[i] if direction[i] == 1 else final_upper[i]
 
-        prev_dir = direction.iloc[i - 1] if i > 1 else 1
-        if prev_dir == 1 and close.iloc[i] < final_lower.iloc[i]:
-            direction.iloc[i] = -1
-        elif prev_dir == -1 and close.iloc[i] > final_upper.iloc[i]:
-            direction.iloc[i] = 1
-        else:
-            direction.iloc[i] = prev_dir
-
-        supertrend_line.iloc[i] = (
-            final_lower.iloc[i] if direction.iloc[i] == 1 else final_upper.iloc[i]
-        )
-
-    return supertrend_line, direction
+    idx = df.index
+    return pd.Series(st_line, index=idx), pd.Series(direction, index=idx)
 
 
 def ichimoku(

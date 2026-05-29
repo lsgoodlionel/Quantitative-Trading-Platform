@@ -1,7 +1,11 @@
 """唐奇安通道突破策略（海龟交易法则）
 
-价格突破 N 日高点买入，跌破短期低点出场。
+价格突破前 N 日最高价买入，跌破短期最低价出场。
 Richard Dennis 海龟实验的核心策略，适合强趋势行情。
+
+标准规则：
+  - 买入：今日收盘价 > 前 N 日最高价（upper.iloc[-2]，不含今日 high）
+  - 出场：今日收盘价 < 前 M 日最低价（exit_lower.iloc[-2]，不含今日 low）
 
 参数:
   period       — 入场突破周期（默认 20）；价格创 N 日新高则买入
@@ -27,19 +31,19 @@ class DonchianBreakoutStrategy(StrategyBase):
         if len(df) < period + 2:
             return
 
-        upper, _, _  = donchian_channels(df, period)
+        upper, _, _      = donchian_channels(df, period)
         _, _, exit_lower = donchian_channels(df, exit_period)
 
-        close      = ctx.bar.close
-        prev_close = df["close"].iloc[-2]
-        prev_upper = upper.iloc[-2]
+        close = ctx.bar.close
 
-        # 价格突破上轨 → 入场做多
-        if prev_close < prev_upper and close >= upper.iloc[-1] and ctx.qty == 0:
+        # 标准海龟规则：今日收盘 > 前 N 日通道上轨（不含当日 high）
+        prev_upper = upper.iloc[-2]
+        prev_exit_lower = exit_lower.iloc[-2]
+
+        if close > prev_upper and ctx.qty == 0:
             qty = int(ctx.cash * 0.95 / close)
             if qty > 0:
                 ctx.buy(qty)
 
-        # 价格跌破短期下轨 → 出场
-        elif ctx.qty > 0 and close < exit_lower.iloc[-1]:
+        elif ctx.qty > 0 and close < prev_exit_lower:
             ctx.sell_all()
