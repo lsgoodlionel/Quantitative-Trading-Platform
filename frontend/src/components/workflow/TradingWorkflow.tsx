@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react"
+import { Link } from "react-router-dom"
 import type {
   WorkflowState, WorkflowStep, WorkflowData, StrategyOption, BacktestVerdict,
 } from "./workflowTypes"
@@ -6,12 +7,19 @@ import {
   initWorkflowData, classifyCondition, buildStrategyOptions,
 } from "./workflowTypes"
 import { StepParamAdjust } from "./StepParamAdjust"
+import { WorkflowHistory } from "./WorkflowHistory"
 import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import { useRunBacktest } from "@/hooks/useBacktest"
 import { useKelly } from "@/hooks/useQuant"
+import { useStartStrategy } from "@/hooks/useLiveStrategy"
 import { Spinner } from "@/components/ui/Spinner"
 import type { Market } from "@/types"
 import { format, subYears } from "date-fns"
+import {
+  saveWorkflowState, loadWorkflowState, clearWorkflowState,
+  appendWorkflowHistory, loadWorkflowHistory, clearWorkflowHistory,
+} from "@/hooks/useWorkflowStorage"
+import type { WorkflowHistoryEntry } from "@/hooks/useWorkflowStorage"
 
 // ── 帮助工具 ──────────────────────────────────────────────────
 
@@ -494,22 +502,37 @@ function StepLiveConfirm({ onConfirm, onKeepPaper }: { onConfirm: () => void; on
 
 // ── 主工作流组件 ──────────────────────────────────────────────
 
+const INIT_STATE: WorkflowState = {
+  phase: "idle",
+  currentStepIndex: 0,
+  steps: buildInitSteps(),
+  data: initWorkflowData(),
+}
+
 export function TradingWorkflow() {
-  const [state, setState] = useState<WorkflowState>({
-    phase: "idle",
-    currentStepIndex: 0,
-    steps: buildInitSteps(),
-    data: initWorkflowData(),
+  // ── 恢复上次进度（localStorage）──────────────────────────────
+  const [state, setState] = useState<WorkflowState>(() => {
+    const saved = loadWorkflowState()
+    return (saved && saved.phase === "running") ? saved : INIT_STATE
   })
+
+  // 历史记录列表（只在空闲/完成态显示）
+  const [history, setHistory] = useState<WorkflowHistoryEntry[]>(() => loadWorkflowHistory())
 
   // Ref to always access latest workflow data in async callbacks (avoids stale closure)
   const dataRef = useRef<WorkflowData>(state.data)
   useEffect(() => { dataRef.current = state.data }, [state.data])
 
   const { data: spotData } = useSpotQuotes(state.phase === "running")
-  const runBacktest = useRunBacktest()
-  const calcKelly   = useKelly()
-  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runBacktest  = useRunBacktest()
+  const calcKelly    = useKelly()
+  const startStrategy = useStartStrategy()
+  const timerRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── 持久化：运行中时自动保存到 localStorage ────────────────
+  useEffect(() => {
+    if (state.phase === "running") saveWorkflowState(state)
+  }, [state])
 
   // 工具：更新单个步骤状态
   const updateStep = useCallback((idx: number, patch: Partial<WorkflowStep>) => {
@@ -702,38 +725,101 @@ export function TradingWorkflow() {
     }))
   }, [])
 
-  // ── Step 9: 模拟盘启动 ──────────────────────────────────────
-  const handlePaperConfirm = useCallback(() => {
+  // ── Step 9: 模拟盘启动（调用真实 API）─────────────────────
+  const handlePaperConfirm = useCallback(async () => {
+    const { symbol, market, selectedStrategy } = dataRef.current
+    if (!selectedStrategy) return
+
+    // 先设为 running 显示 spinner
     setState(s => ({
       ...s,
-      currentStepIndex: 9,
-      steps: s.steps.map((st, i) => {
-        if (i === 8) return { ...st, status: "done", summary: "模拟盘已启动" }
-        if (i === 9) return { ...st, status: "waiting_decision" }
-        return st
-      }),
-      data: { ...s.data, paperStrategyId: "paper-" + Date.now() },
+      steps: s.steps.map((st, i) => i === 8 ? { ...st, status: "running" } : st),
     }))
+
+    try {
+      const inst = await startStrategy.mutateAsync({
+        strategy_name: selectedStrategy.id,
+        symbol,
+        market: market as Market,
+        frequency: "1d",
+        params: selectedStrategy.params as Record<string, unknown>,
+        warmup_days: 120,
+      })
+      setState(s => ({
+        ...s,
+        currentStepIndex: 9,
+        steps: s.steps.map((st, i) => {
+          if (i === 8) return { ...st, status: "done", summary: `模拟盘运行中 · ${inst.instance_id.slice(-8)}` }
+          if (i === 9) return { ...st, status: "waiting_decision" }
+          return st
+        }),
+        data: { ...s.data, paperStrategyId: inst.instance_id },
+      }))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "模拟盘启动失败，请重试"
+      updateStep(8, { status: "error", errorMsg: msg })
+    }
+  }, [startStrategy, updateStep])
+
+  // ── 保存历史记录工具函数 ─────────────────────────────────────
+  const saveHistory = useCallback((phase: WorkflowHistoryEntry["phase"]) => {
+    const d = dataRef.current
+    const entry: WorkflowHistoryEntry = {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      symbol: d.symbol,
+      market: d.market,
+      strategyName: d.selectedStrategy?.name ?? "—",
+      strategyId:   d.selectedStrategy?.id   ?? "—",
+      verdict:      d.backtestVerdict,
+      sharpe:       d.backtestResult?.metrics.sharpe_ratio ?? null,
+      drawdown:     d.backtestResult ? Math.abs(d.backtestResult.metrics.max_drawdown_pct) : null,
+      winRate:      d.backtestResult?.metrics.win_rate_pct ?? null,
+      positionPct:  d.confirmedPositionPct,
+      instanceId:   d.paperStrategyId,
+      phase,
+    }
+    const updated = appendWorkflowHistory(entry)
+    setHistory(updated)
   }, [])
 
   // ── Step 10: 实盘确认 ───────────────────────────────────────
   const handleLiveConfirm = useCallback(() => {
+    saveHistory("completed")
+    clearWorkflowState()
     setState(s => ({
       ...s,
       phase: "completed",
       steps: s.steps.map((st, i) => i === 9 ? { ...st, status: "done", summary: "已切换实盘" } : st),
       data: { ...s.data, liveConfirmed: true },
     }))
-  }, [])
+  }, [saveHistory])
+
+  // ── 继续观察模拟盘（也算完成一轮流程）──────────────────────
+  const handleKeepPaper = useCallback(() => {
+    saveHistory("paper_only")
+    clearWorkflowState()
+    setState(s => ({
+      ...s,
+      phase: "completed",
+      steps: s.steps.map((st, i) => i === 9 ? { ...st, status: "done", summary: "继续模拟盘观察" } : st),
+    }))
+  }, [saveHistory])
 
   const handleReset = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
-    setState({ phase: "idle", currentStepIndex: 0, steps: buildInitSteps(), data: initWorkflowData() })
+    clearWorkflowState()
+    setState(INIT_STATE)
   }, [])
 
   // ── 渲染 ────────────────────────────────────────────────────
 
   if (state.phase === "idle") {
+    // 检查是否存在未保存的 running 状态（用户手动触发 reset 后 savedState 为空，
+    // 但页面reload时若有running状态则已自动在 useState 初始化中恢复）
+    const savedRunning = loadWorkflowState()
+    const hasResumable = savedRunning?.phase === "running"
+
     return (
       <div className="card">
         <div className="card-header mb-4">
@@ -742,25 +828,109 @@ export function TradingWorkflow() {
             <p className="text-[10px] text-[#6e7681] mt-0.5">从选股到实盘的全流程自动化引导，系统自动执行分析，关键决策由您把控</p>
           </div>
         </div>
+
+        {/* 未完成流程恢复提示 */}
+        {hasResumable && savedRunning && (
+          <div className="mb-4 bg-[#1f3d5e]/30 border border-[#58a6ff]/30 rounded-lg p-3 space-y-2">
+            <p className="text-xs font-medium text-[#58a6ff]">⚡ 上次有未完成的分析流程</p>
+            <p className="text-[10px] text-[#8b949e]">
+              {savedRunning.data.symbol} ({savedRunning.data.market}) ·
+              第 {savedRunning.currentStepIndex + 1}/{savedRunning.steps.length} 步
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setState(savedRunning)}
+                className="flex-1 py-1.5 rounded-lg bg-[#1f6feb] text-white text-xs font-medium hover:bg-[#388bfd] transition-colors"
+              >
+                继续上次
+              </button>
+              <button
+                onClick={() => { clearWorkflowState(); setState(INIT_STATE) }}
+                className="flex-1 py-1.5 rounded-lg border border-[#30363d] text-[#8b949e] text-xs hover:bg-[#21262d] transition-colors"
+              >
+                重新开始
+              </button>
+            </div>
+          </div>
+        )}
+
         <StepInput onConfirm={handleInputConfirm} />
+
+        <WorkflowHistory
+          entries={history}
+          onClear={() => { clearWorkflowHistory(); setHistory([]) }}
+        />
       </div>
     )
   }
 
   if (state.phase === "completed") {
+    const d = state.data
+    const m = d.backtestResult?.metrics
     return (
-      <div className="card">
-        <div className="flex flex-col items-center py-6 gap-3">
-          <div className="w-12 h-12 rounded-full bg-[#1a3a1a] border border-[#3fb950] flex items-center justify-center text-2xl">✓</div>
-          <p className="text-sm font-semibold text-[#3fb950]">全流程完成！</p>
-          <p className="text-xs text-[#8b949e] text-center">
-            {state.data.symbol} 已完成从分析到实盘的完整流程。
-            请在「实盘策略」页监控运行状态，在「风控中心」查看风险指标。
-          </p>
-          <button onClick={handleReset} className="mt-2 px-4 py-2 rounded-lg bg-[#21262d] text-[#8b949e] text-xs hover:bg-[#30363d] transition-colors">
-            分析新标的
-          </button>
+      <div className="card space-y-4">
+        {/* 完成标题 */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-[#1a3a1a] border border-[#3fb950] flex items-center justify-center text-lg shrink-0">✓</div>
+          <div>
+            <p className="text-sm font-semibold text-[#3fb950]">全流程完成！</p>
+            <p className="text-[10px] text-[#6e7681]">
+              {d.symbol} · {d.selectedStrategy?.name ?? "—"} · 仓位 {pct(d.confirmedPositionPct)}
+            </p>
+          </div>
         </div>
+
+        {/* 回测摘要 */}
+        {m && (
+          <div className="grid grid-cols-3 gap-2 text-xs bg-[#0d1117] rounded-lg p-3">
+            <div><p className="text-[#6e7681]">Sharpe</p><p className="font-mono font-bold text-[#e6edf3]">{m.sharpe_ratio.toFixed(2)}</p></div>
+            <div><p className="text-[#6e7681]">最大回撤</p><p className="font-mono font-bold text-[#f85149]">{Math.abs(m.max_drawdown_pct).toFixed(1)}%</p></div>
+            <div><p className="text-[#6e7681]">胜率</p><p className="font-mono font-bold text-[#3fb950]">{m.win_rate_pct.toFixed(1)}%</p></div>
+          </div>
+        )}
+
+        {/* 模拟盘实例信息 */}
+        {d.paperStrategyId && (
+          <div className="bg-[#1a2a1a] border border-[#3fb950]/30 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-[#3fb950] font-medium">▶ 模拟盘运行中</p>
+              <span className="font-mono text-[10px] text-[#6e7681]">{d.paperStrategyId.slice(-12)}</span>
+            </div>
+            <Link
+              to="/live-strategy"
+              className="flex items-center justify-between w-full py-2 px-3 rounded-lg bg-[#1f3d5e]/40 border border-[#58a6ff]/30 text-xs text-[#58a6ff] hover:bg-[#1f3d5e]/60 transition-colors"
+            >
+              <span>前往「实盘策略」查看运行状态</span>
+              <span>→</span>
+            </Link>
+          </div>
+        )}
+
+        {/* 快捷导航 */}
+        <div className="grid grid-cols-2 gap-2 text-[10px]">
+          {[
+            { to: "/live-strategy", icon: "▶", label: "实盘策略监控" },
+            { to: "/risk",          icon: "⚑", label: "风控中心" },
+            { to: "/orders",        icon: "≡", label: "订单记录" },
+            { to: "/portfolio",     icon: "◈", label: "持仓分析" },
+          ].map(item => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[#30363d] text-[#8b949e] hover:text-[#e6edf3] hover:border-[#58a6ff]/40 hover:bg-[#21262d] transition-colors"
+            >
+              <span>{item.icon}</span>
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </div>
+
+        <button
+          onClick={handleReset}
+          className="w-full py-2 rounded-lg bg-[#21262d] text-[#8b949e] text-xs hover:bg-[#30363d] transition-colors"
+        >
+          分析新标的
+        </button>
       </div>
     )
   }
@@ -844,6 +1014,14 @@ export function TradingWorkflow() {
                   ↺ 重新回测
                 </button>
               )}
+              {step.id === "paper" && (
+                <button
+                  onClick={handlePaperConfirm}
+                  className="flex-1 py-2 rounded-lg bg-[#1a2a1a] text-[#3fb950] text-xs border border-[#3fb950]/30 hover:bg-[#1e3a1e] transition-colors"
+                >
+                  ↺ 重新启动模拟盘
+                </button>
+              )}
               <button
                 onClick={handleReset}
                 className="flex-1 py-2 rounded-lg border border-[#30363d] text-[#8b949e] text-xs hover:bg-[#21262d] transition-colors"
@@ -894,7 +1072,7 @@ export function TradingWorkflow() {
 
         {/* Step 10: 实盘确认 */}
         {step?.id === "live" && step.status === "waiting_decision" && (
-          <StepLiveConfirm onConfirm={handleLiveConfirm} onKeepPaper={() => updateStep(9, { status: "done", summary: "继续观察模拟盘" })} />
+          <StepLiveConfirm onConfirm={handleLiveConfirm} onKeepPaper={handleKeepPaper} />
         )}
       </div>
     </div>
