@@ -9,6 +9,8 @@ import {
   ResponsiveContainer, ReferenceDot, Cell, PieChart, Pie,
 } from "recharts"
 import type { Market, PortfolioOptMethod, PortfolioOptResult } from "@/types"
+import { InsightBox } from "@/components/ui/InsightBox"
+import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 
 // ── 常量 ──────────────────────────────────────────────────────
 
@@ -130,8 +132,81 @@ function EfficientFrontierChart({
   )
 }
 
+// ── 组合优化结论生成 ─────────────────────────────────────────────
+
+function buildPortfolioInsight(result: PortfolioOptResult) {
+  const { expected_return, expected_volatility, sharpe_ratio, cvar_95, weights } = result
+  const maxW = Math.max(...Object.values(weights)) * 100
+  const activeN = Object.values(weights).filter((w) => w > 0.01).length
+  const methodLabel = METHOD_OPTIONS.find((m) => m.value === result.method)?.label ?? result.method
+
+  const verdict: InsightVerdict =
+    sharpe_ratio >= 1.5 && expected_return > 0 ? "good"
+    : sharpe_ratio >= 0.8 && expected_return > 0 ? "warn"
+    : "bad"
+
+  const grade =
+    sharpe_ratio >= 1.5 ? "优秀（Sharpe ≥ 1.5）"
+    : sharpe_ratio >= 1.0 ? "良好（Sharpe ≥ 1.0）"
+    : sharpe_ratio >= 0.5 ? "一般（Sharpe < 1.0）"
+    : "较弱（Sharpe < 0.5）"
+
+  const summary = `采用「${methodLabel}」优化后，组合年化收益预期 ${expected_return >= 0 ? "+" : ""}${expected_return.toFixed(2)}%，年化波动率 ${expected_volatility.toFixed(2)}%，夏普比率 ${sharpe_ratio.toFixed(2)}，综合评级：${grade}。`
+
+  const findings: InsightItem[] = [
+    {
+      text: `夏普比率 ${sharpe_ratio.toFixed(3)} — ${sharpe_ratio >= 1.5 ? "风险调整收益优秀，远超无风险资产" : sharpe_ratio >= 1.0 ? "风险调整收益良好，具备实盘部署参考价值" : "风险调整收益偏低，建议优化资产池或调整方法"}`,
+      type: sharpe_ratio >= 1.5 ? "good" : sharpe_ratio >= 1.0 ? "good" : sharpe_ratio >= 0.5 ? "warn" : "bad",
+    },
+    {
+      text: `95% CVaR ${cvar_95.toFixed(2)}% — 极端情景下单日最大预期损失`,
+      sub: cvar_95 > 10 ? "尾部风险偏高，建议降低单资产权重上限或加入低相关性资产" : "尾部风险可控",
+      type: cvar_95 > 10 ? "bad" : cvar_95 > 5 ? "warn" : "good",
+    },
+    {
+      text: `最大单资产权重 ${maxW.toFixed(1)}% — ${maxW > 40 ? "集中度过高，面临个股黑天鹅风险" : maxW > 25 ? "集中度适中" : "分散度良好"}`,
+      type: maxW > 40 ? "bad" : maxW > 25 ? "warn" : "good",
+    },
+    {
+      text: `有效持仓 ${activeN} 只 — ${activeN < 3 ? "过度集中，建议增加资产数量" : activeN <= 8 ? "资产数量合理" : "资产过多，可能稀释阿尔法"}`,
+      type: activeN < 3 ? "bad" : activeN <= 8 ? "good" : "warn",
+    },
+  ]
+
+  const recommendations: InsightItem[] = [
+    ...(sharpe_ratio < 1.0 ? [{
+      text: "尝试切换优化方法",
+      sub: "当前结果夏普偏低，可试验「最大夏普」或「风险平价」方法，或更换资产池",
+      type: "warn" as const,
+    }] : []),
+    ...(maxW > 35 ? [{
+      text: "设置权重上限约束",
+      sub: `最大权重 ${maxW.toFixed(1)}% 过高，建议在后端 API 参数中加入 max_weight=0.30 约束`,
+      type: "warn" as const,
+    }] : []),
+    {
+      text: "周期性再平衡",
+      sub: "建议每季度重新运行优化，市场结构变化会使优化权重失效",
+      type: "neutral" as const,
+    },
+    {
+      text: "结合回测验证",
+      sub: "优化结果基于历史协方差，建议在「回测」页面对该权重组合做历史验证，防止过拟合",
+      type: "neutral" as const,
+    },
+    ...(expected_return <= 0 ? [{
+      text: "收益预期为负，重新筛选资产",
+      sub: "检查各资产的历史收益数据区间，或更换具有正收益预期的标的组合",
+      type: "bad" as const,
+    }] : []),
+  ]
+
+  return { verdict, summary, findings, recommendations }
+}
+
 function ResultPanel({ result }: { result: PortfolioOptResult }) {
   const methodLabel = METHOD_OPTIONS.find((m) => m.value === result.method)?.label ?? result.method
+  const insight = buildPortfolioInsight(result)
 
   return (
     <div className="space-y-5">
@@ -218,6 +293,14 @@ function ResultPanel({ result }: { result: PortfolioOptResult }) {
           </table>
         </div>
       </div>
+
+      {/* 结论与建议 */}
+      <InsightBox
+        verdict={insight.verdict}
+        summary={insight.summary}
+        findings={insight.findings}
+        recommendations={insight.recommendations}
+      />
     </div>
   )
 }

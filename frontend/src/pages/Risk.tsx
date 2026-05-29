@@ -9,6 +9,8 @@ import { usePositions, useAccount } from "@/hooks/usePositions"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import type { RiskConfig, RiskRule, Market } from "@/types"
+import { InsightBox } from "@/components/ui/InsightBox"
+import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 
 const RULE_LABELS: Record<string, string> = {
   max_position_pct:    "最大持仓比例 (%)",
@@ -183,6 +185,70 @@ function VaRPanel({ market }: { market: Market }) {
             <span>峰度 <span className="font-mono text-[#e6edf3]">{varResult.kurtosis.toFixed(3)}</span></span>
             <span>样本 <span className="font-mono text-[#e6edf3]">{varResult.n_days}日</span></span>
           </div>
+
+          {/* VaR 结论 */}
+          {(() => {
+            const v95 = varResult.hist_var_95_pct
+            const v99 = varResult.hist_var_99_pct
+            const cv95 = varResult.hist_cvar_95_pct
+            const kurt = varResult.kurtosis
+            const skew = varResult.skewness
+
+            const verdict: InsightVerdict = v95 > 5 ? "bad" : v95 > 3 ? "warn" : "good"
+            const riskLevel = v95 > 5 ? "高风险" : v95 > 3 ? "中等风险" : "低风险"
+            const summary = `当前持仓在 95% 置信度下单日最大损失为 ${v95.toFixed(2)}%（$${varResult.hist_var_95_value.toFixed(0)}），风险等级：${riskLevel}。极端情景下（CVaR 95%）预期损失达 ${cv95.toFixed(2)}%。`
+
+            const findings: InsightItem[] = [
+              {
+                text: `95% VaR ${v95.toFixed(2)}% — 在正常市场条件下，100个交易日中预期不超过5次触发该损失`,
+                type: v95 > 5 ? "bad" : v95 > 3 ? "warn" : "good",
+              },
+              {
+                text: `99% VaR ${v99.toFixed(2)}% vs 95% CVaR ${cv95.toFixed(2)}% — ${cv95 > v99 * 1.5 ? "两者差距较大，说明尾部分布肥尾显著" : "尾部风险集中度正常"}`,
+                type: cv95 > v99 * 1.5 ? "warn" : "good",
+              },
+              {
+                text: `偏度 ${skew.toFixed(3)} — ${skew < -0.5 ? "明显左偏（负偏），组合有大亏概率高于正态假设" : skew > 0.5 ? "右偏，大盈概率相对更高" : "近似对称分布"}`,
+                type: skew < -0.5 ? "bad" : "neutral",
+              },
+              {
+                text: `峰度 ${kurt.toFixed(3)} — ${kurt > 4 ? "肥尾分布（峰度 > 4），极端损失频率远高于正态分布" : kurt > 3 ? "略有肥尾" : "接近正态分布"}`,
+                type: kurt > 4 ? "bad" : kurt > 3 ? "warn" : "good",
+              },
+            ]
+
+            const recommendations: InsightItem[] = [
+              ...(v95 > 5 ? [{
+                text: "立即审查高风险持仓",
+                sub: "VaR 超过 5%，建议减少波动率最高的持仓，或通过期权对冲尾部风险",
+                type: "bad" as const,
+              }] : []),
+              ...(kurt > 4 ? [{
+                text: "考虑 CVaR 约束而非 VaR",
+                sub: "肥尾分布下 VaR 低估了真实风险，组合优化时应使用 CVaR 最小化目标",
+                type: "warn" as const,
+              }] : []),
+              {
+                text: "定期更新风险计量",
+                sub: "市场波动率随时间变化，建议每周重新计算 VaR，高波动期缩短为每日",
+                type: "neutral" as const,
+              },
+              {
+                text: "将 VaR 阈值与风控规则对齐",
+                sub: "确保「每日亏损限额」风控规则数值 ≥ 组合净值 × VaR%，避免风控被动触发",
+                type: "neutral" as const,
+              },
+            ]
+
+            return (
+              <InsightBox
+                verdict={verdict}
+                summary={summary}
+                findings={findings}
+                recommendations={recommendations}
+              />
+            )
+          })()}
 
           {/* Return distribution chart */}
           <div>

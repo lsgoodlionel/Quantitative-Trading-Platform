@@ -12,6 +12,7 @@ import Editor from "@monaco-editor/react"
 import { usePresets, useStrategySource, useValidateStrategy } from "@/hooks/useStrategy"
 import { SectionCard, ParamRow, MetaGrid, CHART_COLORS } from "@/pages/algolab/shared"
 import { MLPanel } from "@/pages/algolab/MLStrategyPanel"
+import { InsightBox } from "@/components/ui/InsightBox"
 
 // ── Shared helpers ────────────────────────────────────────────────
 
@@ -123,6 +124,21 @@ function GBMPanel() {
               </BarChart>
             </ResponsiveContainer>
           </SectionCard>
+          <InsightBox
+            verdict={result.prob_loss > 0.5 ? "bad" : result.prob_loss > 0.3 ? "warn" : "good"}
+            summary={`在 μ=${(parseFloat(mu)*100).toFixed(1)}%、σ=${(parseFloat(sigma)*100).toFixed(1)}% 条件下，模拟 ${nPaths} 条路径后期望价格为 $${result.final_mean.toFixed(2)}（起点 $${result.S0}），亏损概率 ${(result.prob_loss*100).toFixed(1)}%。`}
+            findings={[
+              { text: `期望收益率 ${(result.expected_return*100).toFixed(2)}% — ${result.expected_return > 0 ? "漂移率为正，长期向上趋势占优" : "漂移率为负，长期预期亏损"}`, type: result.expected_return > 0 ? "good" : "bad" },
+              { text: `亏损概率 ${(result.prob_loss*100).toFixed(1)}% — ${result.prob_loss > 0.5 ? "超过50%，该价格路径在该参数下大概率亏损" : result.prob_loss > 0.3 ? "亏损概率偏高（30%+），需要风控止损" : "亏损概率可控"}`, type: result.prob_loss > 0.5 ? "bad" : result.prob_loss > 0.3 ? "warn" : "good" },
+              { text: `95% 区间 $${result.final_p5.toFixed(2)} ～ $${result.final_p95.toFixed(2)}，价格波动幅度 ${(((result.final_p95-result.final_p5)/result.S0)*100).toFixed(1)}%`, type: "neutral" },
+              { text: `95% CVaR（预期亏损）$${result.cvar_95.toFixed(2)} — 极端情景下的平均损失`, type: result.cvar_95 > result.S0 * 0.3 ? "bad" : "warn" },
+            ]}
+            recommendations={[
+              { text: "σ 参数对应真实标的年化波动率", sub: "可在「风控→VaR分析」查询当前持仓真实波动率，代入此处模拟", type: "neutral" },
+              { text: "蒙卡结果仅供参考，非收益承诺", sub: "GBM 假设对数正态分布和恒定波动率，实际市场存在跳跃和波动率聚集", type: "warn" },
+              ...(result.prob_loss > 0.4 ? [{ text: "在参数相似条件下建议使用止损", sub: `若亏损超过 VaR95 $${result.var_95.toFixed(2)} 即触发止损，可有效控制尾部损失`, type: "warn" as const }] : []),
+            ]}
+          />
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">设置参数后点击运行模拟</div>
@@ -207,6 +223,31 @@ function BSMPanel() {
               ))}
             </div>
           </SectionCard>
+          {(() => {
+            const sv = parseFloat(S), kv = parseFloat(K)
+            const moneyness = sv / kv
+            const mLabel = moneyness > 1.03 ? "实值（ITM）" : moneyness < 0.97 ? "虚值（OTM）" : "平值（ATM）"
+            const optLabel = optType === "call" ? "认购" : "认沽"
+            const isHighGamma = result.gamma > 0.05
+            const isHighVega = result.vega > 5
+            return (
+              <InsightBox
+                verdict={result.intrinsic_value > 0 ? "good" : "warn"}
+                summary={`${optLabel}期权理论价格 $${result.price.toFixed(4)}，当前处于${mLabel}（S/K=${moneyness.toFixed(3)}），内在价值 $${result.intrinsic_value.toFixed(4)}，时间价值 $${result.time_value.toFixed(4)}。`}
+                findings={[
+                  { text: `Delta ${result.delta.toFixed(4)} — 标的每涨$1，期权价值变化 $${result.delta.toFixed(4)}，实际持仓对冲比约 1:${(1/Math.abs(result.delta)).toFixed(0)}`, type: "neutral" },
+                  { text: `Theta ${result.theta.toFixed(4)} — 每日时间衰减 $${Math.abs(result.theta).toFixed(4)}，${parseFloat(T) < 0.1 ? "临近到期时间价值加速损耗，风险较高" : "时间价值损耗可控"}`, type: parseFloat(T) < 0.1 ? "warn" : "neutral" },
+                  { text: `Gamma ${result.gamma.toFixed(4)} — ${isHighGamma ? "Gamma 较高，Delta 变化剧烈，需要频繁对冲" : "Gamma 较低，Delta 较稳定"}`, type: isHighGamma ? "warn" : "neutral" },
+                  { text: `Vega ${result.vega.toFixed(4)} — ${isHighVega ? "波动率敏感性高，隐含波动率1%变化影响期权价值$" + result.vega.toFixed(2) : "波动率敏感性适中"}`, type: isHighVega ? "warn" : "neutral" },
+                ]}
+                recommendations={[
+                  { text: `Delta 对冲需持有 ${Math.abs(result.delta * 100).toFixed(0)} 股${optLabel === "认购" ? "标的" : ""}以对冲 100 张期权`, sub: "每日 Delta 对冲成本 = Gamma × 标的日内波动²/2，请权衡对冲频率", type: "neutral" },
+                  ...(parseFloat(T) < 0.05 ? [{ text: "临近到期，时间价值损耗加速", sub: "若处于虚值状态，当前期权大概率归零，注意资金安全", type: "bad" as const }] : []),
+                  { text: "对比市场实际期权价格", sub: "BSM 理论价格 vs 市场报价的差值即「隐含波动率溢价」，可作为期权高估/低估的参考", type: "neutral" },
+                ]}
+              />
+            )
+          })()}
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">填写参数后点击计算</div>
@@ -289,6 +330,21 @@ function GARCHPanel() {
               </LineChart>
             </ResponsiveContainer>
           </SectionCard>
+          <InsightBox
+            verdict={result.persistence > 0.98 ? "warn" : result.persistence > 0.9 ? "neutral" : "good"}
+            summary={`GARCH(1,1) 拟合完成。波动率持续性 α+β=${result.persistence.toFixed(4)}，${result.persistence > 0.98 ? "接近单位根（非平稳），波动率冲击衰减极慢" : "波动率均值回归能力正常"}。长期均衡年化波动率为 ${(result.long_run_vol_annualized*100).toFixed(2)}%。`}
+            findings={[
+              { text: `α（ARCH项）=${result.alpha.toFixed(4)} — ${result.alpha > 0.15 ? "对新信息的反应过度（波动率杠杆效应显著）" : "对新信息反应适中"}`, type: result.alpha > 0.15 ? "warn" : "neutral" },
+              { text: `β（GARCH项）=${result.beta.toFixed(4)} — 波动率记忆性，β越高历史波动率影响越持久`, type: "neutral" },
+              { text: `冲击半衰期 ${result.half_life_days.toFixed(1)} 天 — ${result.half_life_days > 60 ? "极长，波动率冲击需要数月消散，适合配置低频止损" : result.half_life_days > 20 ? "正常，约1个月消散" : "较短，市场恢复快"}`, type: result.half_life_days > 60 ? "warn" : "neutral" },
+              { text: `长期年化波动率 ${(result.long_run_vol_annualized*100).toFixed(2)}% — 用于设置 VaR 压力测试的基准波动率参数`, type: "neutral" },
+            ]}
+            recommendations={[
+              { text: "将长期波动率代入 BSM 期权定价", sub: `当前长期波动率 ${(result.long_run_vol_annualized*100).toFixed(2)}% 可作为 σ 参数输入「BSM期权」面板`, type: "neutral" },
+              ...(result.persistence > 0.97 ? [{ text: "波动率持续性极高，慎用简单移动平均止损", sub: "建议改用 GARCH 动态止损：止损宽度 = 2 × GARCH预测σ × 持仓成本", type: "warn" as const }] : []),
+              { text: "结合预测区间动态调整仓位", sub: `未来 ${horizon} 天预测波动率 ${forecastData.length ? (forecastData[forecastData.length-1].vol).toFixed(2) : "—"}% vs 长期均值 ${(result.long_run_vol_annualized*100).toFixed(2)}%，波动率上升时降低仓位`, type: "neutral" },
+            ]}
+          />
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">点击"拟合 GARCH"运行模型</div>
@@ -365,6 +421,21 @@ function KellyPanel() {
               </LineChart>
             </ResponsiveContainer>
           </SectionCard>
+          <InsightBox
+            verdict={result.edge > 0 ? "good" : "bad"}
+            summary={`当前策略期望值（Edge）为 ${(result.edge*100).toFixed(2)}%，盈亏比 b=${result.odds_ratio.toFixed(2)}。完整凯利仓位 f*=${(result.full_kelly*100).toFixed(1)}%，推荐使用 ${(result.recommended*100).toFixed(1)}% 仓位（${frac === "0.5" ? "½" : frac === "0.25" ? "¼" : frac === "0.75" ? "¾" : "Full"} Kelly）。`}
+            findings={[
+              { text: `期望值 ${(result.edge*100).toFixed(2)}% — ${result.edge > 0 ? "正期望策略，具备长期盈利能力" : "负期望策略，任何仓位都会长期亏损"}`, type: result.edge > 0 ? "good" : "bad" },
+              { text: `完整凯利 f*=${(result.full_kelly*100).toFixed(1)}%，半凯利=${(result.half_kelly*100).toFixed(2)}%`, sub: "实战中通常使用半凯利或¼凯利以降低破产风险", type: "neutral" },
+              { text: `全凯利破产概率 ${(result.ruin_probability_full*100).toFixed(1)}% vs 半凯利破产概率 ${(result.ruin_probability_half*100).toFixed(1)}%`, type: result.ruin_probability_full > 0.2 ? "warn" : "good" },
+              ...(result.full_kelly > parseFloat(maxF) ? [{ text: `凯利最优仓位 ${(result.full_kelly*100).toFixed(1)}% 超过设定上限 ${(parseFloat(maxF)*100).toFixed(0)}%，已受上限约束`, type: "warn" as const }] : []),
+            ]}
+            recommendations={[
+              ...(result.edge <= 0 ? [{ text: "负期望策略请勿实盘", sub: "改善策略的胜率或盈亏比，直到期望值转为正数再考虑实盘", type: "bad" as const }] : []),
+              { text: `实际建议仓位 ${(result.recommended*100).toFixed(1)}%`, sub: "在「实盘策略 → 启动」中，单笔资金使用比例参考此值，不建议超过¼ Kelly", type: result.edge > 0 ? "good" : "warn" },
+              { text: "随策略表现动态调整", sub: "策略实盘运行后，根据实际胜率和盈亏比重新输入计算，每季度至少更新一次", type: "neutral" },
+            ]}
+          />
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">输入历史胜率和盈亏数据后点击计算</div>
@@ -446,6 +517,25 @@ function CointegrationPanel() {
               </AreaChart>
             </ResponsiveContainer>
           </SectionCard>
+          <InsightBox
+            verdict={result.is_cointegrated ? (result.half_life_days < 30 ? "good" : "warn") : "bad"}
+            summary={`Engle-Granger 协整检验 ${result.is_cointegrated ? "通过（ADF p值=" + result.adf_pvalue.toFixed(4) + "）" : "未通过（p值=" + result.adf_pvalue.toFixed(4) + " > 0.05，价差非平稳）"}。当前价差 Z-score=${result.z_score_last.toFixed(3)}，当前信号：${result.signal}。`}
+            findings={[
+              { text: `协整关系：${result.is_cointegrated ? "✓ 两序列存在长期均衡关系，价差具有均值回归性" : "✗ 未发现协整关系，配对交易假设不成立"}`, type: result.is_cointegrated ? "good" : "bad" },
+              { text: `均值回归半衰期 ${result.half_life_days.toFixed(1)} 天 — ${result.half_life_days < 10 ? "回归极快，适合短线配对" : result.half_life_days < 30 ? "回归速度适中" : "回归较慢，需要较长持仓周期"}`, type: result.half_life_days < 30 ? "good" : "warn" },
+              { text: `当前 Z-score ${result.z_score_last.toFixed(3)} — ${Math.abs(result.z_score_last) > parseFloat(entryZ) ? `超过开仓阈值 ±${entryZ}，满足开仓条件` : `在阈值 ±${entryZ} 内，暂无开仓信号`}`, type: Math.abs(result.z_score_last) > parseFloat(entryZ) ? "warn" : "neutral" },
+              { text: `对冲比例 β=${result.hedge_ratio.toFixed(4)}，价差相关系数 ${result.correlation.toFixed(4)}`, type: result.correlation > 0.8 ? "good" : "warn" },
+            ]}
+            recommendations={[
+              ...(result.is_cointegrated ? [{
+                text: `当前信号「${result.signal}」`,
+                sub: result.signal === "BUY_SPREAD" ? `买入 Y 同时卖出 ${result.hedge_ratio.toFixed(2)} 单位 X，等待价差回归均值` : result.signal === "SELL_SPREAD" ? `卖出 Y 同时买入 ${result.hedge_ratio.toFixed(2)} 单位 X` : "价差处于中性区间，持仓等待或平仓",
+                type: result.signal !== "HOLD" ? ("good" as const) : ("neutral" as const),
+              }] : [{ text: "当前资产组合不满足协整条件，更换配对标的", sub: "尝试选择同行业、同市场、相关性 > 0.8 的两只股票重新检验", type: "bad" as const }]),
+              { text: "滚动更新对冲比例", sub: "β 随市场结构变化而漂移，建议每 30 天重新估算并调整仓位比例", type: "neutral" },
+              { text: `止损设置：当 |Z-score| > ${(parseFloat(entryZ) * 1.5).toFixed(1)} 时强制平仓`, sub: "价差持续扩大可能意味着协整关系破裂，须及时止损", type: "warn" },
+            ]}
+          />
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">配置参数后点击运行检验</div>
@@ -523,6 +613,37 @@ function HMMPanel() {
               </ScatterChart>
             </ResponsiveContainer>
           </SectionCard>
+          {(() => {
+            const curState = result.current_state
+            const curLabel = result.state_labels[curState]
+            const curMean = result.state_means[curState]
+            const curVol = result.state_vols[curState]
+            // Find best and worst state by mean
+            const bestStateIdx = result.state_means.indexOf(Math.max(...result.state_means))
+            const worstStateIdx = result.state_means.indexOf(Math.min(...result.state_means))
+            const isBullish = curState === bestStateIdx
+            const isBearish = curState === worstStateIdx
+            const verdict = isBullish ? "good" : isBearish ? "bad" : "warn"
+            return (
+              <InsightBox
+                verdict={verdict}
+                summary={`HMM 识别当前市场状态为「${curLabel}」（置信 ${(result.current_state_prob*100).toFixed(1)}%），${nStates}状态模型中${isBullish ? "处于最优状态，可适当积极" : isBearish ? "处于最差状态，建议防御" : "处于中间状态，维持中性仓位"}。`}
+                findings={[
+                  { text: `当前状态「${curLabel}」年化收益预期 ${(curMean*100).toFixed(1)}%，年化波动 ${(curVol*100).toFixed(1)}%`, type: curMean > 0 ? "good" : "bad" },
+                  { text: `置信度 ${(result.current_state_prob*100).toFixed(1)}% — ${result.current_state_prob > 0.8 ? "状态判断高度确信" : result.current_state_prob > 0.6 ? "状态判断较为确信" : "状态判断不确定，可能处于状态切换期"}`, type: result.current_state_prob > 0.7 ? "good" : "warn" },
+                  ...result.state_labels.map((label, k) => ({
+                    text: `状态「${label}」：年化收益 ${(result.state_means[k]*100).toFixed(1)}%，波动 ${(result.state_vols[k]*100).toFixed(1)}%`,
+                    type: result.state_means[k] > 0.05 ? "good" as const : result.state_means[k] < -0.05 ? "bad" as const : "neutral" as const,
+                  })),
+                ]}
+                recommendations={[
+                  { text: isBullish ? "当前牛市状态，适度提升权益仓位" : isBearish ? "当前熊市状态，降低权益仓位，增加现金或对冲" : "震荡状态，维持中性配置，等待方向明确", type: verdict },
+                  { text: "监控状态切换时机", sub: "当置信度低于 60% 时表明状态可能正在转换，提前调整仓位", type: "warn" },
+                  { text: "与技术指标交叉验证", sub: "HMM 结果建议与趋势指标（如 ADX、SuperTrend）结合使用，单一模型不宜单独决策", type: "neutral" },
+                ]}
+              />
+            )
+          })()}
         </>}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">点击"识别状态"运行 HMM</div>

@@ -11,6 +11,8 @@ import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import { useFactorList, useFactorAnalysis } from "@/hooks/useFactorAnalysis"
 import type { Market, Frequency } from "@/types"
+import { InsightBox } from "@/components/ui/InsightBox"
+import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -428,6 +430,97 @@ export function FactorAnalysis() {
                   label={String(selectedPeriod)}
                 />
               </div>
+
+              {/* 因子结论 */}
+              {(() => {
+                // 取最长前瞻期的 IC 作为主要评判依据
+                const periods = result.forward_periods
+                const bestPeriod = periods[periods.length - 1]
+                const bk = String(bestPeriod)
+                const icMean = result.ic_mean[bk] ?? 0
+                const icIr = result.ic_ir[bk] ?? 0
+                const icPosRate = result.ic_positive_rate[bk] ?? 0
+
+                // 短周期 IC（5日）
+                const shortIc = result.ic_mean[String(periods[0])] ?? 0
+
+                // 分位数单调性检查（Q1 < Q5 为正向因子）
+                const qtl20 = result.quantile_returns[bk] ?? []
+                const isMonotonic = qtl20.length >= 2 && qtl20[qtl20.length - 1] > qtl20[0]
+                const q1q5Spread = qtl20.length >= 2
+                  ? qtl20[qtl20.length - 1] - qtl20[0]
+                  : 0
+
+                const strength =
+                  Math.abs(icMean) >= 0.05 && Math.abs(icIr) >= 0.5 ? "强有效"
+                  : Math.abs(icMean) >= 0.03 ? "弱有效"
+                  : "无效"
+
+                const verdict: InsightVerdict =
+                  strength === "强有效" ? "good"
+                  : strength === "弱有效" ? "warn"
+                  : "bad"
+
+                const factorLabel = factorList.find((f) => f.name === result.factor_name)?.label ?? result.factor_name
+                const direction = icMean >= 0 ? "正向" : "反向"
+
+                const summary = `因子「${factorLabel}」在 ${result.symbol} ${bestPeriod}日前瞻期下IC均值为 ${icMean.toFixed(4)}，IR为 ${icIr.toFixed(3)}，综合评定为「${strength}」${direction}因子。${strength === "无效" ? "建议放弃该因子或对其进行变换处理。" : "具备一定预测能力。"}`
+
+                const findings: InsightItem[] = [
+                  {
+                    text: `IC均值 ${icMean.toFixed(4)} — ${Math.abs(icMean) >= 0.05 ? "超过 0.05 门槛，因子具有统计预测力" : Math.abs(icMean) >= 0.03 ? "在 0.03~0.05 之间，预测力较弱" : "低于 0.03，预测力不显著"}`,
+                    type: Math.abs(icMean) >= 0.05 ? "good" : Math.abs(icMean) >= 0.03 ? "warn" : "bad",
+                  },
+                  {
+                    text: `IC IR ${icIr.toFixed(3)} — ${Math.abs(icIr) >= 0.5 ? "信息比率良好，因子信号稳定" : Math.abs(icIr) >= 0.3 ? "信息比率尚可" : "信息比率偏低，信号不稳定噪声大"}`,
+                    type: Math.abs(icIr) >= 0.5 ? "good" : Math.abs(icIr) >= 0.3 ? "warn" : "bad",
+                  },
+                  {
+                    text: `IC正比率 ${(icPosRate * 100).toFixed(1)}% — ${icPosRate >= 0.6 ? "超过60%，因子方向一致性好" : icPosRate >= 0.5 ? "方向略占优" : "方向不稳定，因子时效性差"}`,
+                    type: icPosRate >= 0.6 ? "good" : icPosRate >= 0.5 ? "warn" : "bad",
+                  },
+                  {
+                    text: `分位数单调性：Q1→Q5 ${isMonotonic ? `呈单调递增（价差 ${q1q5Spread.toFixed(2)}%），多空策略可行` : "未呈单调分布，分组选股效果不稳定"}`,
+                    type: isMonotonic ? "good" : "warn",
+                  },
+                  ...(Math.abs(shortIc) < Math.abs(icMean) * 0.5 ? [{
+                    text: `短周期（${periods[0]}日）IC ${shortIc.toFixed(4)} 显著低于长周期，说明该因子属于中长周期信号`,
+                    type: "neutral" as const,
+                  }] : []),
+                ]
+
+                const recommendations: InsightItem[] = [
+                  ...(strength === "无效" ? [{
+                    text: "放弃或变换因子",
+                    sub: "尝试对因子取对数、排名变换（rank IC）或与其他因子组合使用",
+                    type: "bad" as const,
+                  }] : []),
+                  ...(strength === "强有效" ? [{
+                    text: "纳入多因子模型",
+                    sub: "与其他有效因子做正交化处理后组合，可在「策略 → 多因子模型」中使用",
+                    type: "good" as const,
+                  }] : []),
+                  {
+                    text: "扩展至更多标的做截面验证",
+                    sub: "单标的 IC 受样本限制，建议对同市场多只股票计算截面 IC 以验证普适性",
+                    type: "neutral" as const,
+                  },
+                  {
+                    text: "关注因子衰退",
+                    sub: "查看累计 IC 曲线斜率，若近期趋势转负说明因子有效性在衰减，应及时替换",
+                    type: "warn" as const,
+                  },
+                ]
+
+                return (
+                  <InsightBox
+                    verdict={verdict}
+                    summary={summary}
+                    findings={findings}
+                    recommendations={recommendations}
+                  />
+                )
+              })()}
 
               {/* Cumulative IC + Quantile Returns side by side */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
