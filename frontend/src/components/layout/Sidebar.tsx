@@ -9,19 +9,19 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/",          icon: "⬡",  label: "仪表盘" },
+  { to: "/",          icon: "🏠", label: "仪表盘" },
   { to: "/market",    icon: "📈", label: "行情" },
-  { to: "/strategies",icon: "⚙", label: "策略" },
-  { to: "/backtest",  icon: "◷",  label: "回测" },
-  { to: "/orders",    icon: "≡",  label: "订单" },
-  { to: "/portfolio", icon: "◈",  label: "持仓" },
-  { to: "/portfolio-optimizer", icon: "⬡", label: "组合优化" },
-  { to: "/risk",      icon: "⚑",  label: "风控" },
-  { to: "/factor",    icon: "λ",  label: "因子分析" },
-  { to: "/algolab",       icon: "∑",  label: "算法实验室" },
-  { to: "/live-strategy", icon: "▶",  label: "实盘策略" },
+  { to: "/strategies",icon: "🔧", label: "策略" },
+  { to: "/backtest",  icon: "🔬", label: "回测" },
+  { to: "/orders",    icon: "📋", label: "订单" },
+  { to: "/portfolio", icon: "💼", label: "持仓" },
+  { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化" },
+  { to: "/risk",      icon: "🛡️", label: "风控" },
+  { to: "/factor",    icon: "🔭", label: "因子分析" },
+  { to: "/algolab",       icon: "🧪", label: "算法实验室" },
+  { to: "/live-strategy", icon: "▶️",  label: "实盘策略" },
   { to: "/alerts",        icon: "🔔", label: "价格预警" },
-  { to: "/settings",      icon: "⚯",  label: "设置" },
+  { to: "/settings",      icon: "⚙️", label: "设置" },
 ]
 
 export function Sidebar() {
@@ -64,7 +64,7 @@ export function Sidebar() {
           className="flex items-center gap-3 w-full px-2 py-2 rounded-md text-sm text-[#8b949e] hover:text-[#f85149] hover:bg-[#2a1b1b] transition-colors"
           aria-label="退出登录"
         >
-          <span className="text-base leading-none w-5 text-center shrink-0">⏻</span>
+          <span className="text-base leading-none w-5 text-center shrink-0">🚪</span>
           <span className="hidden lg:block">退出</span>
         </button>
       </div>

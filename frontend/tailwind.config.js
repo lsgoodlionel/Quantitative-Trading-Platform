@@ -34,8 +34,10 @@ export default {
         danger: "#f85149",
       },
       fontFamily: {
-        mono: ["JetBrains Mono", "Fira Code", "ui-monospace", "monospace"],
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco",
+               "Cascadia Mono", "Segoe UI Mono", "Consolas", "Courier New", "monospace"],
+        sans: ["ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont",
+               "PingFang SC", "Microsoft YaHei", "Helvetica Neue", "Arial", "sans-serif"],
       },
       fontSize: {
         "2xs": ["0.65rem", "0.9rem"],
