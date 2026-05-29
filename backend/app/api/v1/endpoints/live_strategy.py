@@ -60,6 +60,7 @@ class StrategyInstanceResponse(BaseModel):
     orders_placed: int
     started_at: str | None
     stopped_at: str | None
+    paper: dict | None = None   # 纸面交易模拟结果
 
 
 # ── Deps ────────────────────────────────────────────────────
