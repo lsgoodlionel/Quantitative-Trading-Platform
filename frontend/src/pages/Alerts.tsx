@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
@@ -97,6 +98,27 @@ function AlertRow({ alert }: { alert: PriceAlert }) {
               </span>
             )}
           </div>
+
+          {/* 触发后操作引导 */}
+          {alert.is_triggered && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                to={`/orders`}
+                className="px-3 py-1.5 rounded text-[10px] font-medium border border-[#3fb950]/30 text-[#3fb950] bg-[#162a1e] hover:bg-[#3fb950]/15 transition-colors">
+                📋 立即下单 {alert.symbol}
+              </Link>
+              <Link
+                to={`/market?symbol=${alert.symbol}&market=${alert.market}`}
+                className="px-3 py-1.5 rounded text-[10px] border border-[#58a6ff]/30 text-[#58a6ff] hover:bg-[#58a6ff]/10 transition-colors">
+                📈 查看行情
+              </Link>
+              <Link
+                to={`/backtest?symbol=${alert.symbol}&market=${alert.market}`}
+                className="px-3 py-1.5 rounded text-[10px] border border-[#6e7681]/30 text-[#8b949e] hover:bg-[#21262d] transition-colors">
+                🔬 快速回测
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Actions */}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { Link } from "react-router-dom"
 import {
   AreaChart, Area, BarChart, Bar as RBar,
   LineChart, Line,
@@ -519,6 +520,45 @@ export function FactorAnalysis() {
                     findings={findings}
                     recommendations={recommendations}
                   />
+                )
+              })()}
+
+              {/* 因子有效性 → 策略类型推荐 */}
+              {(() => {
+                const icMean5 = result.ic_mean?.[5] ?? 0
+                const isPositive = icMean5 > 0
+                const isStrong = Math.abs(icMean5) >= 0.05
+                const strategies = isStrong
+                  ? (isPositive
+                    ? [{ name: "momentum", label: "价格动量", reason: "因子正向有效，适合趋势跟踪" },
+                       { name: "double_ma", label: "双均线交叉", reason: "结合均线捕捉趋势方向" }]
+                    : [{ name: "rsi_mean_reversion", label: "RSI 均值回归", reason: "因子负向，价格往往超买后回归" },
+                       { name: "bollinger", label: "布林带回归", reason: "结合波动率通道捕捉反转" }])
+                  : [{ name: "multi_factor", label: "多因子模型", reason: "单因子 IC 不足，建议组合多因子提升信号稳定性" }]
+
+                return (
+                  <div className="card border-[#30363d] space-y-3">
+                    <p className="text-xs font-semibold text-[#8b949e]">
+                      🎯 因子结果 → 推荐策略类型
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {strategies.map((s) => (
+                        <Link key={s.name}
+                          to={`/backtest?strategy=${s.name}`}
+                          className="flex-1 min-w-[140px] px-3 py-2.5 rounded-lg border border-[#58a6ff]/25 bg-[#111d2e] hover:bg-[#58a6ff]/10 transition-colors">
+                          <p className="text-xs font-medium text-[#58a6ff]">{s.label}</p>
+                          <p className="text-[10px] text-[#6e7681] mt-0.5">{s.reason}</p>
+                          <p className="text-[9px] text-[#58a6ff]/60 mt-1">→ 点击前往回测</p>
+                        </Link>
+                      ))}
+                      <Link to="/portfolio-optimizer"
+                        className="flex-1 min-w-[140px] px-3 py-2.5 rounded-lg border border-[#3fb950]/25 bg-[#0d2018] hover:bg-[#3fb950]/10 transition-colors">
+                        <p className="text-xs font-medium text-[#3fb950]">组合权重优化</p>
+                        <p className="text-[10px] text-[#6e7681] mt-0.5">用因子筛选结果调整持仓权重</p>
+                        <p className="text-[9px] text-[#3fb950]/60 mt-1">→ 点击前往组合优化</p>
+                      </Link>
+                    </div>
+                  </div>
                 )
               })()}
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import { Link } from "react-router-dom"
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from "recharts"
@@ -398,6 +399,24 @@ export function Risk() {
             </div>
           )}
 
+          {/* 违规后操作引导 */}
+          {summary && (summary.violations?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-[#f85149]/20 bg-[#1a0f0f] p-3 space-y-2">
+              <p className="text-xs font-semibold text-[#f85149]">⚡ 检测到风控违规，建议操作：</p>
+              <div className="flex flex-wrap gap-2">
+                <Link to="/portfolio" className="px-3 py-1.5 rounded text-xs border border-[#f85149]/30 text-[#f85149] hover:bg-[#f85149]/10 transition-colors">
+                  💼 查看超仓持仓
+                </Link>
+                <Link to="/orders" className="px-3 py-1.5 rounded text-xs border border-[#e3b341]/30 text-[#e3b341] hover:bg-[#e3b341]/10 transition-colors">
+                  📋 前往下单减仓
+                </Link>
+                <Link to="/live-strategy" className="px-3 py-1.5 rounded text-xs border border-[#6e7681]/30 text-[#8b949e] hover:bg-[#21262d] transition-colors">
+                  ⏸ 暂停运行策略
+                </Link>
+              </div>
+            </div>
+          )}
+
           {/* VaR Analysis */}
           <div>
             <div className="flex gap-1 mb-2">
@@ -416,6 +435,17 @@ export function Risk() {
               ))}
             </div>
             <VaRPanel market={market} />
+          </div>
+
+          {/* 风控 → 组合优化 引导 */}
+          <div className="rounded-lg border border-[#30363d] bg-[#161b22] p-3 space-y-2">
+            <p className="text-xs font-semibold text-[#8b949e]">💡 风控结果使用路径</p>
+            <div className="space-y-1.5 text-[10px] text-[#6e7681]">
+              <p>▸ VaR 过高（风险偏大）→ <Link to="/portfolio-optimizer" className="text-[#58a6ff] hover:underline">组合优化</Link> 重新分配权重，降低集中度</p>
+              <p>▸ 波动率持续偏高 → <Link to="/algolab" className="text-[#58a6ff] hover:underline">算法实验室 · GARCH</Link> 建立动态止损模型</p>
+              <p>▸ 回撤超限 → <Link to="/orders" className="text-[#58a6ff] hover:underline">订单中心</Link> 手动减仓，或 <Link to="/live-strategy" className="text-[#58a6ff] hover:underline">停止运行策略</Link></p>
+              <p>▸ 调整完毕 → 回到风控页重新运行 VaR 验证</p>
+            </div>
           </div>
         </div>
       </div>

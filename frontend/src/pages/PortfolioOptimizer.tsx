@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { format, subYears } from "date-fns"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
@@ -301,6 +302,51 @@ function ResultPanel({ result }: { result: PortfolioOptResult }) {
         findings={insight.findings}
         recommendations={insight.recommendations}
       />
+
+      {/* 下一步操作 CTA */}
+      <div className="card border-[#30363d] space-y-3">
+        <p className="text-xs font-semibold text-[#8b949e]">📍 优化完成，建议下一步</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+          <Link to="/risk"
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#f85149]/25 text-[#f85149] bg-[#1a0f0f] hover:bg-[#f85149]/10 transition-colors">
+            <span className="text-base">🛡️</span>
+            <div>
+              <p className="font-medium">验证风险水平</p>
+              <p className="text-[10px] text-[#f85149]/70">在风控页运行 VaR 确认组合风险</p>
+            </div>
+          </Link>
+          <Link to="/backtest"
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#58a6ff]/25 text-[#58a6ff] bg-[#111d2e] hover:bg-[#58a6ff]/10 transition-colors">
+            <span className="text-base">🔬</span>
+            <div>
+              <p className="font-medium">对权重最高标的回测</p>
+              <p className="text-[10px] text-[#58a6ff]/70">验证最优权重的历史表现</p>
+            </div>
+          </Link>
+          <Link to="/orders"
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#3fb950]/25 text-[#3fb950] bg-[#0d2018] hover:bg-[#3fb950]/10 transition-colors">
+            <span className="text-base">📋</span>
+            <div>
+              <p className="font-medium">执行再平衡</p>
+              <p className="text-[10px] text-[#3fb950]/70">按优化权重手动调整仓位</p>
+            </div>
+          </Link>
+        </div>
+        {/* 权重摘要供手动参考 */}
+        <div className="bg-[#0d1117] rounded-lg p-3 text-[10px] text-[#6e7681]">
+          <p className="font-medium text-[#8b949e] mb-1.5">优化权重（再平衡参考）</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(result.weights)
+              .sort(([,a],[,b]) => b - a)
+              .map(([sym, w]) => (
+                <span key={sym} className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5">
+                  <span className="font-mono text-[#e6edf3]">{sym}</span>
+                  <span className="ml-1 text-[#58a6ff]">{(w * 100).toFixed(1)}%</span>
+                </span>
+              ))}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

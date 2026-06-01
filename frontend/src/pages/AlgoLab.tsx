@@ -12,6 +12,7 @@ import Editor from "@monaco-editor/react"
 import { usePresets, useStrategySource, useValidateStrategy } from "@/hooks/useStrategy"
 import { SectionCard, ParamRow, MetaGrid, CHART_COLORS } from "@/pages/algolab/shared"
 import { MLPanel } from "@/pages/algolab/MLStrategyPanel"
+import { Link } from "react-router-dom"
 import { InsightBox } from "@/components/ui/InsightBox"
 
 // ── Shared helpers ────────────────────────────────────────────────
@@ -437,6 +438,29 @@ function KellyPanel() {
             ]}
           />
         </>}
+        {/* Kelly → 交易应用 */}
+        {result && result.edge > 0 && (
+          <div className="card border-[#3fb950]/25 space-y-2">
+            <p className="text-xs font-semibold text-[#3fb950]">✅ 正期望策略 — 如何应用凯利仓位</p>
+            <div className="flex flex-wrap gap-2">
+              <Link to="/live-strategy"
+                className="px-3 py-2 rounded-lg text-xs border border-[#3fb950]/30 text-[#3fb950] bg-[#0d2018] hover:bg-[#3fb950]/15 transition-colors">
+                <p className="font-medium">▶ 启动模拟盘</p>
+                <p className="text-[9px] text-[#3fb950]/70 mt-0.5">在策略参数中，每笔仓位不超过 {(result.recommended*100).toFixed(0)}%</p>
+              </Link>
+              <Link to="/backtest"
+                className="px-3 py-2 rounded-lg text-xs border border-[#58a6ff]/30 text-[#58a6ff] bg-[#111d2e] hover:bg-[#58a6ff]/15 transition-colors">
+                <p className="font-medium">🔬 验证策略胜率</p>
+                <p className="text-[9px] text-[#58a6ff]/70 mt-0.5">先回测确认胜率和盈亏比再实盘</p>
+              </Link>
+              <Link to="/risk"
+                className="px-3 py-2 rounded-lg text-xs border border-[#e3b341]/30 text-[#e3b341] bg-[#1a1400] hover:bg-[#e3b341]/15 transition-colors">
+                <p className="font-medium">🛡️ 设置风控上限</p>
+                <p className="text-[9px] text-[#e3b341]/70 mt-0.5">将 {(result.recommended*100).toFixed(0)}% 作为最大持仓比例</p>
+              </Link>
+            </div>
+          </div>
+        )}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">输入历史胜率和盈亏数据后点击计算</div>
         )}
@@ -537,6 +561,22 @@ function CointegrationPanel() {
             ]}
           />
         </>}
+        {/* 协整 → 配对策略回测 */}
+        {result?.is_cointegrated && (
+          <div className="card border-[#3fb950]/25 space-y-2">
+            <p className="text-xs font-semibold text-[#3fb950]">✅ 协整关系成立 — 下一步</p>
+            <div className="flex flex-wrap gap-2">
+              <Link to="/backtest?strategy=pairs_trading"
+                className="px-3 py-1.5 rounded text-xs border border-[#58a6ff]/30 text-[#58a6ff] hover:bg-[#58a6ff]/10 transition-colors">
+                🔬 用配对套利策略回测
+              </Link>
+              <Link to="/live-strategy?strategy=pairs_trading"
+                className="px-3 py-1.5 rounded text-xs border border-[#3fb950]/30 text-[#3fb950] hover:bg-[#3fb950]/10 transition-colors">
+                ▶ 启动配对套利模拟盘
+              </Link>
+            </div>
+          </div>
+        )}
         {!result && !isPending && (
           <div className="card flex items-center justify-center h-48 text-[#6e7681] text-sm">配置参数后点击运行检验</div>
         )}
@@ -834,6 +874,36 @@ export function AlgoLab() {
           </button>
         ))}
       </div>
+
+      {/* 使用场景说明 */}
+      {(() => {
+        const USAGE: Record<string, { when: string; next: string; nextPath: string }> = {
+          gbm:    { when: "估算标的未来价格分布、评估潜在收益和最坏情况", next: "→ 用波动率参数设置 GARCH 动态止损", nextPath: "" },
+          bsm:    { when: "期权定价、Delta 对冲、Greeks 分析", next: "→ 对冲策略可在策略编辑器实现", nextPath: "editor" },
+          garch:  { when: "预测近期波动率、设置动态止损位", next: "→ 将预测波动率用于风控 VaR 计算", nextPath: "/risk" },
+          kelly:  { when: "根据策略历史表现确定每笔交易仓位比例", next: "→ 应用到风控最大持仓限制", nextPath: "/risk" },
+          coint:  { when: "检验两支股票是否存在配对套利机会", next: "→ 通过后可用 pairs_trading 策略回测", nextPath: "/backtest?strategy=pairs_trading" },
+          hmm:    { when: "识别市场所处的牛/熊/震荡状态，指导仓位方向", next: "→ 结合状态信号调整策略参数", nextPath: "/live-strategy" },
+          editor: { when: "编写和验证自定义策略代码", next: "→ 保存后前往回测运行策略", nextPath: "/backtest" },
+          ml:     { when: "训练机器学习模型预测价格方向", next: "→ 信号可集成到自定义策略中", nextPath: "editor" },
+        }
+        const u = USAGE[tab]
+        if (!u) return null
+        return (
+          <div className="flex items-start gap-3 px-4 py-2 bg-[#0d1117] border border-[#21262d] rounded-lg mb-4 text-xs text-[#6e7681]">
+            <span className="text-[#58a6ff] shrink-0 mt-0.5">ℹ</span>
+            <span><strong className="text-[#8b949e]">使用时机：</strong>{u.when}</span>
+            {u.nextPath && (
+              <span className="ml-auto shrink-0">
+                {u.nextPath.startsWith("/")
+                  ? <Link to={u.nextPath} className="text-[#58a6ff] hover:underline">{u.next}</Link>
+                  : <button onClick={() => setTab(u.nextPath as typeof tab)} className="text-[#58a6ff] hover:underline">{u.next}</button>
+                }
+              </span>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Panel */}
       {tab === "gbm"   && <GBMPanel />}
