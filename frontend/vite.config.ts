@@ -17,10 +17,14 @@ export default defineConfig({
         // Docker 容器内用 backend 服务名；本地裸跑用 localhost
         target: process.env.BACKEND_URL ?? "http://localhost:8000",
         changeOrigin: true,
+        // data-config/status 探测最长 10s，WS 超时关闭探测最长 30s
+        timeout: 35000,
+        proxyTimeout: 35000,
       },
       "/ws": {
         target: process.env.WS_URL ?? "ws://localhost:8000",
         ws: true,
+        changeOrigin: true,
       },
     },
   },

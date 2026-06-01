@@ -193,12 +193,21 @@ interface CardProps {
   name: string
   meta: StrategyMeta
   description: string
-  onBacktest: () => void
+  onBacktest: (symbol: string, market: string) => void
 }
 
 function StrategyCard({ name, meta, description, onBacktest }: CardProps) {
+  const [symbol, setSymbol] = useState("")
+  const [market, setMarket] = useState(
+    meta.markets[0] === "美股" ? "US" : meta.markets[0] === "港股" ? "HK" : "A"
+  )
   const catCfg = CATEGORY_CFG[meta.category]
   const cplxCfg = COMPLEXITY_CFG[meta.complexity]
+
+  const placeholderSymbol =
+    market === "US" ? "如 AAPL" : market === "HK" ? "如 00700" : "如 000001"
+  const defaultSymbol =
+    market === "US" ? "AAPL" : market === "HK" ? "00700" : "000001"
 
   return (
     <div className="card flex flex-col gap-3 hover:border-[#30363d] transition-colors group">
@@ -280,14 +289,43 @@ function StrategyCard({ name, meta, description, onBacktest }: CardProps) {
         </div>
       )}
 
+      {/* 市场 + 标的快捷输入 */}
+      <div className="flex gap-1.5">
+        {/* 市场选择 */}
+        {meta.markets.length > 1 && (
+          <div className="flex rounded border border-[#30363d] overflow-hidden shrink-0">
+            {meta.markets.map((m) => {
+              const code = m === "美股" ? "US" : m === "港股" ? "HK" : "A"
+              return (
+                <button key={m} type="button"
+                  onClick={() => { setMarket(code); setSymbol("") }}
+                  className={`px-2 py-1 text-[10px] font-medium transition-colors ${
+                    market === code
+                      ? "bg-[#1f6feb]/20 text-[#58a6ff]"
+                      : "text-[#6e7681] hover:text-[#e6edf3] hover:bg-[#21262d]"
+                  }`}>{m === "美股" ? "🇺🇸" : m === "港股" ? "🇭🇰" : "🇨🇳"}{m.replace("股", "")}</button>
+              )
+            })}
+          </div>
+        )}
+        {/* 标的代码 */}
+        <input
+          type="text"
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          placeholder={placeholderSymbol}
+          className="input flex-1 text-xs font-mono py-1.5 min-w-0"
+        />
+      </div>
+
       {/* Action button */}
       <button
-        onClick={onBacktest}
+        onClick={() => onBacktest(symbol.trim() || defaultSymbol, market)}
         className="w-full py-2 rounded-md text-xs font-medium bg-[#1c2128] text-[#58a6ff]
                    border border-[#30363d] hover:bg-[#21262d] hover:border-[#58a6ff]/40
                    transition-all group-hover:text-[#79c0ff]"
       >
-        ▶ 开始回测
+        ▶ 开始回测 {symbol ? symbol : defaultSymbol}
       </button>
     </div>
   )
@@ -392,7 +430,7 @@ export function Strategies() {
                 name={s.name}
                 meta={meta}
                 description={s.description}
-                onBacktest={() => navigate(`/backtest?strategy=${s.name}`)}
+                onBacktest={(sym, mkt) => navigate(`/backtest?strategy=${s.name}&symbol=${sym}&market=${mkt}`)}
               />
             )
           })}

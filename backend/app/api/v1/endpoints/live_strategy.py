@@ -44,6 +44,7 @@ class StartStrategyRequest(BaseModel):
     frequency: str = Field("1d", description="K 线周期")
     params: dict = Field(default_factory=dict, description="策略参数")
     warmup_days: int = Field(120, ge=20, le=730, description="历史预热天数")
+    sim_days: int = Field(60, ge=7, le=365, description="模拟回测天数（最近 N 天）")
     instance_id: str | None = Field(None, description="自定义实例 ID（默认自动生成）")
 
 
@@ -120,6 +121,7 @@ async def start_live_strategy(
             params=body.params,
             data_service=svc,
             warmup_days=body.warmup_days,
+            sim_days=body.sim_days,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -91,6 +91,7 @@ class PaperPortfolio:
     buy_hold_return_pct: float = 0.0
     sim_start: str = ""
     sim_end: str = ""
+    sim_days: int = PAPER_SIM_DAYS   # 本次模拟使用的天数
 
     def current_equity(self, price: float) -> float:
         return self.cash + self.position * price
@@ -196,6 +197,7 @@ class PaperPortfolio:
             "buy_hold_return_pct": self.buy_hold_return_pct,
             "sim_start": self.sim_start,
             "sim_end": self.sim_end,
+            "sim_days": self.sim_days,
         }
 
 
@@ -300,6 +302,7 @@ def run_paper_simulation(
 
     portfolio.sim_start = str(sim_bars[0].time)[:10]
     portfolio.sim_end   = str(sim_bars[-1].time)[:10]
+    portfolio.sim_days  = sim_days
 
     # 初始化策略（用全部历史做 on_start）
     full_df = _bars_to_df(all_bars)
@@ -428,6 +431,7 @@ class StrategyEngine:
         params: dict,
         data_service: DataService,
         warmup_days: int = 120,
+        sim_days: int = PAPER_SIM_DAYS,
     ) -> StrategyInstance:
         """
         启动策略实例。
@@ -456,7 +460,7 @@ class StrategyEngine:
             raise ValueError(str(e)) from e
 
         end = date.today()
-        start = end - timedelta(days=max(warmup_days, PAPER_SIM_DAYS + 60))
+        start = end - timedelta(days=max(warmup_days, sim_days + 60))
         bars = await data_service.get_bars(
             symbol=symbol, market=market_enum, frequency=freq_enum, start=start, end=end,
         )
@@ -482,7 +486,7 @@ class StrategyEngine:
                     strategy_cls=strategy_cls,
                     params=params,
                     all_bars=bars,
-                    sim_days=PAPER_SIM_DAYS,
+                    sim_days=sim_days,
                 )
                 logger.info(
                     "Paper simulation done: %s — %d trades, return=%.1f%%",

@@ -143,32 +143,49 @@ function MarketDataSection({ market, isLoading, onRefresh, isRefreshing }: Marke
       </div>
 
       {/* Feed list */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-14 bg-[#21262d] rounded-lg animate-pulse" />
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {market.feeds.map(feed => (
-            <FeedRow key={feed.name} feed={feed} />
-          ))}
-        </div>
-      )}
+      <div className="space-y-2">
+        {isLoading
+          ? [1, 2, 3].map(i => (
+              <div key={i} className="h-14 bg-[#21262d] rounded-lg animate-pulse" />
+            ))
+          : market.feeds.map(feed => (
+              <FeedRow key={feed.name} feed={feed} />
+            ))
+        }
+      </div>
     </div>
   )
 }
 
 /** Wrapper 负责一次加载、两个市场共享数据 */
 function MarketDataChannels() {
-  const { data, isLoading, refetch, isFetching } = useDataConfigStatus()
+  const { data, isLoading, isError, refetch, isFetching } = useDataConfigStatus()
 
-  if (!data && !isLoading) {
+  if (isError && !data) {
     return (
-      <p className="text-xs text-[#f85149] py-2">
-        无法加载数据通道状态
-      </p>
+      <div className="flex items-center gap-3 py-2">
+        <span className="w-2 h-2 rounded-full bg-[#f85149] shrink-0" />
+        <p className="text-xs text-[#8b949e] flex-1">
+          无法连接后端，数据通道状态暂不可用
+        </p>
+        <button
+          className="btn btn-ghost text-xs py-1 px-3 shrink-0"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          {isFetching ? <Spinner size="sm" /> : "重新检测"}
+        </button>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="h-14 bg-[#21262d] rounded-lg animate-pulse" />
+        ))}
+      </div>
     )
   }
 
@@ -239,37 +256,49 @@ function AlpacaConfigSection() {
 
   async function handleSave() {
     if (!apiKey || !apiSecret) return
-    await save.mutateAsync({
-      api_key: apiKey,
-      api_secret: apiSecret,
-      base_url: paperMode ? ALPACA_PAPER_URL : ALPACA_LIVE_URL,
-      paper_mode: paperMode,
-    })
-    setEditing(false)
-    setTestResult(null)
+    try {
+      await save.mutateAsync({
+        api_key: apiKey,
+        api_secret: apiSecret,
+        base_url: paperMode ? ALPACA_PAPER_URL : ALPACA_LIVE_URL,
+        paper_mode: paperMode,
+      })
+      setEditing(false)
+      setTestResult(null)
+    } catch {
+      // save.error is shown in the form below
+    }
   }
 
   async function handleDelete() {
     if (!confirm("确认清除 Alpaca 配置？")) return
-    await del.mutateAsync()
-    setTestResult(null)
+    try {
+      await del.mutateAsync()
+      setTestResult(null)
+    } catch {
+      // ignore
+    }
   }
 
   async function handleTest() {
     setTestResult(null)
-    const r = await test.mutateAsync()
-    if (r.ok) {
-      setTestResult(`✓ 连接成功 · 账户 ${r.account_id} · 购买力 $${r.buying_power?.toLocaleString()}`)
-    } else {
-      // Try to extract a clean message from Alpaca's JSON error string
-      let errMsg = r.error ?? "连接失败"
-      try {
-        const parsed = JSON.parse(errMsg)
-        if (parsed?.message) errMsg = parsed.message
-      } catch {
-        // Not JSON — use as-is
+    try {
+      const r = await test.mutateAsync()
+      if (r.ok) {
+        setTestResult(`✓ 连接成功 · 账户 ${r.account_id} · 购买力 $${r.buying_power?.toLocaleString()}`)
+      } else {
+        let errMsg = r.error ?? "连接失败"
+        try {
+          const parsed = JSON.parse(errMsg)
+          if (parsed?.message) errMsg = parsed.message
+        } catch {
+          // Not JSON — use as-is
+        }
+        setTestResult(`✗ ${errMsg}`)
       }
-      setTestResult(`✗ ${errMsg}`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "网络请求失败，请检查服务是否运行"
+      setTestResult(`✗ ${msg}`)
     }
   }
 
@@ -280,8 +309,32 @@ function AlpacaConfigSection() {
   const isDeleting = del.isPending
   const isTesting = test.isPending
 
+  // Paper 密钥（PK 前缀）与实盘 URL 不匹配检测
+  const keyHint = alpaca?.key_hint ?? ""
+  const isPaperKey = keyHint.startsWith("PK")
+  const isLiveUrl = alpaca?.paper_mode === false
+  const hasKeyMismatch = isConfigured && isPaperKey && isLiveUrl && !editing
+
   return (
     <div className="space-y-4">
+      {/* 密钥与模式不匹配警告 */}
+      {hasKeyMismatch && (
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border border-[#e3b341]/40 bg-[#272111]/60 text-xs text-[#e3b341]">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <div className="space-y-0.5">
+            <p className="font-medium">密钥类型与交易模式不匹配</p>
+            <p className="text-[#c9a227]/80">
+              当前密钥以 <code className="font-mono bg-[#1c1a0a] px-1 rounded">PK</code> 开头，
+              这是 <strong>Paper Trading</strong> 密钥，但配置的 API 地址为实盘（Live）。
+              Paper 密钥无法连接实盘，测试连接将返回"未授权"错误。
+            </p>
+            <p className="text-[#c9a227]/80 mt-0.5">
+              解决方法：点击「修改密钥」→ 将「交易模式」切换为「模拟盘」，重新保存。
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Status row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">

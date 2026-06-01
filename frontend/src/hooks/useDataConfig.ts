@@ -30,6 +30,7 @@ export function useDataConfigStatus(enabled = true) {
     queryFn: () => api.get<DataConfigStatus>("/api/v1/data-config/status"),
     enabled,
     staleTime: 1000 * 60 * 2,   // 2 分钟内不重复探测
-    retry: false,                // 探测超时不重试
+    retry: 2,                   // 允许重试 2 次，应对 Docker 冷启动竞态
+    retryDelay: 4000,           // 每次重试等待 4 秒（探测本身已有 8-10 秒超时）
   })
 }

@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react"
+import { useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { CandleChart } from "@/components/charts/CandleChart"
@@ -216,6 +217,7 @@ interface QueryPanelProps {
 }
 
 function QueryPanel({ initialSymbol, initialMarket }: QueryPanelProps) {
+  const navigate = useNavigate()
   const initialCfg = MARKET_CONFIGS.find(c => c.value === initialMarket) ?? MARKET_CONFIGS[0]
   const [marketCfg, setMarketCfg] = useState<MarketConfig>(initialCfg)
   const [symbol, setSymbol] = useState(initialSymbol)
@@ -366,6 +368,21 @@ function QueryPanel({ initialSymbol, initialMarket }: QueryPanelProps) {
           <span className="text-[#6e7681] text-sm">
             {data?.symbol} · {marketCfg.label} · {FREQUENCY_LABELS[frequency]}
           </span>
+          {/* 快捷操作 */}
+          {data?.symbol && (
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={() => navigate(`/backtest?symbol=${data.symbol}&market=${marketCfg.value}`)}
+                className="px-3 py-1 rounded text-xs border border-[#58a6ff]/30 text-[#58a6ff] hover:bg-[#58a6ff]/10 transition-colors">
+                🔬 回测此标的
+              </button>
+              <button
+                onClick={() => navigate(`/live-strategy?symbol=${data.symbol}&market=${marketCfg.value}`)}
+                className="px-3 py-1 rounded text-xs border border-[#3fb950]/30 text-[#3fb950] hover:bg-[#3fb950]/10 transition-colors">
+                ▶ 模拟此标的
+              </button>
+            </div>
+          )}
         </div>
       )}
 

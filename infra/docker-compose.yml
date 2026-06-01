@@ -84,7 +84,8 @@ services:
       - ../frontend/src:/app/src
       - ../frontend/index.html:/app/index.html
     environment:
-      VITE_API_URL:  http://localhost:8000
+      # VITE_API_URL 不设置 → API_BASE="" → 所有请求走 Vite proxy（同源，无 CORS）
+      # 浏览器: localhost:3000/api/... → Vite proxy → backend:8000/api/...
       VITE_WS_URL:   ws://localhost:8000
       BACKEND_URL:   http://backend:8000
       WS_URL:        ws://backend:8000

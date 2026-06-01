@@ -8,20 +8,26 @@ interface NavItem {
   label: string
 }
 
+// ── 导航分组（按用户工作流顺序）────────────────────────────────
+// 1.看行情 → 2.选策略 → 3.回测 → 4.模拟/实盘 → 5.监控 → 6.研究 → 7.工具
 const NAV_ITEMS: NavItem[] = [
-  { to: "/",          icon: "🏠", label: "仪表盘" },
-  { to: "/market",    icon: "📈", label: "行情" },
-  { to: "/strategies",icon: "🔧", label: "策略" },
-  { to: "/backtest",  icon: "🔬", label: "回测" },
-  { to: "/orders",    icon: "📋", label: "订单" },
-  { to: "/portfolio", icon: "💼", label: "持仓" },
-  { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化" },
-  { to: "/risk",      icon: "🛡️", label: "风控" },
-  { to: "/factor",    icon: "🔭", label: "因子分析" },
-  { to: "/algolab",       icon: "🧪", label: "算法实验室" },
-  { to: "/live-strategy", icon: "▶️",  label: "实盘策略" },
-  { to: "/alerts",        icon: "🔔", label: "价格预警" },
-  { to: "/settings",      icon: "⚙️", label: "设置" },
+  // ── 核心交易流程 ──────────────────────────
+  { to: "/",              icon: "🏠", label: "仪表盘"    },
+  { to: "/market",        icon: "📈", label: "行情"      },
+  { to: "/strategies",    icon: "🔧", label: "策略"      },
+  { to: "/backtest",      icon: "🔬", label: "回测"      },
+  { to: "/live-strategy", icon: "▶️",  label: "模拟/实盘" },
+  // ── 监控 ─────────────────────────────────
+  { to: "/orders",        icon: "📋", label: "订单"      },
+  { to: "/portfolio",     icon: "💼", label: "持仓"      },
+  { to: "/risk",          icon: "🛡️", label: "风控"      },
+  { to: "/alerts",        icon: "🔔", label: "价格预警"  },
+  // ── 量化研究 ─────────────────────────────
+  { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化"   },
+  { to: "/factor",              icon: "🔭", label: "因子分析"   },
+  { to: "/algolab",             icon: "🧪", label: "算法实验室" },
+  // ── 系统 ─────────────────────────────────
+  { to: "/settings",      icon: "⚙️", label: "设置"      },
 ]
 
 export function Sidebar() {

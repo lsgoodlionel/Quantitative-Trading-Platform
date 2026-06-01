@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { EquityCurve } from "@/components/charts/EquityCurve"
@@ -172,9 +172,32 @@ function ConfigPanel({ form, strategies, isLoading, error, onChange, onSubmit, s
 }
 
 // ── Tab: 回测结果 ─────────────────────────────────────────────
-function BacktestResultPanel({ result }: { result: BacktestResult }) {
+interface BacktestResultPanelProps {
+  result: BacktestResult
+  /** 原始回测配置，用于"启动模拟盘"参数透传 */
+  form?: BacktestRequest
+}
+
+function BacktestResultPanel({ result, form }: BacktestResultPanelProps) {
+  const navigate = useNavigate()
   const m = result.metrics
   const [resultTab, setResultTab] = useState<"overview" | "drawdown" | "monthly" | "trades">("overview")
+
+  /** 是否达到模拟盘门槛（Sharpe>0.5, 回撤<30%, 正收益） */
+  const isQualified = m.sharpe_ratio >= 0.5 && Math.abs(m.max_drawdown_pct) < 30 && m.total_return_pct > 0
+
+  /** 携带参数跳转到模拟盘 */
+  function handleLaunchPaper() {
+    if (!form) { navigate("/live-strategy"); return }
+    const params = new URLSearchParams({
+      strategy: form.strategy_name,
+      symbol:   form.symbol,
+      market:   form.market,
+      freq:     form.frequency,
+      params:   JSON.stringify(form.params ?? {}),
+    })
+    navigate(`/live-strategy?${params.toString()}`)
+  }
 
   const RESULT_TABS = [
     { key: "overview" as const, label: "总览" },
@@ -256,6 +279,35 @@ function BacktestResultPanel({ result }: { result: BacktestResult }) {
           <div className="card">
             <h3 className="text-sm font-semibold text-[#e6edf3] mb-3">净值曲线</h3>
             <EquityCurve data={result.equity_curve} initialCash={result.initial_cash} height={240} />
+          </div>
+
+          {/* ── 下一步 CTA ── */}
+          <div className={`rounded-xl border p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+            isQualified
+              ? "border-[#3fb950]/30 bg-[#0d2018]"
+              : "border-[#e3b341]/25 bg-[#1a1500]"
+          }`}>
+            <div>
+              <p className={`text-sm font-semibold mb-1 ${isQualified ? "text-[#3fb950]" : "text-[#e3b341]"}`}>
+                {isQualified ? "✅ 回测指标达标，可进入模拟验证" : "⚠ 回测结果仅供参考，建议先在模拟盘验证"}
+              </p>
+              <p className="text-xs text-[#6e7681]">
+                {isQualified
+                  ? `Sharpe ${m.sharpe_ratio.toFixed(2)} · 回撤 ${m.max_drawdown_pct.toFixed(1)}% · 收益 +${m.total_return_pct.toFixed(1)}%，以相同参数启动 60 天模拟盘`
+                  : "历史回测不代表未来表现，在真实市场数据上模拟验证后再考虑实盘"}
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handleLaunchPaper}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  isQualified
+                    ? "bg-[#3fb950]/15 border border-[#3fb950]/40 text-[#3fb950] hover:bg-[#3fb950]/25"
+                    : "bg-[#e3b341]/10 border border-[#e3b341]/30 text-[#e3b341] hover:bg-[#e3b341]/20"
+                }`}>
+                ▶ 启动模拟盘
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -762,20 +814,39 @@ export function Backtest() {
   const [result, setResult] = useState<BacktestResult | null>(null)
   const [activeTab, setActiveTab] = useState<MainTab>("backtest")
 
-  const [form, setForm] = useState<BacktestRequest>({
-    strategy_name: searchParams.get("strategy") ?? "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(2),
-    end_date: today(),
-    initial_cash: 100_000,
-    params: {},
+  const [form, setForm] = useState<BacktestRequest>(() => {
+    const mkt = (searchParams.get("market") as Market) ?? "US"
+    const cfg = MARKET_CFGS.find((c) => c.value === mkt) ?? MARKET_CFGS[0]
+    let params: Record<string, unknown> = {}
+    try { params = JSON.parse(searchParams.get("params") ?? "{}") } catch {}
+    return {
+      strategy_name: searchParams.get("strategy") ?? "double_ma",
+      symbol:        searchParams.get("symbol")   ?? "AAPL",
+      market:        mkt,
+      frequency:     cfg.defaultFreq,
+      start_date:    yearsAgo(2),
+      end_date:      today(),
+      initial_cash:  100_000,
+      params,
+    }
   })
 
   useEffect(() => {
-    const s = searchParams.get("strategy")
-    if (s) setForm((prev) => ({ ...prev, strategy_name: s }))
+    const s   = searchParams.get("strategy")
+    const sym = searchParams.get("symbol")
+    const mkt = searchParams.get("market") as Market | null
+    let params: Record<string, unknown> = {}
+    try { params = JSON.parse(searchParams.get("params") ?? "{}") } catch {}
+
+    if (s || sym || mkt) {
+      setForm((prev) => ({
+        ...prev,
+        ...(s   ? { strategy_name: s } : {}),
+        ...(sym ? { symbol: sym }       : {}),
+        ...(mkt ? { market: mkt }       : {}),
+        ...(Object.keys(params).length ? { params } : {}),
+      }))
+    }
   }, [searchParams])
 
   function updateForm<K extends keyof BacktestRequest>(key: K, val: BacktestRequest[K]) {
@@ -841,7 +912,7 @@ export function Backtest() {
                 />
               </div>
             )}
-            {result && !isPending && <BacktestResultPanel result={result} />}
+            {result && !isPending && <BacktestResultPanel result={result} form={form} />}
           </div>
         </div>
       )}

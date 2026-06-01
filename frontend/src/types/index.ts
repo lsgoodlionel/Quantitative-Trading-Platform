@@ -225,6 +225,41 @@ export interface Strategy {
 // ── 实盘策略 ──────────────────────────────────────────────────
 export type LiveStrategyState = "idle" | "running" | "stopped" | "error"
 
+export interface PaperTrade {
+  timestamp: string
+  side: "BUY" | "SELL"
+  price: number
+  qty: number
+  value: number
+  realized_pnl: number
+  signal_reason: string
+}
+
+export interface PaperEquityPoint {
+  time: string
+  value: number
+  pnl_pct: number
+}
+
+export interface PaperSimResult {
+  initial_cash: number
+  cash: number
+  position: number
+  avg_cost: number
+  equity_curve: PaperEquityPoint[]
+  trades: PaperTrade[]
+  total_return_pct: number
+  sharpe_ratio: number
+  max_drawdown_pct: number
+  win_rate_pct: number
+  profit_factor: number
+  total_trades: number
+  buy_hold_return_pct: number
+  sim_start: string
+  sim_end: string
+  sim_days: number
+}
+
 export interface LiveStrategyInstance {
   instance_id: string
   strategy_name: string
@@ -238,6 +273,7 @@ export interface LiveStrategyInstance {
   orders_placed: number
   started_at: string | null
   stopped_at: string | null
+  paper: PaperSimResult | null
 }
 
 export interface StartStrategyRequest {
@@ -247,6 +283,7 @@ export interface StartStrategyRequest {
   frequency: string
   params: Record<string, unknown>
   warmup_days: number
+  sim_days: number
   instance_id?: string
 }
 

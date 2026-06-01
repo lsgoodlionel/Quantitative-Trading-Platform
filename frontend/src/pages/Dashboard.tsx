@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react"
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip,
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts"
 import { AppShell } from "@/components/layout/AppShell"
 import { useAccount, usePositions } from "@/hooks/usePositions"
@@ -248,69 +247,66 @@ function ActivityFeed({ orders, currency }: { orders: LiveOrder[]; currency: str
   )
 }
 
-// ── Sparkline (simulated intraday equity) ─────────────────────
+// ── Account Summary Card ───────────────────────────────────────
+// 用真实账户数据替换了原先的合成净值曲线（EquitySparkline 使用 Math.sin 生成假数据，已移除）
 
-function EquitySparkline({
+function AccountSummaryCard({
   portfolioValue,
+  cash,
+  buyingPower,
+  openPositions,
   currency,
   accentColor,
 }: {
   portfolioValue: number
+  cash: number
+  buyingPower: number
+  openPositions: Position[]
   currency: string
   accentColor: string
 }) {
-  // Generate a synthetic intraday sparkline from portfolio value with small noise
-  const points = useMemo(() => {
-    const base = portfolioValue * 0.992
-    return Array.from({ length: 20 }, (_, i) => {
-      const noise = (Math.sin(i * 1.5) * 0.004 + Math.cos(i * 0.8) * 0.003) * portfolioValue
-      const trend = (i / 19) * portfolioValue * 0.008
-      return { t: `${8 + Math.floor(i * 0.4)}:${String((i * 17) % 60).padStart(2, "0")}`, v: base + noise + trend }
-    })
-  }, [portfolioValue])
-
-  const change = points[points.length - 1].v - points[0].v
-  const changePct = (change / points[0].v) * 100
+  const investedValue = portfolioValue - cash
+  const investedPct   = portfolioValue > 0 ? (investedValue / portfolioValue) * 100 : 0
 
   return (
     <div>
-      <div className="flex items-baseline gap-2 mb-2">
+      <div className="flex items-baseline gap-2 mb-3">
         <span className="font-mono text-2xl font-bold text-[#e6edf3]">
           {fmt(currency, portfolioValue)}
         </span>
-        <span className={`text-sm font-mono ${pnlColor(change)}`}>
-          {pnlSign(change)}{changePct.toFixed(2)}%
-        </span>
+        <span className="text-xs text-[#6e7681]">组合总值</span>
       </div>
-      <div style={{ height: 60 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={points} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
-            <defs>
-              <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={accentColor} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
-            <XAxis dataKey="t" hide />
-            <YAxis domain={["auto", "auto"]} hide />
-            <ReTooltip
-              formatter={(v: number) => [`${currency}${v.toFixed(2)}`, "净值"]}
-              contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 6, fontSize: 11 }}
-              labelStyle={{ color: "#8b949e" }}
-              itemStyle={{ color: "#e6edf3" }}
-            />
-            <Area
-              type="monotone"
-              dataKey="v"
-              stroke={accentColor}
-              strokeWidth={1.5}
-              fill="url(#equityGrad)"
-              dot={false}
-              isAnimationActive={false}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+
+      {/* 资金分布 bar */}
+      <div className="mb-3">
+        <div className="flex items-center justify-between text-[10px] text-[#6e7681] mb-1">
+          <span>持仓 {investedPct.toFixed(1)}%</span>
+          <span>现金 {(100 - investedPct).toFixed(1)}%</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-[#21262d] overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${Math.min(investedPct, 100)}%`, background: accentColor }} />
+        </div>
+      </div>
+
+      {/* 关键数字 */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-[#0d1117] rounded-lg px-3 py-2">
+          <p className="text-[10px] text-[#6e7681]">可用资金</p>
+          <p className="font-mono text-sm font-semibold text-[#e6edf3]">{fmt(currency, cash)}</p>
+        </div>
+        <div className="bg-[#0d1117] rounded-lg px-3 py-2">
+          <p className="text-[10px] text-[#6e7681]">购买力</p>
+          <p className="font-mono text-sm font-semibold text-[#e6edf3]">{fmt(currency, buyingPower)}</p>
+        </div>
+        <div className="bg-[#0d1117] rounded-lg px-3 py-2">
+          <p className="text-[10px] text-[#6e7681]">持仓市值</p>
+          <p className="font-mono text-sm font-semibold" style={{ color: accentColor }}>{fmt(currency, investedValue)}</p>
+        </div>
+        <div className="bg-[#0d1117] rounded-lg px-3 py-2">
+          <p className="text-[10px] text-[#6e7681]">持仓标的</p>
+          <p className="font-mono text-sm font-semibold text-[#e6edf3]">{openPositions.length} 个</p>
+        </div>
       </div>
     </div>
   )
@@ -510,6 +506,9 @@ export function Dashboard() {
   return (
     <AppShell title="仪表盘" help={PAGE_HELP.dashboard}>
 
+      {/* ── 智能交易引导（置顶，首屏可见） ── */}
+      <TradingWorkflow />
+
       {/* ── Market Selector ── */}
       <div className="flex gap-1 mb-5 bg-[#161b22] rounded-lg p-1 w-fit border border-[#21262d]">
         {MARKETS.map((m) => {
@@ -582,14 +581,22 @@ export function Dashboard() {
       {/* ── Middle Row: Equity + Composition + Risk ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
 
-        {/* Equity sparkline */}
+        {/* Account summary (real data) */}
         <div className="card lg:col-span-1">
           <div className="card-header mb-3">
-            <h2 className="text-sm font-semibold text-[#e6edf3]">净值走势（模拟日内）</h2>
+            <h2 className="text-sm font-semibold text-[#e6edf3]">账户概览</h2>
+            <span className="text-[10px] text-[#6e7681]">{cfg.flag} {cfg.label}</span>
           </div>
           {portfolioValue > 0
-            ? <EquitySparkline portfolioValue={portfolioValue} currency={cfg.currency} accentColor={cfg.accent} />
-            : <p className="text-[#6e7681] text-sm py-4 text-center">暂无数据</p>
+            ? <AccountSummaryCard
+                portfolioValue={portfolioValue}
+                cash={cash}
+                buyingPower={account?.buying_power ?? cash}
+                openPositions={openPositions}
+                currency={cfg.currency}
+                accentColor={cfg.accent}
+              />
+            : <p className="text-[#6e7681] text-sm py-4 text-center">暂无账户数据</p>
           }
         </div>
 
@@ -639,8 +646,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* ── 智能交易引导工作流 ── */}
-      <TradingWorkflow />
+      {/* ── 快捷入口提示（对首次访问用户） ── */}
 
     </AppShell>
   )

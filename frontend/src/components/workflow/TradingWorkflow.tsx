@@ -744,6 +744,7 @@ export function TradingWorkflow() {
         frequency: "1d",
         params: selectedStrategy.params as Record<string, unknown>,
         warmup_days: 120,
+        sim_days: 60,
       })
       setState(s => ({
         ...s,
