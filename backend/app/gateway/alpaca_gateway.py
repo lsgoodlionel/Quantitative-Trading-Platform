@@ -27,42 +27,59 @@ logger = logging.getLogger(__name__)
 _EXECUTOR = None  # 使用默认 ThreadPoolExecutor
 
 
-def _get_trading_client():
-    """延迟导入 + 懒加载，避免没安装 alpaca-py 时启动失败。"""
+def _build_trading_client(api_key: str, secret_key: str, paper: bool):
+    """根据传入凭证构建 TradingClient，避免依赖全局 settings。"""
     try:
         from alpaca.trading.client import TradingClient
-        return TradingClient(
-            api_key=settings.alpaca_api_key,
-            secret_key=settings.alpaca_secret_key,
-            paper=settings.alpaca_paper,
-        )
+        return TradingClient(api_key=api_key, secret_key=secret_key, paper=paper)
     except ImportError as e:
-        raise RuntimeError(
-            "alpaca-py not installed. Run: pip install alpaca-py"
-        ) from e
+        raise RuntimeError("alpaca-py not installed. Run: pip install alpaca-py") from e
+
+
+# 向后兼容：使用 settings 中的凭证
+def _get_trading_client():
+    return _build_trading_client(
+        api_key=settings.alpaca_api_key,
+        secret_key=settings.alpaca_secret_key,
+        paper=settings.alpaca_paper,
+    )
 
 
 class AlpacaGateway(TradingGateway):
     """
-    Alpaca 实盘网关（美股）。
+    Alpaca 实盘/模拟盘网关（美股）。
 
     特性:
-    - 支持沙盒（paper）和实盘切换
+    - 支持 Paper Trading（Alpaca 模拟账户）和 Live Trading（真实资金）
     - 零佣金，含 SEC/FINRA 规费
     - 美股市价单/限价单
+    - 可通过构造函数直接传入 API 凭证（优先于 settings）
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        secret_key: str | None = None,
+        paper: bool = True,
+    ) -> None:
+        self._api_key = api_key
+        self._secret_key = secret_key
+        self._paper = paper
         self._client = None
         self._connected = False
 
     async def connect(self) -> None:
         loop = asyncio.get_event_loop()
-        self._client = await loop.run_in_executor(None, _get_trading_client)
+        if self._api_key and self._secret_key:
+            self._client = await loop.run_in_executor(
+                None, _build_trading_client, self._api_key, self._secret_key, self._paper
+            )
+        else:
+            self._client = await loop.run_in_executor(None, _get_trading_client)
         # 验证连接：拉取账户信息
         await self.get_account()
         self._connected = True
-        mode = "PAPER" if settings.alpaca_paper else "LIVE"
+        mode = "PAPER" if self._paper else "LIVE"
         logger.info("Alpaca gateway connected (%s mode)", mode)
 
     async def disconnect(self) -> None:

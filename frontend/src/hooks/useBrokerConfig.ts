@@ -60,6 +60,7 @@ export interface TradingMode {
   configured: boolean
   paper_mode: boolean
   mode_label: string
+  gateway_type: "alpaca_paper" | "alpaca_live" | "local_paper" | "unknown"
   base_url?: string
 }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { useSearchParams } from "react-router-dom"
+import { useSearchParams, Link } from "react-router-dom"
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip as ReTooltip, ResponsiveContainer, ReferenceLine,
@@ -979,7 +979,28 @@ export function LiveStrategy() {
   }
 
   return (
-    <AppShell title="实盘 / 模拟盘" help={PAGE_HELP["live-strategy"]}>
+    <AppShell title="策略自动交易" help={PAGE_HELP["live-strategy"]}>
+
+      {/* 功能说明横幅 */}
+      <div className="flex items-start gap-3 mb-5 px-4 py-3 rounded-xl border border-[#58a6ff]/20 bg-[#0d1421]">
+        <span className="text-xl mt-0.5">🤖</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[#e6edf3] mb-1">量化策略自动执行</p>
+          <p className="text-xs text-[#8b949e] leading-relaxed">
+            在此选择策略、标的和参数，系统将在历史数据上运行<strong className="text-[#e6edf3]">模拟盘</strong>（回放真实行情，本地纸面撮合），
+            看到净值曲线和成交记录。策略满意后，可在
+            <Link to="/orders" className="text-[#58a6ff] underline mx-1">订单中心</Link>
+            手动下单，或等待 Alpaca 实盘接入功能上线。
+          </p>
+        </div>
+        <div className="shrink-0 flex gap-2">
+          <Link to="/orders"
+            className="px-3 py-1.5 rounded text-xs border border-[#3fb950]/30 text-[#3fb950] hover:bg-[#3fb950]/10 transition-colors whitespace-nowrap">
+            📋 手动下单
+          </Link>
+        </div>
+      </div>
+
       {/* 头部操作行 */}
       <div className="flex items-center justify-between mb-5">
         <div>

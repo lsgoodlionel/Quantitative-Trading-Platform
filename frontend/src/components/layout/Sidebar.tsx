@@ -16,9 +16,9 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/market",        icon: "📈", label: "行情"      },
   { to: "/strategies",    icon: "🔧", label: "策略"      },
   { to: "/backtest",      icon: "🔬", label: "回测"      },
-  { to: "/live-strategy", icon: "▶️",  label: "模拟/实盘" },
+  { to: "/live-strategy", icon: "🤖",  label: "策略交易"  },
   // ── 监控 ─────────────────────────────────
-  { to: "/orders",        icon: "📋", label: "订单"      },
+  { to: "/orders",        icon: "📋", label: "手动下单"  },
   { to: "/portfolio",     icon: "💼", label: "持仓"      },
   { to: "/risk",          icon: "🛡️", label: "风控"      },
   { to: "/alerts",        icon: "🔔", label: "价格预警"  },

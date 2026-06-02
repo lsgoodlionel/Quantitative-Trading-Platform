@@ -22,8 +22,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
     logger.info("Database connection pool ready")
 
-    # 初始化 OMS（纸面交易模式 — 无真实券商时自动启用）
-    from app.oms.manager import init_paper_order_manager
+    # 初始化 OMS：自动检测 Redis 中的 Alpaca 配置
+    # - 已配置 Alpaca → AlpacaGateway (Paper/Live) 处理美股
+    # - 未配置 Alpaca → PaperGateway（本地纸面交易）
+    from app.oms.manager import init_hybrid_order_manager
     from app.core.redis import get_redis_pool
     import redis.asyncio as aioredis
     try:
@@ -32,7 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         redis_client = None
         logger.warning("Redis unavailable, OMS events will not be published")
-    await init_paper_order_manager(redis_client=redis_client)
+    await init_hybrid_order_manager(redis_client=redis_client)
 
     yield
 

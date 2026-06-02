@@ -330,3 +330,70 @@ async def init_paper_order_manager(redis_client=None) -> OrderManager:
     await _manager.start()
     logger.info("Paper trading OMS initialized for markets: US / HK / A")
     return _manager
+
+
+async def init_hybrid_order_manager(redis_client=None) -> OrderManager:
+    """
+    智能混合 OMS 初始化。
+
+    自动检测 Redis 中的 Alpaca 配置：
+    - 若配置了 Alpaca → US 市场使用 AlpacaGateway（Paper 或 Live）
+    - 若未配置 → US 市场回退到 PaperGateway
+    - HK / A 市场始终使用 PaperGateway（待接入富途等网关）
+
+    Returns:
+        OrderManager: 已启动的订单管理器，同时设置全局 _manager
+    """
+    from app.gateway.paper_gateway import PaperGateway
+
+    global _manager
+    _manager = OrderManager(redis_client=redis_client)
+
+    # ── 检测 Alpaca 配置 ──────────────────────────────────────
+    alpaca_cfg: dict[str, str] = {}
+    if redis_client:
+        try:
+            raw = await redis_client.hgetall("broker_config:alpaca")
+            if raw:
+                alpaca_cfg = {
+                    k.decode() if isinstance(k, bytes) else k:
+                    v.decode() if isinstance(v, bytes) else v
+                    for k, v in raw.items()
+                }
+        except Exception as e:
+            logger.warning("Failed to read Alpaca config from Redis: %s", e)
+
+    # ── US 市场 ───────────────────────────────────────────────
+    if alpaca_cfg.get("api_key") and alpaca_cfg.get("api_secret"):
+        paper_mode = alpaca_cfg.get("paper_mode", "true").lower() == "true"
+        try:
+            from app.gateway.alpaca_gateway import AlpacaGateway
+            gw_us = AlpacaGateway(
+                api_key=alpaca_cfg["api_key"],
+                secret_key=alpaca_cfg["api_secret"],
+                paper=paper_mode,
+            )
+            await gw_us.connect()
+            _manager.register_gateway("US", gw_us)
+            mode_label = "Paper (Alpaca)" if paper_mode else "Live (Alpaca ⚠ 真实资金)"
+            logger.info("US market: AlpacaGateway connected (%s)", mode_label)
+        except Exception as e:
+            logger.warning("AlpacaGateway connection failed, falling back to PaperGateway: %s", e)
+            gw_us = PaperGateway(market="US", initial_cash=1_000_000.0, currency="USD")
+            await gw_us.connect()
+            _manager.register_gateway("US", gw_us)
+    else:
+        gw_us = PaperGateway(market="US", initial_cash=1_000_000.0, currency="USD")
+        await gw_us.connect()
+        _manager.register_gateway("US", gw_us)
+        logger.info("US market: PaperGateway (Alpaca not configured)")
+
+    # ── HK / A 市场（暂用 PaperGateway）─────────────────────
+    for market, currency, cash in [("HK", "HKD", 5_000_000.0), ("A", "CNY", 1_000_000.0)]:
+        gw = PaperGateway(market=market, initial_cash=cash, currency=currency)
+        await gw.connect()
+        _manager.register_gateway(market, gw)
+
+    await _manager.start()
+    logger.info("Hybrid OMS initialized")
+    return _manager

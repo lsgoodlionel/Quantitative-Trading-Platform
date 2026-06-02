@@ -60,13 +60,28 @@ interface OrderEntryPanelProps {
   isSubmitting: boolean
 }
 
-function OrderEntryPanel({ form, onFormChange, onSubmit, isSubmitting }: OrderEntryPanelProps) {
+function OrderEntryPanel({
+  form, onFormChange, onSubmit, isSubmitting, tradingMode
+}: OrderEntryPanelProps & { tradingMode?: import("@/hooks/useBrokerConfig").TradingMode }) {
   const isBuy = form.side === "BUY"
   const marketCfg = MARKET_CFGS.find((m) => m.value === form.market) ?? MARKET_CFGS[0]
 
+  const gwType = tradingMode?.gateway_type ?? "local_paper"
+  const gwBadge = {
+    alpaca_paper: { label: "Alpaca Paper", color: "text-[#58a6ff] bg-[#1c2a3a] border-[#388bfd]/30" },
+    alpaca_live:  { label: "Alpaca Live ⚠", color: "text-[#f85149] bg-[#2a1515] border-[#f85149]/30" },
+    local_paper:  { label: "本地模拟", color: "text-[#8b949e] bg-[#161b22] border-[#30363d]" },
+    unknown:      { label: "未连接", color: "text-[#6e7681] bg-[#0d1117] border-[#21262d]" },
+  }[gwType]
+
   return (
     <form onSubmit={onSubmit} className="card h-fit">
-      <h2 className="text-sm font-semibold text-[#e6edf3] mb-4">快速下单</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-[#e6edf3]">📋 手动下单</h2>
+        <span className={`text-[10px] px-2 py-0.5 rounded border font-medium ${gwBadge.color}`}>
+          {gwBadge.label}
+        </span>
+      </div>
 
       {/* 买卖方向 */}
       <div className="flex rounded-md overflow-hidden border border-[#30363d] mb-4">
@@ -186,7 +201,13 @@ function OrderEntryPanel({ form, onFormChange, onSubmit, isSubmitting }: OrderEn
         </button>
 
         <p className="text-[10px] text-[#6e7681] text-center">
-          纸面交易模式 · 市价单立即模拟成交
+          {gwType === "local_paper"
+            ? "本地纸面交易 · 市价单立即模拟成交"
+            : gwType === "alpaca_paper"
+              ? "Alpaca Paper Trading · 订单发送至 Alpaca 模拟账户"
+              : gwType === "alpaca_live"
+                ? "⚠ Alpaca 实盘 · 订单使用真实资金执行"
+                : "OMS 未连接"}
         </p>
       </div>
     </form>
@@ -455,6 +476,7 @@ export function Orders() {
             onFormChange={handleFormChange}
             onSubmit={handleSubmit}
             isSubmitting={creating}
+            tradingMode={tradingMode}
           />
         </div>
 

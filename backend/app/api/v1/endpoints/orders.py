@@ -72,27 +72,57 @@ def get_oms() -> OrderManager:
 @router.get("/trading-mode")
 async def get_trading_mode() -> dict:
     """
-    返回当前美股交易模式（模拟盘 / 实盘）。
-    前端用于在订单页显示全局模式徽章。
+    返回当前美股交易模式：OMS 实际使用的网关类型 + Redis 中的 Alpaca 配置。
+
+    gateway_type 字段:
+      "alpaca_paper"  — Alpaca Paper Trading（模拟账户，已连接）
+      "alpaca_live"   — Alpaca Live Trading（真实资金，已连接）
+      "local_paper"   — 本地纸面交易（PaperGateway，未连接券商）
+      "unknown"       — OMS 未初始化
     """
+    # 检测 OMS 当前使用的网关
+    oms = _try_get_oms()
+    gateway_type = "unknown"
+    if oms is not None:
+        gw = oms._gateways.get("US")
+        if gw is not None:
+            gw_name = type(gw).__name__
+            if gw_name == "AlpacaGateway":
+                gateway_type = "alpaca_paper" if getattr(gw, "_paper", True) else "alpaca_live"
+            else:
+                gateway_type = "local_paper"
+
+    # 同时读取 Redis 中的 Alpaca 配置（供前端显示凭证状态）
+    alpaca_configured = False
+    paper_mode = True
+    base_url = ""
     try:
         import redis.asyncio as aioredis
         from app.core.config import settings
         r = aioredis.from_url(settings.redis_url)
         raw = await r.hgetall("broker_config:alpaca")
         await r.aclose()
-        if not raw:
-            return {"configured": False, "paper_mode": True, "mode_label": "未配置"}
-        paper = raw.get(b"paper_mode", b"true").decode().lower() == "true"
-        base_url = raw.get(b"base_url", b"").decode()
-        return {
-            "configured": True,
-            "paper_mode": paper,
-            "mode_label": "模拟盘 (Paper)" if paper else "实盘 (Live)",
-            "base_url": base_url,
-        }
+        if raw:
+            alpaca_configured = True
+            paper_mode = raw.get(b"paper_mode", b"true").decode().lower() == "true"
+            base_url = raw.get(b"base_url", b"").decode()
     except Exception:
-        return {"configured": False, "paper_mode": True, "mode_label": "未知"}
+        pass
+
+    labels = {
+        "alpaca_paper": "Alpaca 模拟盘 (Paper Trading)",
+        "alpaca_live":  "Alpaca 实盘 ⚠ 真实资金",
+        "local_paper":  "本地纸面交易（模拟）",
+        "unknown":      "OMS 未初始化",
+    }
+
+    return {
+        "configured":      alpaca_configured,
+        "paper_mode":      paper_mode,
+        "mode_label":      labels.get(gateway_type, gateway_type),
+        "gateway_type":    gateway_type,
+        "base_url":        base_url,
+    }
 
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)

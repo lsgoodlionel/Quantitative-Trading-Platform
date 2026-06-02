@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { Link } from "react-router-dom"
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as ReTooltip,
 } from "recharts"
@@ -11,6 +12,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { PnlCell } from "@/components/ui/PnlCell"
 import { TradingWorkflow } from "@/components/workflow/TradingWorkflow"
+import { useTradingMode } from "@/hooks/useBrokerConfig"
 import { PAGE_HELP } from "@/data/pageHelp"
 import type { Market, Position, LiveOrder, MarketOverviewItem } from "@/types"
 
@@ -487,6 +489,7 @@ export function Dashboard() {
   const { data: positions = [] }                   = usePositions(market)
   const { data: orders = [] }                      = useOrders()
   const { data: riskSummary }                      = useRiskSummary()
+  const { data: tradingMode }                      = useTradingMode()
 
   const openPositions = useMemo(() => positions.filter((p) => p.qty !== 0), [positions])
 
@@ -505,6 +508,50 @@ export function Dashboard() {
 
   return (
     <AppShell title="仪表盘" help={PAGE_HELP.dashboard}>
+
+      {/* ── 交易入口卡（首屏核心导航） ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        {/* 手动下单 */}
+        <Link to="/orders"
+          className="flex items-center gap-4 p-4 rounded-xl border border-[#3fb950]/25 bg-[#0d2018] hover:border-[#3fb950]/50 hover:bg-[#0d2018]/80 transition-all group">
+          <div className="w-12 h-12 rounded-xl bg-[#3fb950]/15 flex items-center justify-center text-2xl shrink-0">
+            📋
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-[#e6edf3] text-sm">手动下单</p>
+            <p className="text-xs text-[#6e7681] mt-0.5">直接买入/卖出指定标的，支持市价/限价单</p>
+            <div className="mt-1.5 flex items-center gap-2">
+              {tradingMode && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                  tradingMode.gateway_type === "alpaca_live"
+                    ? "text-[#f85149] border-[#f85149]/30"
+                    : tradingMode.gateway_type === "alpaca_paper"
+                      ? "text-[#58a6ff] border-[#58a6ff]/30"
+                      : "text-[#8b949e] border-[#30363d]"
+                }`}>
+                  {tradingMode.mode_label}
+                </span>
+              )}
+              <span className="text-[10px] text-[#3fb950] opacity-0 group-hover:opacity-100 transition-opacity">点击进入 →</span>
+            </div>
+          </div>
+        </Link>
+
+        {/* 量化策略 */}
+        <Link to="/live-strategy"
+          className="flex items-center gap-4 p-4 rounded-xl border border-[#58a6ff]/25 bg-[#0d1421] hover:border-[#58a6ff]/50 hover:bg-[#0d1421]/80 transition-all group">
+          <div className="w-12 h-12 rounded-xl bg-[#58a6ff]/15 flex items-center justify-center text-2xl shrink-0">
+            🤖
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-[#e6edf3] text-sm">量化策略自动交易</p>
+            <p className="text-xs text-[#6e7681] mt-0.5">选择策略、配置参数，系统自动生成买卖信号</p>
+            <div className="mt-1.5">
+              <span className="text-[10px] text-[#58a6ff] opacity-0 group-hover:opacity-100 transition-opacity">点击进入 →</span>
+            </div>
+          </div>
+        </Link>
+      </div>
 
       {/* ── 智能交易引导（置顶，首屏可见） ── */}
       <TradingWorkflow />
