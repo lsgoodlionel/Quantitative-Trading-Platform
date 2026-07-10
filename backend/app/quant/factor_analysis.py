@@ -110,6 +110,7 @@ def analyze_factor(
     df: pd.DataFrame,
     factor_name: str,
     forward_periods: list[int] | None = None,
+    factor_override: pd.Series | None = None,
 ) -> FactorAnalysisResult:
     """
     计算因子与前瞻收益的 IC 分析。
@@ -117,16 +118,17 @@ def analyze_factor(
     Parameters
     ----------
     df            : OHLCV DataFrame，index 为时间字符串
-    factor_name   : 因子名称（见 _compute_factor）
+    factor_name   : 因子名称（见 _compute_factor）；当传入 factor_override 时仅作标签
     forward_periods: 前瞻期列表，默认 [5, 10, 20]
+    factor_override: 预先计算好的因子值序列（用于公式因子），传入时跳过内置计算
     """
     if forward_periods is None:
         forward_periods = [5, 10, 20]
 
     close = df["close"]
 
-    # 1. 计算因子值
-    factor = _compute_factor(df, factor_name)
+    # 1. 计算因子值（公式因子直接使用预算好的序列）
+    factor = factor_override if factor_override is not None else _compute_factor(df, factor_name)
 
     # 2. 计算各前瞻期收益率
     fwd_returns: dict[str, pd.Series] = {}

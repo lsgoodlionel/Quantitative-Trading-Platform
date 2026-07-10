@@ -303,6 +303,107 @@ async def run_factor_analysis(req: FactorAnalysisRequest) -> dict:
     }
 
 
+# ── 公式因子（Formula Factor）─────────────────────────────────────
+
+class FormulaFactorRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+    market: str = Field(default="US", pattern="^(US|HK|A)$")
+    frequency: str = "1d"
+    start: str | None = None
+    end: str | None = None
+    tokens: list[str] = Field(..., min_length=1, max_length=32, description="RPN 公式 token 列表")
+    forward_periods: list[int] = Field(default=[5, 10, 20], max_length=4)
+
+
+@router.get("/factor/formula/meta")
+async def get_formula_meta() -> dict:
+    """返回公式因子构建器的元数据：可用特征、算子、预设公式。"""
+    from app.quant.formula_factor import FEATURE_META, OP_META, PRESET_FORMULAS
+    return {
+        "features": FEATURE_META,
+        "operators": OP_META,
+        "presets": PRESET_FORMULAS,
+    }
+
+
+@router.post("/factor/formula")
+async def run_formula_factor(req: FormulaFactorRequest) -> dict:
+    """
+    自定义公式因子 IC 分析。
+
+    用 RPN（逆波兰）token 列表构造 alpha 表达式，执行后复用因子 IC 分析流程，
+    返回与 /factor/analyze 相同结构的结果。
+
+    示例 tokens：["MOM20", "ATR_RATIO", "DIV"]（动量除以波动率）
+    """
+    from datetime import date, timedelta
+    import pandas as pd
+    from app.quant.factor_analysis import analyze_factor
+    from app.quant.formula_factor import evaluate_formula, FormulaError
+    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.service import DataService
+    from app.core.database import AsyncSessionLocal
+
+    end_date = date.fromisoformat(req.end) if req.end else date.today()
+    start_date = date.fromisoformat(req.start) if req.start else end_date - timedelta(days=365 * 2)
+
+    try:
+        market_enum = MarketEnum(req.market)
+        freq_enum = FreqEnum(req.frequency)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    async with AsyncSessionLocal() as session:
+        svc = DataService(session)
+        try:
+            bars = await svc.get_bars(req.symbol, market_enum, freq_enum, start_date, end_date)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Data feed error: {e}") from e
+
+    if len(bars) < 60:
+        raise HTTPException(status_code=400, detail=f"Not enough data: {len(bars)} bars (need ≥ 60)")
+
+    df = pd.DataFrame([{
+        "time": b.time.isoformat(),
+        "open": b.open, "high": b.high, "low": b.low,
+        "close": b.close, "volume": b.volume,
+    } for b in bars]).set_index("time")
+
+    # 执行公式得到因子序列
+    try:
+        factor_series = evaluate_formula(df, req.tokens)
+    except FormulaError as e:
+        raise HTTPException(status_code=400, detail=f"公式错误: {e}") from e
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"公式求值失败: {e}") from e
+
+    formula_label = " ".join(req.tokens)
+
+    try:
+        result = analyze_factor(
+            df, formula_label, req.forward_periods, factor_override=factor_series
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Factor analysis error: {e}") from e
+
+    return {
+        "symbol": req.symbol,
+        "market": req.market,
+        "factor_name": formula_label,
+        "tokens": req.tokens,
+        "forward_periods": result.forward_periods,
+        "factor_series": result.factor_series[-500:],
+        "ic_series": {k: v[-500:] for k, v in result.ic_series.items()},
+        "cumulative_ic": {k: v[-500:] for k, v in result.cumulative_ic.items()},
+        "ic_mean": result.ic_mean,
+        "ic_std": result.ic_std,
+        "ic_ir": result.ic_ir,
+        "ic_positive_rate": result.ic_positive_rate,
+        "ic_abs_mean": result.ic_abs_mean,
+        "quantile_returns": result.quantile_returns,
+    }
+
+
 # ── ML Strategy ───────────────────────────────────────────────────
 
 MLModelType = Literal["logistic_regression", "random_forest", "gradient_boosting"]

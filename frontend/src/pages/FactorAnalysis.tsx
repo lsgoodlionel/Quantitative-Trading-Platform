@@ -10,10 +10,14 @@ import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
-import { useFactorList, useFactorAnalysis } from "@/hooks/useFactorAnalysis"
+import {
+  useFactorList, useFactorAnalysis, useFormulaMeta, useFormulaFactor,
+  type FactorAnalysisResult,
+} from "@/hooks/useFactorAnalysis"
 import type { Market, Frequency } from "@/types"
 import { InsightBox } from "@/components/ui/InsightBox"
 import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
+import { FormulaBuilder } from "./factor/FormulaBuilder"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -221,16 +225,26 @@ function FactorSeriesChart({ data }: { data: { time: string; value: number }[] }
 
 // ── Main Page ──────────────────────────────────────────────────────
 
+type FactorMode = "preset" | "formula"
+
 export function FactorAnalysis() {
   const { data: factorList = [], isLoading: factorsLoading } = useFactorList()
-  const { mutate: runAnalysis, isPending, data: result, error } = useFactorAnalysis()
+  const { mutate: runAnalysis, isPending: presetPending, data: presetResult, error: presetError } = useFactorAnalysis()
+  const { data: formulaMeta, isLoading: metaLoading } = useFormulaMeta()
+  const { mutate: runFormula, isPending: formulaPending, data: formulaResult, error: formulaError } = useFormulaFactor()
   const { toast } = useToast()
 
+  const [mode, setMode] = useState<FactorMode>("preset")
   const [symbol, setSymbol] = useState("AAPL")
   const [market, setMarket] = useState<Market>("US")
   const [freq, setFreq] = useState<Frequency>("1d")
   const [factorName, setFactorName] = useState("momentum_20")
+  const [tokens, setTokens] = useState<string[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<number>(20)
+
+  // 当前模式的结果 / 状态（统一为 FactorAnalysisResult 结构）
+  const result: FactorAnalysisResult | undefined = mode === "preset" ? presetResult : formulaResult
+  const isPending = mode === "preset" ? presetPending : formulaPending
 
   const groupedFactors = useMemo(() => {
     const groups: Record<string, typeof factorList> = {}
@@ -252,6 +266,18 @@ export function FactorAnalysis() {
     })
   }
 
+  function handleRunFormula() {
+    if (!symbol.trim()) { toast("请输入股票代码", "warning"); return }
+    if (tokens.length === 0) { toast("请先构建公式", "warning"); return }
+    runFormula({
+      symbol: symbol.trim().toUpperCase(),
+      market,
+      frequency: freq,
+      tokens,
+      forward_periods: FORWARD_PERIODS,
+    })
+  }
+
   const icSeries = result?.ic_series[String(selectedPeriod)] ?? []
   const qtlData = result?.quantile_returns[String(selectedPeriod)] ?? []
 
@@ -261,8 +287,32 @@ export function FactorAnalysis() {
 
         {/* ── Config Panel ── */}
         <div className="xl:col-span-1 space-y-4">
+          {/* 模式切换 */}
+          <div className="flex gap-1 bg-[#161b22] rounded-lg p-1 border border-[#21262d]">
+            <button
+              onClick={() => setMode("preset")}
+              className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+                mode === "preset"
+                  ? "bg-[#bc8cff]/20 text-[#bc8cff]"
+                  : "text-[#8b949e] hover:text-[#e6edf3]"
+              }`}>
+              预设因子
+            </button>
+            <button
+              onClick={() => setMode("formula")}
+              className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+                mode === "formula"
+                  ? "bg-[#58a6ff]/20 text-[#58a6ff]"
+                  : "text-[#8b949e] hover:text-[#e6edf3]"
+              }`}>
+              ⚡ 公式因子
+            </button>
+          </div>
+
           <div className="card">
-            <h3 className="text-sm font-semibold text-[#e6edf3] mb-4">分析参数</h3>
+            <h3 className="text-sm font-semibold text-[#e6edf3] mb-4">
+              {mode === "preset" ? "分析参数" : "标的与周期"}
+            </h3>
 
             {/* Symbol */}
             <div className="mb-3">
@@ -315,47 +365,64 @@ export function FactorAnalysis() {
               </div>
             </div>
 
-            {/* Factor Selector */}
-            <div className="mb-4">
-              <label className="label block mb-1">因子</label>
-              {factorsLoading ? (
-                <Spinner size="sm" />
-              ) : (
-                <div className="space-y-2">
-                  {Object.entries(groupedFactors).map(([group, factors]) => (
-                    <div key={group}>
-                      <p className="text-xs text-[#6e7681] mb-1">{group}</p>
-                      {factors.map((f) => (
-                        <button
-                          key={f.name}
-                          onClick={() => setFactorName(f.name)}
-                          className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
-                            factorName === f.name
-                              ? "bg-[#bc8cff]/20 text-[#bc8cff]"
-                              : "text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]"
-                          }`}
-                        >
-                          {f.label}
-                        </button>
+            {/* Factor Selector（仅预设模式）*/}
+            {mode === "preset" && (
+              <>
+                <div className="mb-4">
+                  <label className="label block mb-1">因子</label>
+                  {factorsLoading ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <div className="space-y-2">
+                      {Object.entries(groupedFactors).map(([group, factors]) => (
+                        <div key={group}>
+                          <p className="text-xs text-[#6e7681] mb-1">{group}</p>
+                          {factors.map((f) => (
+                            <button
+                              key={f.name}
+                              onClick={() => setFactorName(f.name)}
+                              className={`w-full text-left px-2 py-1 rounded text-xs transition-colors ${
+                                factorName === f.name
+                                  ? "bg-[#bc8cff]/20 text-[#bc8cff]"
+                                  : "text-[#8b949e] hover:text-[#e6edf3] hover:bg-[#21262d]"
+                              }`}
+                            >
+                              {f.label}
+                            </button>
+                          ))}
+                        </div>
                       ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
 
-            <button
-              className="btn btn-primary w-full"
-              onClick={handleRun}
-              disabled={isPending}
-            >
-              {isPending ? <Spinner size="sm" className="mx-auto" /> : "运行因子分析"}
-            </button>
+                <button
+                  className="btn btn-primary w-full"
+                  onClick={handleRun}
+                  disabled={isPending}
+                >
+                  {isPending ? <Spinner size="sm" className="mx-auto" /> : "运行因子分析"}
+                </button>
 
-            {error && (
-              <p className="text-xs text-[#f85149] mt-2 leading-snug">{error.message}</p>
+                {presetError && (
+                  <p className="text-xs text-[#f85149] mt-2 leading-snug">{presetError.message}</p>
+                )}
+              </>
             )}
           </div>
+
+          {/* 公式构建器（仅公式模式）*/}
+          {mode === "formula" && (
+            <FormulaBuilder
+              meta={formulaMeta}
+              metaLoading={metaLoading}
+              tokens={tokens}
+              onTokensChange={setTokens}
+              onRun={handleRunFormula}
+              isRunning={formulaPending}
+              error={formulaError?.message ?? null}
+            />
+          )}
         </div>
 
         {/* ── Results ── */}
@@ -377,12 +444,18 @@ export function FactorAnalysis() {
               {/* Header */}
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-base font-semibold text-[#e6edf3]">
-                  {result.symbol} · {result.factor_name}
+                  {result.symbol}
                 </h2>
                 <span className="badge text-[#8b949e] border-[#30363d]">{result.market}</span>
-                <span className="badge text-[#bc8cff] border-[#bc8cff]/30">
-                  {factorList.find((f) => f.name === result.factor_name)?.label ?? result.factor_name}
-                </span>
+                {mode === "formula" ? (
+                  <span className="badge text-[#58a6ff] border-[#58a6ff]/30 font-mono">
+                    ⚡ {result.factor_name}
+                  </span>
+                ) : (
+                  <span className="badge text-[#bc8cff] border-[#bc8cff]/30">
+                    {factorList.find((f) => f.name === result.factor_name)?.label ?? result.factor_name}
+                  </span>
+                )}
               </div>
 
               {/* IC Stats Table */}
