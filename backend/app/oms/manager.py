@@ -59,6 +59,32 @@ class OrderManager:
         """注入动态防护管理器（None 时跳过防护）。"""
         self._protections = protection_manager
 
+    # ── Dry-Run / Live 一致性（E4）──────────────────────────────
+    # 模拟盘（dry_run）与实盘共享同一条执行路径：相同订单生命周期、
+    # 相同事件、相同风控/防护，唯一差别是路由到的网关为 Paper。
+    # 这些方法为「加钩子」式扩展，不改动 __init__ 签名。
+
+    def set_dry_run(self, value: bool) -> None:
+        """显式标记全局模拟盘模式（强制所有订单 paper_mode=True）。"""
+        self._dry_run = bool(value)
+
+    @property
+    def is_dry_run(self) -> bool:
+        return getattr(self, "_dry_run", False)
+
+    def _stamp_paper_mode(self, order: "LiveOrder") -> None:
+        """
+        标记订单是否为模拟盘：显式 dry_run 或路由网关为 PaperGateway 时为 True。
+
+        使 paper 与 live 订单走完全相同的 OMS 流程，仅凭该标志区分来源，
+        让前端/审计能一致地识别模拟盘成交。
+        """
+        if self.is_dry_run:
+            order.paper_mode = True
+            return
+        gw = self._gateways.get(order.market.upper())
+        order.paper_mode = type(gw).__name__ == "PaperGateway" if gw is not None else False
+
     # ── 网关注册 ──────────────────────────────────────────────
 
     def register_gateway(self, market: str, gateway: TradingGateway) -> None:
@@ -117,6 +143,7 @@ class OrderManager:
             limit_price=limit_price,
             strategy_id=strategy_id,
         )
+        self._stamp_paper_mode(order)
 
         self._pre_trade_risk_check(order)
 

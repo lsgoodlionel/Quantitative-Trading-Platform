@@ -8,6 +8,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { useToast } from "@/components/ui/Toast"
+import { AdvancedOrderSection } from "@/pages/orders/AdvancedOrderSection"
 import type { LiveOrder, Market, OrderSide, OrderType } from "@/types"
 
 // ── 常量 ──────────────────────────────────────────────────────
@@ -378,6 +379,7 @@ export function Orders() {
 
   const [form, setForm] = useState<NewOrderForm>(DEFAULT_FORM)
   const [statusFilter, setStatusFilter] = useState<string>("")
+  const [orderMode, setOrderMode] = useState<"manual" | "advanced">("manual")
 
   function handleFormChange(key: keyof NewOrderForm, val: string) {
     setForm((prev) => ({ ...prev, [key]: val }))
@@ -468,6 +470,29 @@ export function Orders() {
         ))}
       </div>
 
+      {/* 下单模式切换：手动下单 / 高级算法拆单 */}
+      <div className="flex items-center gap-1 mb-5 bg-[#0d1117] border border-[#21262d] rounded-lg p-1 w-fit">
+        {([
+          { value: "manual", label: "📋 手动下单" },
+          { value: "advanced", label: "🧊 高级算法单" },
+        ] as const).map((m) => (
+          <button
+            key={m.value}
+            onClick={() => setOrderMode(m.value)}
+            className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+              orderMode === m.value
+                ? "bg-[#1f6feb]/20 text-[#58a6ff] border border-[#58a6ff]/30"
+                : "text-[#6e7681] hover:text-[#e6edf3] border border-transparent"
+            }`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
+      {orderMode === "advanced" && <AdvancedOrderSection />}
+
+      {orderMode === "manual" && (
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* 左侧：下单面板 */}
         <div className="xl:col-span-1">
@@ -544,6 +569,7 @@ export function Orders() {
           </div>
         </div>
       </div>
+      )}
     </AppShell>
   )
 }

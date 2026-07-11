@@ -4,8 +4,12 @@
 - models: 标准基本面 Pydantic 模型
 - {yfinance,akshare}_provider: 具体数据源适配
 - service.FundamentalsService: 按市场路由 + 派生比率的统一入口
+- news_service.NewsCalendarService: 新闻 + 财报/分红日历（Wave-3f / A4）
+- options_service.OptionsService: 期权链 + Greeks（Wave-3f / A5，仅美股）
 """
 
+from app.data.providers.news_service import NewsCalendarService
+from app.data.providers.options_service import OptionsService
 from app.data.providers.service import FundamentalsService
 
-__all__ = ["FundamentalsService"]
+__all__ = ["FundamentalsService", "NewsCalendarService", "OptionsService"]

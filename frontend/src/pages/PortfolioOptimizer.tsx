@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { api } from "@/lib/api"
 import { usePortfolioAllocate } from "@/hooks/usePortfolio"
 import { useAdvancedPortfolioOptimize } from "@/hooks/usePortfolioAdvanced"
+import { TopkDropoutPanel } from "@/pages/portfolio/TopkDropoutPanel"
 import type {
   AdvancedOptMethod, AdvancedOptResult, AdvancedRiskModel,
   AdvancedReturnsMethod, HrpLinkage, BLViewInput,
@@ -847,7 +848,10 @@ function parseSymbols(text: string): string[] {
     .filter(Boolean)
 }
 
+type OptimizerView = "optimize" | "topk"
+
 export function PortfolioOptimizer() {
+  const [view, setView] = useState<OptimizerView>("optimize")
   const { mutate: runOpt, isPending, data: result, error } = useAdvancedPortfolioOptimize()
 
   const [form, setForm] = useState<FormState>({
@@ -915,6 +919,31 @@ export function PortfolioOptimizer() {
 
   return (
     <AppShell title="组合优化器" help={PAGE_HELP["portfolio-optimizer"]}>
+      {/* 模式切换：均值-方差优化 vs Topk 轮动组合 */}
+      <div className="flex gap-1 mb-5 border-b border-[#30363d]">
+        {([
+          { key: "optimize", label: "组合优化", desc: "均值-方差 / 风险平价 / BL / CVaR" },
+          { key: "topk", label: "Topk 轮动组合", desc: "打分 → 持 topK、控换手轮动" },
+        ] as { key: OptimizerView; label: string; desc: string }[]).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => setView(t.key)}
+            title={t.desc}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              view === t.key
+                ? "border-[#58a6ff] text-[#e6edf3]"
+                : "border-transparent text-[#6e7681] hover:text-[#e6edf3]"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === "topk" && <TopkDropoutPanel />}
+
+      {view === "optimize" && (
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* 配置面板 */}
         <form onSubmit={handleSubmit} className="xl:col-span-1 card h-fit space-y-4">
@@ -1141,6 +1170,7 @@ export function PortfolioOptimizer() {
           {result && !isPending && <ResultPanel result={result} market={submittedMarket} />}
         </div>
       </div>
+      )}
     </AppShell>
   )
 }

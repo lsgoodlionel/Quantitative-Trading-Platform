@@ -5,6 +5,16 @@ export type MLModelType =
   | "logistic_regression"
   | "random_forest"
   | "gradient_boosting"
+  | "double_ensemble"
+
+/** DoubleEnsemble 专属集成诊断（仅 model_type=double_ensemble 时返回） */
+export interface EnsembleDiagnostics {
+  num_models: number
+  enable_sr: boolean
+  enable_fs: boolean
+  sub_feature_counts: number[]
+  feature_usage: { name: string; used_by: number }[]
+}
 
 export interface MLTrainRequest {
   symbol: string
@@ -54,6 +64,9 @@ export interface MLTrainResult {
 
   cv_mean: number
   cv_std: number
+
+  /** 仅 DoubleEnsemble 模型返回 */
+  ensemble?: EnsembleDiagnostics
 }
 
 export function useMLTrain() {

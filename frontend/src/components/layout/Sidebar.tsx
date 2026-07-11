@@ -14,6 +14,7 @@ const NAV_ITEMS: NavItem[] = [
   // ── 核心交易流程 ──────────────────────────
   { to: "/",              icon: "🏠", label: "仪表盘"    },
   { to: "/market",        icon: "📈", label: "行情"      },
+  { to: "/market-events", icon: "🗓️", label: "事件期权"  },
   { to: "/strategies",    icon: "🔧", label: "策略"      },
   { to: "/backtest",      icon: "🔬", label: "回测"      },
   { to: "/live-strategy", icon: "🤖",  label: "策略交易"  },

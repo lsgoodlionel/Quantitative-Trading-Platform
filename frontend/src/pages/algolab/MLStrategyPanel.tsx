@@ -13,6 +13,7 @@ import { SectionCard, ParamRow, MetaGrid } from "./shared"
 const MODEL_OPTIONS: { value: MLModelType; label: string; desc: string }[] = [
   { value: "random_forest",       label: "随机森林", desc: "集成树模型，抗过拟合，特征重要度清晰" },
   { value: "gradient_boosting",   label: "梯度提升", desc: "XGBoost 风格，精度高，训练较慢" },
+  { value: "double_ensemble",     label: "DoubleEnsemble", desc: "样本重加权 + 特征筛选的集成包装，精度更稳" },
   { value: "logistic_regression", label: "逻辑回归", desc: "线性基线，可解释性最强" },
 ]
 
@@ -216,6 +217,48 @@ export function MLPanel() {
               </div>
             </SectionCard>
           </div>
+
+          {result.ensemble && (
+            <SectionCard title="DoubleEnsemble 集成诊断"
+              sub={`${result.ensemble.num_models} 个子模型 · 样本重加权 ${result.ensemble.enable_sr ? "开" : "关"} · 特征筛选 ${result.ensemble.enable_fs ? "开" : "关"}`}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-1">
+                <div>
+                  <p className="text-[11px] text-[#8b949e] mb-2">各子模型使用特征数</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {result.ensemble.sub_feature_counts.map((c, i) => (
+                      <span key={i}
+                        className="px-2 py-1 rounded bg-[#1c2128] border border-[#30363d] text-[11px] font-mono text-[#58a6ff]">
+                        #{i + 1}: {c}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-[#6e7681] mt-2 leading-snug">
+                    特征筛选跨子模型剔除不稳定特征，各子模型特征子集不同以降低相关性。
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] text-[#8b949e] mb-2">特征入选稳定性（被多少子模型采用）</p>
+                  <div className="space-y-1">
+                    {result.ensemble.feature_usage.slice(0, 8).map((f) => {
+                      const pct = (f.used_by / Math.max(result.ensemble!.num_models, 1)) * 100
+                      return (
+                        <div key={f.name} className="flex items-center gap-2">
+                          <span className="w-24 text-[10px] text-[#8b949e] truncate">{f.name}</span>
+                          <div className="flex-1 h-2 rounded bg-[#1c2128] overflow-hidden">
+                            <div className="h-full rounded"
+                              style={{ width: `${pct}%`, background: pct >= 75 ? "#3fb950" : pct >= 50 ? "#58a6ff" : "#6e7681" }} />
+                          </div>
+                          <span className="w-10 text-right text-[10px] font-mono text-[#6e7681]">
+                            {f.used_by}/{result.ensemble!.num_models}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+          )}
 
           <SectionCard title="近期预测概率" sub="最近20根 K 线，蓝线为买入概率">
             <ResponsiveContainer width="100%" height={160}>

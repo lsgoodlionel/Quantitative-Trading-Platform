@@ -34,7 +34,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         redis_client = None
         logger.warning("Redis unavailable, OMS events will not be published")
-    await init_hybrid_order_manager(redis_client=redis_client)
+    manager = await init_hybrid_order_manager(redis_client=redis_client)
+    # 富途 HK 网关：配置存在时接入 OMS（否则 HK 保持 PaperGateway）
+    try:
+        from app.oms.futu_wiring import register_futu_gateway
+        await register_futu_gateway(manager, redis_client=redis_client)
+    except Exception as e:
+        logger.warning("Futu gateway wiring skipped: %s", e)
 
     yield
 

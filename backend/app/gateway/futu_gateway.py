@@ -42,7 +42,18 @@ class FutuGateway(TradingGateway):
     - 解锁密码保护
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        trade_env: str | None = None,
+        unlock_pwd: str | None = None,
+    ) -> None:
+        # 可通过构造函数覆盖（优先于 settings），仿 AlpacaGateway 接入模式
+        self._host = host or settings.futu_host
+        self._port = int(port) if port is not None else settings.futu_port
+        self._trade_env = (trade_env or settings.futu_trade_env).upper()
+        self._unlock_pwd = unlock_pwd if unlock_pwd is not None else settings.futu_unlock_pwd
         self._trade_ctx = None
         self._connected = False
         self._account_id: Optional[str] = None
@@ -60,17 +71,17 @@ class FutuGateway(TradingGateway):
 
             env = (
                 ft.TrdEnv.SIMULATE
-                if settings.futu_trade_env.upper() == "SIMULATE"
+                if self._trade_env == "SIMULATE"
                 else ft.TrdEnv.REAL
             )
             ctx = ft.OpenSecTradeContext(
-                host=settings.futu_host,
-                port=settings.futu_port,
+                host=self._host,
+                port=self._port,
                 filter_trdmarket=ft.TrdMarket.HK,  # 默认港股，可扩展
             )
             # 实盘模式需要解锁
-            if env == ft.TrdEnv.REAL and settings.futu_unlock_pwd:
-                ret, data = ctx.unlock_trade(password=settings.futu_unlock_pwd)
+            if env == ft.TrdEnv.REAL and self._unlock_pwd:
+                ret, data = ctx.unlock_trade(password=self._unlock_pwd)
                 if ret != ft.RET_OK:
                     ctx.close()
                     raise RuntimeError(f"Futu unlock failed: {data}")
@@ -81,7 +92,7 @@ class FutuGateway(TradingGateway):
         self._connected = True
         logger.info(
             "Futu gateway connected (env=%s, host=%s:%d)",
-            settings.futu_trade_env, settings.futu_host, settings.futu_port,
+            self._trade_env, self._host, self._port,
         )
 
     async def disconnect(self) -> None:
@@ -254,6 +265,31 @@ class FutuGateway(TradingGateway):
         return await loop.run_in_executor(None, _get)
 
 
+# 富途订单状态 → OMS 统一状态字符串（OrderManager._apply_broker_update 识别小写口径）
+_FUTU_STATUS_MAP: dict[str, str] = {
+    "WAITING_SUBMIT": "submitted",
+    "SUBMITTING": "submitted",
+    "SUBMITTED": "submitted",
+    "FILLED_PART": "partial",
+    "FILLED_ALL": "filled",
+    "CANCELLED_PART": "cancelled",
+    "CANCELLED_ALL": "cancelled",
+    "CANCELLING_PART": "submitted",
+    "CANCELLING_ALL": "submitted",
+    "FAILED": "rejected",
+    "SUBMIT_FAILED": "rejected",
+    "DISABLED": "cancelled",
+    "DELETED": "cancelled",
+    "TIMEOUT": "expired",
+}
+
+
+def _map_futu_status(raw_status: str) -> str:
+    """富途原始状态 → OMS 统一状态；含枚举前缀（OrderStatus.FILLED_ALL）时取尾段。"""
+    token = raw_status.split(".")[-1].upper() if raw_status else ""
+    return _FUTU_STATUS_MAP.get(token, "submitted")
+
+
 def _futu_row_to_dict(row) -> dict:
     return {
         "broker_order_id": str(row.get("order_id", "")),
@@ -262,6 +298,6 @@ def _futu_row_to_dict(row) -> dict:
         "qty": int(row.get("qty", 0)),
         "filled_qty": int(row.get("dealt_qty", 0)),
         "avg_fill_price": float(row.get("dealt_avg_price", 0)) or None,
-        "status": str(row.get("order_status", "")),
+        "status": _map_futu_status(str(row.get("order_status", ""))),
         "created_at": str(row.get("create_time", "")),
     }

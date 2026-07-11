@@ -10,13 +10,14 @@ import { MonteCarloTab } from "@/components/backtest/MonteCarloTab"
 import { HyperoptTab } from "@/components/backtest/HyperoptTab"
 import { WalkForwardTab } from "@/components/backtest/WalkForwardTab"
 import { BiasCheckTab } from "@/components/backtest/BiasCheckTab"
+import { RobustnessTab } from "@/components/backtest/RobustnessTab"
 import { MARKET_CFGS, today, yearsAgo } from "@/components/backtest/config"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import type { BacktestResult, BacktestRequest, Market } from "@/types"
 
 // ── Tab 类型 ──────────────────────────────────────────────────
-type MainTab = "backtest" | "optimize" | "hyperopt" | "walkforward" | "biascheck" | "montecarlo"
+type MainTab = "backtest" | "optimize" | "hyperopt" | "walkforward" | "biascheck" | "robustness" | "montecarlo"
 
 // ── 主页面 ────────────────────────────────────────────────────
 export function Backtest() {
@@ -78,6 +79,7 @@ export function Backtest() {
     { key: "hyperopt", label: "🎯 Hyperopt" },
     { key: "walkforward", label: "🔁 Walk-Forward" },
     { key: "biascheck", label: "🔬 偏差检测" },
+    { key: "robustness", label: "🎰 稳健性" },
     { key: "montecarlo", label: "🎲 蒙特卡洛" },
   ]
 
@@ -143,6 +145,9 @@ export function Backtest() {
 
       {/* 前视/递归偏差检测 */}
       {activeTab === "biascheck" && <BiasCheckTab strategies={stratList} />}
+
+      {/* 稳健性：蒙特卡洛稳健性 + 统计显著性 */}
+      {activeTab === "robustness" && <RobustnessTab strategies={stratList} />}
 
       {/* 蒙特卡洛 */}
       {activeTab === "montecarlo" && <MonteCarloTab strategies={stratList} />}

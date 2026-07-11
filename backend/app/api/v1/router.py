@@ -11,6 +11,10 @@ from app.api.v1.endpoints import (
 from app.api.v1.endpoints import (
     fundamentals, screener, factor_library, backtest_validation,
 )
+from app.api.v1.endpoints import (
+    factor_mining, topk_portfolio, backtest_robustness, order_algos,
+    pairlist, news, calendar, options, futu_config,
+)
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -45,3 +49,13 @@ api_router.include_router(fundamentals.router,       prefix="/fundamentals", tag
 api_router.include_router(screener.router,           prefix="/screener",     tags=["Screener"])
 api_router.include_router(factor_library.router,     prefix="/quant",        tags=["Factor Library"])
 api_router.include_router(backtest_validation.router, prefix="/backtests",   tags=["Backtest Validation"])
+# ── v2.0 Wave 3 ──────────────────────────────────────────────────
+api_router.include_router(factor_mining.router,       prefix="/quant",        tags=["Factor Mining"])
+api_router.include_router(topk_portfolio.router,      prefix="/portfolio",    tags=["Portfolio Optimizer"])
+api_router.include_router(backtest_robustness.router, prefix="/backtests",    tags=["Backtest Robustness"])
+api_router.include_router(order_algos.router,         prefix="/orders",       tags=["Order Algos"])
+api_router.include_router(pairlist.router,            prefix="/screener",     tags=["Pairlist"])
+api_router.include_router(news.router,                prefix="/news",         tags=["News"])
+api_router.include_router(calendar.router,            prefix="/calendar",     tags=["Calendar"])
+api_router.include_router(options.router,             prefix="/options",      tags=["Options"])
+api_router.include_router(futu_config.router,         prefix="/broker-config", tags=["Broker Config"])

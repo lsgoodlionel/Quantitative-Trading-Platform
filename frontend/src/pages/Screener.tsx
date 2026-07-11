@@ -13,6 +13,7 @@ import {
   type ScreenerCandidate,
   type ScreenerSortKey,
 } from "@/hooks/useScreener"
+import { DynamicPairlist } from "@/pages/screener/DynamicPairlist"
 import type { Market } from "@/types"
 
 // ── 常量 ────────────────────────────────────────────────────────
@@ -223,7 +224,7 @@ export function Screener() {
   const navigate = useNavigate()
   const { toast } = useToast()
   const [filter, setFilter] = useState<ScreenerFilter>(DEFAULT_FILTER)
-  const [tab, setTab] = useState<"screen" | "movers">("screen")
+  const [tab, setTab] = useState<"screen" | "movers" | "pairlist">("screen")
 
   const presetsQ = useScreenerPresets()
   const sectorsQ = useScreenerSectors()
@@ -287,7 +288,7 @@ export function Screener() {
           ))}
         </div>
         <div className="flex gap-1 bg-[#161b22] rounded-lg p-1 border border-[#21262d]">
-          {(["screen", "movers"] as const).map((t) => (
+          {(["screen", "movers", "pairlist"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -295,7 +296,7 @@ export function Screener() {
                 tab === t ? "bg-[#1f6feb]/20 text-[#58a6ff]" : "text-[#8b949e] hover:text-[#e6edf3]"
               }`}
             >
-              {t === "screen" ? "条件筛选" : "涨跌榜"}
+              {t === "screen" ? "条件筛选" : t === "movers" ? "涨跌榜" : "动态标的池"}
             </button>
           ))}
         </div>
@@ -303,6 +304,8 @@ export function Screener() {
 
       {tab === "movers" ? (
         <MoversPanel market={filter.market} ccy={ccy} />
+      ) : tab === "pairlist" ? (
+        <DynamicPairlist market={filter.market} />
       ) : (
         <>
           {/* 预设方案 */}

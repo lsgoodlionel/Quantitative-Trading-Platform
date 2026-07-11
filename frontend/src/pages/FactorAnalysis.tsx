@@ -21,6 +21,8 @@ import { FormulaBuilder } from "./factor/FormulaBuilder"
 import { ProcessorPipeline } from "./factor/ProcessorPipeline"
 import { FactorFitness } from "./factor/FactorFitness"
 import { FactorLibrary } from "./factor/FactorLibrary"
+import { FactorMining } from "./factor/FactorMining"
+import { ExperimentLog } from "./factor/ExperimentLog"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -228,14 +230,16 @@ function FactorSeriesChart({ data }: { data: { time: string; value: number }[] }
 
 // ── Main Page ──────────────────────────────────────────────────────
 
-type FactorMode = "preset" | "formula" | "library" | "processors" | "fitness"
+type FactorMode = "preset" | "formula" | "library" | "processors" | "fitness" | "mining" | "experiments"
 
 const MODE_TABS: { key: FactorMode; label: string; accent: string }[] = [
-  { key: "preset",     label: "预设因子",       accent: "#bc8cff" },
-  { key: "formula",    label: "⚡ 公式因子",     accent: "#58a6ff" },
-  { key: "library",    label: "📚 因子库",       accent: "#e3b341" },
-  { key: "processors", label: "🧪 截面处理流水线", accent: "#3fb950" },
-  { key: "fitness",    label: "🎯 成本感知适应度", accent: "#e3b341" },
+  { key: "preset",      label: "预设因子",       accent: "#bc8cff" },
+  { key: "formula",     label: "⚡ 公式因子",     accent: "#58a6ff" },
+  { key: "library",     label: "📚 因子库",       accent: "#e3b341" },
+  { key: "processors",  label: "🧪 截面处理流水线", accent: "#3fb950" },
+  { key: "fitness",     label: "🎯 成本感知适应度", accent: "#e3b341" },
+  { key: "mining",      label: "🧬 因子挖掘",     accent: "#3fb950" },
+  { key: "experiments", label: "🏆 实验记录",     accent: "#e3b341" },
 ]
 
 export function FactorAnalysis() {
@@ -318,6 +322,12 @@ export function FactorAnalysis() {
       )}
       {mode === "fitness" && (
         <FactorFitness factorList={factorList} formulaTokens={tokens} />
+      )}
+      {mode === "mining" && (
+        <FactorMining market={market} freq={freq} />
+      )}
+      {mode === "experiments" && (
+        <ExperimentLog />
       )}
 
       {(mode === "preset" || mode === "formula") && (

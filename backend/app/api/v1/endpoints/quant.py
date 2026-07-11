@@ -406,7 +406,9 @@ async def run_formula_factor(req: FormulaFactorRequest) -> dict:
 
 # ── ML Strategy ───────────────────────────────────────────────────
 
-MLModelType = Literal["logistic_regression", "random_forest", "gradient_boosting"]
+MLModelType = Literal[
+    "logistic_regression", "random_forest", "gradient_boosting", "double_ensemble",
+]
 
 
 class MLTrainRequest(BaseModel):
@@ -467,18 +469,26 @@ async def train_ml_strategy(req: MLTrainRequest) -> dict:
     } for b in bars]).set_index("time")
 
     try:
-        result = _train(
-            df=df,
-            model_type=req.model_type,
-            forward_days=req.forward_days,
-            test_size=req.test_size,
-        )
+        if req.model_type == "double_ensemble":
+            from app.quant.double_ensemble import train_double_ensemble
+            result = train_double_ensemble(
+                df=df,
+                forward_days=req.forward_days,
+                test_size=req.test_size,
+            )
+        else:
+            result = _train(
+                df=df,
+                model_type=req.model_type,
+                forward_days=req.forward_days,
+                test_size=req.test_size,
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"ML training error: {e}") from e
 
-    return {
+    payload = {
         "symbol": req.symbol,
         "market": req.market,
         "model_type": result.model_type,
@@ -500,3 +510,15 @@ async def train_ml_strategy(req: MLTrainRequest) -> dict:
         "cv_mean": result.cv_mean,
         "cv_std": result.cv_std,
     }
+
+    # DoubleEnsemble 附带集成诊断（其余模型无此字段，前端可选读取）
+    if req.model_type == "double_ensemble":
+        payload["ensemble"] = {
+            "num_models": result.num_models,
+            "enable_sr": result.enable_sr,
+            "enable_fs": result.enable_fs,
+            "sub_feature_counts": result.sub_feature_counts,
+            "feature_usage": result.feature_usage,
+        }
+
+    return payload
