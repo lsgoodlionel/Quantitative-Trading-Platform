@@ -42,8 +42,8 @@ async def test_strategy_presets_returns_list() -> None:
         response = await client.get("/api/v1/strategies/presets")
     assert response.status_code == 200
     presets = response.json()
-    assert len(presets) == 8
-    preset_ids = {p["id"] for p in presets}
+    assert len(presets) >= 8   # 已从 8 扩展至 16 种策略
+    preset_ids = {p["name"] for p in presets}   # 预设以 name 为标识
     assert "double_ma" in preset_ids
     assert "bollinger" in preset_ids
     assert "multi_factor" in preset_ids

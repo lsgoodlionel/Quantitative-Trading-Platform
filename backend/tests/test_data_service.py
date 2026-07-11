@@ -94,16 +94,25 @@ class TestDataServiceRouting:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_unsupported_a_share_market_raises(self) -> None:
+    async def test_a_share_market_fetches_via_akshare_feed(self) -> None:
+        # A 股已接入 AkShare（原「不支持」断言已过时）：命中 feed 即写缓存
         mock_session = AsyncMock()
         svc = DataService(mock_session)
 
+        api_bars = [_make_bar()]
         mock_repo = AsyncMock()
         mock_repo.get_bars.return_value = []
+        mock_repo.save_bars.return_value = 1
         svc._repo = mock_repo
 
-        with pytest.raises((ValueError, Exception)):
-            await svc.get_bars("000001", Market.A, Frequency.DAY_1, date(2024, 1, 1), date(2024, 1, 15))
+        mock_feed = AsyncMock()
+        mock_feed.get_bars.return_value = api_bars
+
+        with patch.object(svc._registry, "get_feeds", return_value=(mock_feed, None)):
+            bars = await svc.get_bars(
+                "000001", Market.A, Frequency.DAY_1, date(2024, 1, 1), date(2024, 1, 15)
+            )
+        assert bars == api_bars
 
     @pytest.mark.asyncio
     async def test_bars_written_to_cache_after_api_call(self) -> None:
@@ -138,7 +147,8 @@ class TestFeedRegistry:
         assert "Futu" in primary.__class__.__name__
         assert fallback is not None
 
-    def test_a_share_market_raises_not_supported(self) -> None:
+    def test_a_share_market_returns_akshare_primary(self) -> None:
+        # A 股已接入 AkShare（原「not yet supported」断言已过时）
         registry = _FeedRegistry.instance()
-        with pytest.raises(ValueError, match="not yet supported"):
-            registry.get_feeds(Market.A)
+        primary, _fallback = registry.get_feeds(Market.A)
+        assert "AkShare" in primary.__class__.__name__

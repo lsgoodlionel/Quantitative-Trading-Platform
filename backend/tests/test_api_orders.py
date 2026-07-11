@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -10,7 +10,7 @@ from app.main import app
 from app.oms.manager import OrderManager
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 from app.api.v1.endpoints.orders import get_oms
-from app.api.v1.endpoints.positions import get_oms as get_oms_pos
+from app.api.v1.endpoints.positions import _try_get_oms as get_oms_pos
 
 
 def _make_order(**kwargs) -> LiveOrder:
@@ -57,9 +57,12 @@ def mock_oms() -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def override_oms(mock_oms: MagicMock):
+    # 写端点用 Depends(get_oms)，可用 dependency_overrides
     app.dependency_overrides[get_oms] = lambda: mock_oms
-    app.dependency_overrides[get_oms_pos] = lambda: mock_oms
-    yield
+    # 读端点（list_orders/positions/account）内部直接调用 _try_get_oms()（非 Depends），需 patch
+    with patch("app.api.v1.endpoints.orders._try_get_oms", lambda: mock_oms), \
+         patch("app.api.v1.endpoints.positions._try_get_oms", lambda: mock_oms):
+        yield
     app.dependency_overrides.clear()
 
 
