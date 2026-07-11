@@ -49,6 +49,10 @@ class Order:
     filled_at: datetime | None = None
     commission: float = 0.0
     reject_reason: str | None = None
+    # 开仓标签（策略自定义分组用；平仓单可留空）
+    entry_tag: str | None = None
+    # 平仓原因（如 'stop'/'take_profit'/'signal'；开仓单为 None）
+    exit_reason: str | None = None
 
 
 @dataclass
@@ -62,6 +66,10 @@ class Fill:
     commission: float
     filled_at: datetime
     realized_pnl: float = 0.0
+    # C7 回合分析所需的分组维度（向后兼容，默认无标签）
+    entry_tag: str | None = None
+    exit_reason: str | None = None
+    direction: str = "long"
 
 
 class SimulatedBroker:
@@ -154,21 +162,35 @@ class SimulatedBroker:
         self._pending.append(order)
         return order
 
-    def buy(self, symbol: str, qty: int, market: Market | None = None) -> Order:
+    def buy(
+        self,
+        symbol: str,
+        qty: int,
+        market: Market | None = None,
+        entry_tag: str | None = None,
+    ) -> Order:
         order = Order(
             symbol=symbol,
             market=market or self._market,
             side=OrderSide.BUY,
             qty=qty,
+            entry_tag=entry_tag,
         )
         return self.submit_order(order)
 
-    def sell(self, symbol: str, qty: int, market: Market | None = None) -> Order:
+    def sell(
+        self,
+        symbol: str,
+        qty: int,
+        market: Market | None = None,
+        exit_reason: str | None = None,
+    ) -> Order:
         order = Order(
             symbol=symbol,
             market=market or self._market,
             side=OrderSide.SELL,
             qty=qty,
+            exit_reason=exit_reason,
         )
         return self.submit_order(order)
 
@@ -265,6 +287,14 @@ class SimulatedBroker:
             trade_value = fill_price * order.qty
             self._cash += trade_value - total_cost
 
+        # 平仓（SELL）标注退出原因；信息不足时统一记 'signal'
+        if order.side == OrderSide.SELL:
+            exit_reason = order.exit_reason or "signal"
+            entry_tag = None
+        else:
+            exit_reason = None
+            entry_tag = order.entry_tag
+
         return Fill(
             order_id=order.order_id,
             symbol=order.symbol,
@@ -275,6 +305,9 @@ class SimulatedBroker:
             commission=total_cost,
             filled_at=bar.time,
             realized_pnl=realized_pnl,
+            entry_tag=entry_tag,
+            exit_reason=exit_reason,
+            direction="long",  # 当前引擎为多头现货
         )
 
     def cancel_all_pending(self) -> int:

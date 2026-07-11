@@ -381,8 +381,12 @@ class OrderManagerTradeSource:
     """
     TradeSource 适配器：将 OrderManager 内存订单簿映射为 TradeRecord。
 
-    Wave-1D 限制：LiveOrder 不含逐笔盈亏，profit_ratio / profit_abs 暂为 0，
-    exit_reason 依据 reject_reason 粗略推断。后续接入 DB orders/fills 表后替换。
+    平仓语义：现货多头下，SELL 成交 = 平仓（一笔已闭合交易），BUY 成交 = 开仓
+    （尚未闭合，不计入）。exit_reason 依据订单标注启发式推断，使 StoplossGuard
+    仍能识别止损平仓。
+
+    Wave-1D 限制：LiveOrder 不含逐笔盈亏，profit_ratio / profit_abs 暂为 0。
+    后续接入 DB orders/fills 表后替换为真实盈亏与显式 exit_reason。
     """
 
     def __init__(self, manager: "OrderManager") -> None:
@@ -395,6 +399,9 @@ class OrderManagerTradeSource:
         for order in self._manager._orders.values():
             if order.status != LiveOrderStatus.FILLED:
                 continue
+            # 仅 SELL 成交代表平仓；BUY 为开仓，不是已闭合交易
+            if order.side != LiveOrderSide.SELL:
+                continue
             if symbol is not None and order.symbol != symbol:
                 continue
             close_date = order.filled_at or order.updated_at
@@ -404,9 +411,6 @@ class OrderManagerTradeSource:
             cd = close_date if close_date.tzinfo else close_date.replace(tzinfo=timezone.utc)
             if cd < since:
                 continue
-            exit_reason = "signal"
-            if order.reject_reason and "stop" in order.reject_reason.lower():
-                exit_reason = "stop_loss"
             out.append(
                 TradeRecord(
                     symbol=order.symbol,
@@ -415,10 +419,25 @@ class OrderManagerTradeSource:
                     close_date=cd,
                     profit_ratio=0.0,
                     profit_abs=0.0,
-                    exit_reason=exit_reason,
+                    exit_reason=_infer_exit_reason(order),
                 )
             )
         return out
+
+
+def _infer_exit_reason(order: LiveOrder) -> str:
+    """
+    从平仓订单的标注启发式推断 exit_reason。
+
+    LiveOrder 目前无显式 exit_reason 字段，退而从 strategy_id 约定的标记里推断，
+    使止损/止盈平仓可被 StoplossGuard 等防护识别。无匹配时回退 'signal'。
+    """
+    hint = (order.strategy_id or "").lower()
+    if "stop_loss" in hint or "stoploss" in hint or "stop" in hint:
+        return "stop_loss"
+    if "take_profit" in hint or "takeprofit" in hint or "take-profit" in hint:
+        return "take_profit"
+    return "signal"
 
 
 # 全局单例（在 FastAPI lifespan 中初始化）
@@ -441,19 +460,32 @@ def init_order_manager(redis_client=None) -> OrderManager:
 
 
 async def _attach_protections(manager: OrderManager, redis_client=None) -> None:
-    """从 Redis 加载防护配置，初始化 ProtectionManager 并注入 OMS。"""
+    """从 Redis 加载防护配置与活跃锁，初始化 ProtectionManager 并注入 OMS。"""
     from app.oms.protections.manager import init_protection_manager
-    from app.oms.protections.store import load_config as load_protections_config
+    from app.oms.protections.store import (
+        load_config as load_protections_config,
+        load_locks as load_protection_locks,
+    )
 
     config = None
+    persisted_locks = []
     if redis_client is not None:
         try:
             config = await load_protections_config(redis_client)
         except Exception:
             logger.warning("Failed to load protections config, using defaults")
+        try:
+            persisted_locks = await load_protection_locks(redis_client)
+        except Exception:
+            logger.warning("Failed to load persisted protection locks")
 
     trade_source = OrderManagerTradeSource(manager)
-    prot_manager = init_protection_manager(config=config, trade_source=trade_source)
+    prot_manager = init_protection_manager(
+        config=config, trade_source=trade_source, redis_client=redis_client
+    )
+    if persisted_locks:
+        prot_manager.restore_locks(persisted_locks)
+        logger.info("Restored %d persisted protection lock(s)", len(persisted_locks))
     manager.set_protection_manager(prot_manager)
     logger.info("Dynamic protections attached to OMS")
 

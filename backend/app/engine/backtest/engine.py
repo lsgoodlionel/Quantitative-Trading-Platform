@@ -223,4 +223,8 @@ def _fill_to_dict(fill) -> dict:
         "commission": round(fill.commission, 4),
         "filled_at": fill.filled_at.isoformat() if fill.filled_at else None,
         "realized_pnl": round(fill.realized_pnl, 4),
+        # C7 回合分析 / 标签分组维度（缺省 None，roundtrips 会优雅回退）
+        "entry_tag": getattr(fill, "entry_tag", None),
+        "exit_reason": getattr(fill, "exit_reason", None),
+        "direction": getattr(fill, "direction", "long"),
     }
