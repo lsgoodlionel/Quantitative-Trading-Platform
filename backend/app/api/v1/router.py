@@ -5,6 +5,9 @@ from app.api.v1.endpoints import (
     orders, positions, quant, risk, stream, portfolio_opt,
 )
 from app.api.v1.endpoints import live_strategy
+from app.api.v1.endpoints import (
+    factor_processors, backtest_report, protections, notify,
+)
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -29,3 +32,8 @@ api_router.include_router(stream.router,        prefix="/stream",          tags=
 api_router.include_router(portfolio_opt.router, prefix="/portfolio",       tags=["Portfolio Optimizer"])
 api_router.include_router(alerts.router,        prefix="/alerts",          tags=["Alerts"])
 api_router.include_router(live_strategy.router, prefix="/live-strategies", tags=["Live Strategies"])
+# ── v2.0 Wave 1 ──────────────────────────────────────────────────
+api_router.include_router(factor_processors.router, prefix="/quant",       tags=["Factor Processors"])
+api_router.include_router(backtest_report.router,   prefix="/backtests",   tags=["Backtest Report"])
+api_router.include_router(protections.router,       prefix="/protections", tags=["Protections"])
+api_router.include_router(notify.router,            prefix="/notify",      tags=["Notifications"])

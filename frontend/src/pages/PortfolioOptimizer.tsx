@@ -4,12 +4,16 @@ import { format, subYears } from "date-fns"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
-import { usePortfolioOptimize } from "@/hooks/usePortfolio"
+import { api } from "@/lib/api"
+import { usePortfolioOptimize, usePortfolioAllocate } from "@/hooks/usePortfolio"
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceDot, Cell, PieChart, Pie,
 } from "recharts"
-import type { Market, PortfolioOptMethod, PortfolioOptResult } from "@/types"
+import type {
+  Bar, Market, PortfolioOptMethod, PortfolioOptResult,
+  RiskModel, ExpectedReturnsMethod, AllocationMethod, AllocateResult,
+} from "@/types"
 import { InsightBox } from "@/components/ui/InsightBox"
 import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 
@@ -21,6 +25,24 @@ const METHOD_OPTIONS: { value: PortfolioOptMethod; label: string; desc: string }
   { value: "risk_parity",   label: "风险平价",     desc: "均等化各资产风险贡献" },
   { value: "min_cvar",      label: "最小 CVaR",    desc: "最小化极端损失风险" },
   { value: "equal_weight",  label: "等权重基准",   desc: "等权对照组" },
+]
+
+const RISK_MODEL_OPTIONS: { value: RiskModel; label: string; desc: string }[] = [
+  { value: "sample_cov",     label: "样本协方差",     desc: "历史样本协方差（基准）" },
+  { value: "ledoit_wolf",    label: "Ledoit-Wolf 收缩", desc: "收缩估计，降噪、抗病态（推荐）" },
+  { value: "exp_cov",        label: "指数加权",       desc: "近期数据权重更高，体制感知" },
+  { value: "semicovariance", label: "下行半协方差",   desc: "只统计下行波动，偏重尾部风险" },
+]
+
+const RETURNS_OPTIONS: { value: ExpectedReturnsMethod; label: string; desc: string }[] = [
+  { value: "mean_historical", label: "历史均值",   desc: "历史收益均值（基准）" },
+  { value: "ema_historical",  label: "指数加权均值", desc: "趋势倾斜，近期表现权重更高" },
+  { value: "capm",            label: "CAPM 隐含",   desc: "市场 β 隐含收益，抗噪声均值" },
+]
+
+const ALLOCATION_OPTIONS: { value: AllocationMethod; label: string; desc: string }[] = [
+  { value: "greedy", label: "贪心", desc: "快速、无求解器" },
+  { value: "lp",     label: "整数规划", desc: "L1 最优，略慢" },
 ]
 
 const MARKET_DEFAULTS: Record<string, string[]> = {
@@ -205,7 +227,196 @@ function buildPortfolioInsight(result: PortfolioOptResult) {
   return { verdict, summary, findings, recommendations }
 }
 
-function ResultPanel({ result }: { result: PortfolioOptResult }) {
+// ── 离散配置面板（连续权重 → 整数股数）─────────────────────────
+
+async function fetchLatestPrices(
+  symbols: string[],
+  market: Market,
+): Promise<{ prices: Record<string, number>; missing: string[] }> {
+  const prices: Record<string, number> = {}
+  const missing: string[] = []
+  await Promise.all(
+    symbols.map(async (symbol) => {
+      try {
+        const qs = new URLSearchParams({ symbol, market, frequency: "1d" })
+        const bar = await api.get<Bar | null>(`/api/v1/bars/latest?${qs}`)
+        if (bar && bar.close > 0) prices[symbol] = bar.close
+        else missing.push(symbol)
+      } catch {
+        missing.push(symbol)
+      }
+    }),
+  )
+  return { prices, missing }
+}
+
+function AllocationResultView({ result }: { result: AllocateResult }) {
+  const targetSymbols = Object.keys(result.allocation_weights)
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: "配置方法", value: result.method === "lp" ? "整数规划" : "贪心", color: "text-[#58a6ff]" },
+          { label: "已配置金额", value: `$${result.allocated_value.toLocaleString()}`, color: "text-[#3fb950]" },
+          { label: "剩余现金", value: `$${result.leftover_cash.toLocaleString()}`, color: "text-[#e3b341]" },
+          { label: "权重 RMSE", value: result.rmse.toFixed(4), color: "text-[#e6edf3]" },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="card py-3">
+            <p className="text-xs text-[#6e7681] mb-1">{label}</p>
+            <p className={`font-mono font-semibold text-sm ${color}`}>{value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[#8b949e] text-xs border-b border-[#21262d]">
+              <th className="text-left py-2 pr-3">标的</th>
+              <th className="text-right py-2 pr-3">股数</th>
+              <th className="text-right py-2 pr-3">实际权重</th>
+              <th className="text-right py-2">目标权重</th>
+            </tr>
+          </thead>
+          <tbody>
+            {targetSymbols
+              .sort((a, b) => (result.allocation_weights[b] ?? 0) - (result.allocation_weights[a] ?? 0))
+              .map((sym) => {
+                const shares = result.shares[sym] ?? 0
+                const realized = (result.allocation_weights[sym] ?? 0) * 100
+                return (
+                  <tr key={sym} className="border-b border-[#21262d]/50 last:border-0">
+                    <td className="py-2 pr-3 font-mono text-[#e6edf3] font-medium">{sym}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-[#3fb950]">{shares}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-[#e6edf3]">{realized.toFixed(1)}%</td>
+                    <td className="py-2 text-right font-mono text-xs text-[#8b949e]">
+                      {realized.toFixed(1)}%
+                    </td>
+                  </tr>
+                )
+              })}
+          </tbody>
+        </table>
+      </div>
+
+      {result.skipped.length > 0 && (
+        <p className="text-xs text-[#e3b341]">
+          ⚠ 以下标的因缺少最新价格被跳过，权重已在其余标的上重新归一化：{result.skipped.join(", ")}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function AllocationPanel({
+  result,
+  market,
+}: {
+  result: PortfolioOptResult
+  market: Market
+}) {
+  const { mutate: runAllocate, isPending, data: allocation, error, reset } = usePortfolioAllocate()
+  const [budget, setBudget] = useState<number>(100000)
+  const [method, setMethod] = useState<AllocationMethod>("greedy")
+  const [priceError, setPriceError] = useState<string | null>(null)
+  const [fetchingPrices, setFetchingPrices] = useState(false)
+
+  async function handleAllocate() {
+    setPriceError(null)
+    reset()
+    if (!(budget > 0)) {
+      setPriceError("请输入大于 0 的现金预算")
+      return
+    }
+    const symbols = Object.entries(result.weights)
+      .filter(([, w]) => w > 1e-4)
+      .map(([sym]) => sym)
+
+    setFetchingPrices(true)
+    const { prices, missing } = await fetchLatestPrices(symbols, market)
+    setFetchingPrices(false)
+
+    if (Object.keys(prices).length === 0) {
+      setPriceError(`未能获取任何标的最新价格${missing.length ? `（${missing.join(", ")}）` : ""}`)
+      return
+    }
+
+    runAllocate({
+      weights: result.weights,
+      latest_prices: prices,
+      total_value: budget,
+      method,
+    })
+  }
+
+  const busy = fetchingPrices || isPending
+
+  return (
+    <div className="card space-y-4 border-[#3fb950]/25">
+      <div>
+        <h3 className="text-sm font-semibold text-[#e6edf3]">生成整数配股</h3>
+        <p className="text-[11px] text-[#6e7681] mt-0.5">
+          按最新价格与现金预算，将连续权重转换为可执行的整数股数
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+        <div>
+          <label className="label">现金预算</label>
+          <input
+            type="number"
+            min={0}
+            step={1000}
+            className="input w-full mt-1 font-mono"
+            value={budget}
+            onChange={(e) => setBudget(Number(e.target.value))}
+          />
+        </div>
+        <div>
+          <label className="label">配置算法</label>
+          <div className="flex gap-1 mt-1">
+            {ALLOCATION_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                title={opt.desc}
+                onClick={() => setMethod(opt.value)}
+                className={`flex-1 py-1.5 rounded text-xs font-medium border transition-colors ${
+                  method === opt.value
+                    ? "bg-[#1f6feb]/20 text-[#58a6ff] border-[#58a6ff]/40"
+                    : "text-[#6e7681] border-[#30363d] hover:text-[#e6edf3]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={handleAllocate}
+          className="btn btn-primary w-full"
+        >
+          {busy ? <Spinner size="sm" className="mx-auto" /> : "生成配股方案"}
+        </button>
+      </div>
+
+      {fetchingPrices && (
+        <p className="text-xs text-[#8b949e]">正在获取最新价格…</p>
+      )}
+      {priceError && (
+        <p className="text-xs text-[#f85149]">{priceError}</p>
+      )}
+      {error && !busy && (
+        <p className="text-xs text-[#f85149]">配置失败：{error.message}</p>
+      )}
+      {allocation && !busy && <AllocationResultView result={allocation} />}
+    </div>
+  )
+}
+
+function ResultPanel({ result, market }: { result: PortfolioOptResult; market: Market }) {
   const methodLabel = METHOD_OPTIONS.find((m) => m.value === result.method)?.label ?? result.method
   const insight = buildPortfolioInsight(result)
 
@@ -229,6 +440,28 @@ function ResultPanel({ result }: { result: PortfolioOptResult }) {
           </div>
         ))}
       </div>
+
+      {/* 估计器回显 */}
+      {(result.risk_model || result.expected_returns_method) && (
+        <div className="flex flex-wrap gap-2 text-[11px]">
+          {result.risk_model && (
+            <span className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-[#8b949e]">
+              风险模型：
+              <span className="text-[#58a6ff] ml-1">
+                {RISK_MODEL_OPTIONS.find((o) => o.value === result.risk_model)?.label ?? result.risk_model}
+              </span>
+            </span>
+          )}
+          {result.expected_returns_method && (
+            <span className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-[#8b949e]">
+              预期收益：
+              <span className="text-[#58a6ff] ml-1">
+                {RETURNS_OPTIONS.find((o) => o.value === result.expected_returns_method)?.label ?? result.expected_returns_method}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* 权重分布饼图 */}
@@ -303,6 +536,9 @@ function ResultPanel({ result }: { result: PortfolioOptResult }) {
         recommendations={insight.recommendations}
       />
 
+      {/* 离散配置：连续权重 → 整数股数 */}
+      <AllocationPanel result={result} market={market} />
+
       {/* 下一步操作 CTA */}
       <div className="card border-[#30363d] space-y-3">
         <p className="text-xs font-semibold text-[#8b949e]">📍 优化完成，建议下一步</p>
@@ -360,6 +596,8 @@ interface FormState {
   end_date: string
   method: PortfolioOptMethod
   include_frontier: boolean
+  risk_model: RiskModel
+  expected_returns_method: ExpectedReturnsMethod
 }
 
 export function PortfolioOptimizer() {
@@ -372,7 +610,11 @@ export function PortfolioOptimizer() {
     end_date: today(),
     method: "max_sharpe",
     include_frontier: true,
+    risk_model: "sample_cov",
+    expected_returns_method: "mean_historical",
   })
+  // 记录发起优化时的市场，供离散配置拉取最新价格（表单市场可能后续被改动）
+  const [submittedMarket, setSubmittedMarket] = useState<Market>("US")
 
   function handleMarketChange(m: string) {
     const market = m as Market
@@ -395,6 +637,7 @@ export function PortfolioOptimizer() {
       return
     }
 
+    setSubmittedMarket(form.market)
     runOpt({
       symbols,
       market: form.market,
@@ -402,6 +645,8 @@ export function PortfolioOptimizer() {
       end_date: form.end_date,
       method: form.method,
       include_frontier: form.include_frontier,
+      risk_model: form.risk_model,
+      expected_returns_method: form.expected_returns_method,
     })
   }
 
@@ -506,6 +751,40 @@ export function PortfolioOptimizer() {
             </div>
           </div>
 
+          {/* 风险模型 */}
+          <div>
+            <label className="label">风险模型（协方差估计）</label>
+            <select
+              className="input w-full mt-1 text-xs"
+              value={form.risk_model}
+              onChange={(e) => setForm((f) => ({ ...f, risk_model: e.target.value as RiskModel }))}
+            >
+              {RISK_MODEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-[#6e7681] mt-1">
+              {RISK_MODEL_OPTIONS.find((o) => o.value === form.risk_model)?.desc}
+            </p>
+          </div>
+
+          {/* 预期收益估计 */}
+          <div>
+            <label className="label">预期收益估计</label>
+            <select
+              className="input w-full mt-1 text-xs"
+              value={form.expected_returns_method}
+              onChange={(e) => setForm((f) => ({ ...f, expected_returns_method: e.target.value as ExpectedReturnsMethod }))}
+            >
+              {RETURNS_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-[#6e7681] mt-1">
+              {RETURNS_OPTIONS.find((o) => o.value === form.expected_returns_method)?.desc}
+            </p>
+          </div>
+
           {/* 有效前沿开关 */}
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -552,7 +831,7 @@ export function PortfolioOptimizer() {
             </div>
           )}
 
-          {result && !isPending && <ResultPanel result={result} />}
+          {result && !isPending && <ResultPanel result={result} market={submittedMarket} />}
         </div>
       </div>
     </AppShell>

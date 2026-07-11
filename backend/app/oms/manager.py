@@ -47,12 +47,17 @@ class OrderManager:
         await manager.stop()
     """
 
-    def __init__(self, redis_client=None) -> None:
+    def __init__(self, redis_client=None, protection_manager=None) -> None:
         self._gateways: dict[str, TradingGateway] = {}
         self._orders: dict[str, LiveOrder] = {}   # order_id → LiveOrder
         self._redis = redis_client
+        self._protections = protection_manager   # 可选：ProtectionManager，None 时跳过防护
         self._poll_task: Optional[asyncio.Task] = None
         self._running = False
+
+    def set_protection_manager(self, protection_manager) -> None:
+        """注入动态防护管理器（None 时跳过防护）。"""
+        self._protections = protection_manager
 
     # ── 网关注册 ──────────────────────────────────────────────
 
@@ -115,6 +120,20 @@ class OrderManager:
 
         self._pre_trade_risk_check(order)
 
+        # 动态防护：仅对入场（BUY）订单 gate；平仓/卖出永不阻断（不困住持仓）
+        if self._protections is not None and side == LiveOrderSide.BUY:
+            lock = self._protections.check_entry(symbol, market)
+            if lock is not None:
+                order.status = LiveOrderStatus.REJECTED
+                order.reject_reason = (
+                    f"[PROTECTION:{lock.protection_type.value}] {lock.reason}"
+                )
+                order.updated_at = datetime.now(timezone.utc)
+                self._orders[order.order_id] = order
+                await self._publish_order_event(order)
+                self._notify_protection(lock, order)
+                return order
+
         gw = self.get_gateway(market)
         if not gw.is_connected:
             raise RuntimeError(f"Gateway for {market} is not connected")
@@ -130,6 +149,7 @@ class OrderManager:
             order.status = LiveOrderStatus.REJECTED
             order.reject_reason = str(e)
             logger.error("Order rejected by gateway: %s", e)
+            self._notify_order_reject(order)
 
         order.updated_at = datetime.now(timezone.utc)
         self._orders[order.order_id] = order
@@ -275,6 +295,14 @@ class OrderManager:
 
         if new_status != old_status:
             asyncio.create_task(self._publish_order_event(order))
+            if new_status in (LiveOrderStatus.FILLED, LiveOrderStatus.PARTIAL):
+                self._notify_fill(order)
+                # 成交后重新评估防护，使新触发的锁在下一次入场前生效
+                if self._protections is not None:
+                    try:
+                        self._protections.evaluate()
+                    except Exception:
+                        logger.debug("Protection evaluate on fill failed")
 
     # ── 事件发布 ──────────────────────────────────────────────
 
@@ -290,6 +318,107 @@ class OrderManager:
             )
         except Exception:
             logger.debug("Failed to publish order event to Redis")
+
+    # ── 通知分发（fire-and-forget，不阻塞热路径） ──────────────
+
+    def _notify_protection(self, lock, order: LiveOrder) -> None:
+        try:
+            from app.tasks.notify import emit_event
+
+            emit_event(
+                "protection",
+                f"防护熔断阻止入场 · {order.symbol}",
+                symbol=order.symbol,
+                market=order.market,
+                payload={
+                    "protection_type": lock.protection_type.value,
+                    "scope": lock.scope.value,
+                    "reason": lock.reason,
+                    "until": lock.until.isoformat(),
+                },
+            )
+        except Exception:
+            logger.debug("Failed to dispatch protection notification")
+
+    def _notify_order_reject(self, order: LiveOrder) -> None:
+        try:
+            from app.tasks.notify import emit_event
+
+            emit_event(
+                "order_reject",
+                f"订单被拒 · {order.symbol}",
+                symbol=order.symbol,
+                market=order.market,
+                payload={
+                    "order_id": order.order_id,
+                    "reason": order.reject_reason or "unknown",
+                },
+            )
+        except Exception:
+            logger.debug("Failed to dispatch order-reject notification")
+
+    def _notify_fill(self, order: LiveOrder) -> None:
+        try:
+            from app.tasks.notify import emit_event
+
+            emit_event(
+                "trade_fill",
+                f"订单成交 · {order.symbol}",
+                symbol=order.symbol,
+                market=order.market,
+                payload={
+                    "order_id": order.order_id,
+                    "side": order.side.value,
+                    "filled_qty": order.filled_qty,
+                    "avg_fill_price": order.avg_fill_price,
+                },
+            )
+        except Exception:
+            logger.debug("Failed to dispatch fill notification")
+
+
+class OrderManagerTradeSource:
+    """
+    TradeSource 适配器：将 OrderManager 内存订单簿映射为 TradeRecord。
+
+    Wave-1D 限制：LiveOrder 不含逐笔盈亏，profit_ratio / profit_abs 暂为 0，
+    exit_reason 依据 reject_reason 粗略推断。后续接入 DB orders/fills 表后替换。
+    """
+
+    def __init__(self, manager: "OrderManager") -> None:
+        self._manager = manager
+
+    def get_closed_trades(self, symbol, since):
+        from app.oms.protections.base import TradeRecord
+
+        out = []
+        for order in self._manager._orders.values():
+            if order.status != LiveOrderStatus.FILLED:
+                continue
+            if symbol is not None and order.symbol != symbol:
+                continue
+            close_date = order.filled_at or order.updated_at
+            if close_date is None:
+                continue
+            # since 为带时区 UTC；close_date 为 naive UTC，比较时补 tzinfo
+            cd = close_date if close_date.tzinfo else close_date.replace(tzinfo=timezone.utc)
+            if cd < since:
+                continue
+            exit_reason = "signal"
+            if order.reject_reason and "stop" in order.reject_reason.lower():
+                exit_reason = "stop_loss"
+            out.append(
+                TradeRecord(
+                    symbol=order.symbol,
+                    market=order.market,
+                    side=order.side.value,
+                    close_date=cd,
+                    profit_ratio=0.0,
+                    profit_abs=0.0,
+                    exit_reason=exit_reason,
+                )
+            )
+        return out
 
 
 # 全局单例（在 FastAPI lifespan 中初始化）
@@ -311,6 +440,24 @@ def init_order_manager(redis_client=None) -> OrderManager:
     return _manager
 
 
+async def _attach_protections(manager: OrderManager, redis_client=None) -> None:
+    """从 Redis 加载防护配置，初始化 ProtectionManager 并注入 OMS。"""
+    from app.oms.protections.manager import init_protection_manager
+    from app.oms.protections.store import load_config as load_protections_config
+
+    config = None
+    if redis_client is not None:
+        try:
+            config = await load_protections_config(redis_client)
+        except Exception:
+            logger.warning("Failed to load protections config, using defaults")
+
+    trade_source = OrderManagerTradeSource(manager)
+    prot_manager = init_protection_manager(config=config, trade_source=trade_source)
+    manager.set_protection_manager(prot_manager)
+    logger.info("Dynamic protections attached to OMS")
+
+
 async def init_paper_order_manager(redis_client=None) -> OrderManager:
     """
     初始化纸面交易 OMS（无需真实券商配置）。
@@ -328,6 +475,7 @@ async def init_paper_order_manager(redis_client=None) -> OrderManager:
         _manager.register_gateway(market, gw)
 
     await _manager.start()
+    await _attach_protections(_manager, redis_client)
     logger.info("Paper trading OMS initialized for markets: US / HK / A")
     return _manager
 
@@ -395,5 +543,6 @@ async def init_hybrid_order_manager(redis_client=None) -> OrderManager:
         _manager.register_gateway(market, gw)
 
     await _manager.start()
+    await _attach_protections(_manager, redis_client)
     logger.info("Hybrid OMS initialized")
     return _manager

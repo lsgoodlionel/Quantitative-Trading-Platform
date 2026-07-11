@@ -190,6 +190,13 @@ export interface Account {
 export type PortfolioOptMethod =
   | "max_sharpe" | "min_volatility" | "risk_parity" | "min_cvar" | "equal_weight"
 
+// ── 组合优化：风险模型 & 预期收益估计 (D1) ──
+export type RiskModel =
+  | "sample_cov" | "ledoit_wolf" | "exp_cov" | "semicovariance"
+
+export type ExpectedReturnsMethod =
+  | "mean_historical" | "ema_historical" | "capm"
+
 export interface PortfolioOptRequest {
   symbols: string[]
   market: Market
@@ -197,6 +204,8 @@ export interface PortfolioOptRequest {
   end_date: string
   method: PortfolioOptMethod
   include_frontier: boolean
+  risk_model?: RiskModel                            // 新增，默认 "sample_cov"
+  expected_returns_method?: ExpectedReturnsMethod   // 新增，默认 "mean_historical"
 }
 
 export interface PortfolioFrontierPoint {
@@ -214,6 +223,29 @@ export interface PortfolioOptResult {
   cvar_95: number
   frontier: PortfolioFrontierPoint[]
   risk_contributions: Record<string, number>
+  risk_model?: string                 // 新增回显
+  expected_returns_method?: string    // 新增回显
+}
+
+// ── 离散配置 (D2) ──
+export type AllocationMethod = "greedy" | "lp"
+
+export interface AllocateRequest {
+  weights: Record<string, number>
+  latest_prices: Record<string, number>
+  total_value: number
+  method: AllocationMethod
+}
+
+export interface AllocateResult {
+  method: string
+  shares: Record<string, number>
+  leftover_cash: number
+  allocated_value: number
+  total_value: number
+  allocation_weights: Record<string, number>
+  rmse: number
+  skipped: string[]
 }
 
 // ── 策略 ──────────────────────────────────────────────────────
@@ -325,4 +357,129 @@ export interface RiskViolation {
   value_actual: number | null
   value_limit: number | null
   timestamp: string
+}
+
+// ── 动态防护 / 熔断 ────────────────────────────────────────────
+export type ProtectionType =
+  | "stoploss_guard"
+  | "cooldown_period"
+  | "max_drawdown"
+  | "low_profit_pairs"
+
+export type LockScope = "global" | "symbol"
+
+export interface ProtectionRuleConfig {
+  type: ProtectionType
+  enabled: boolean
+  stop_duration_minutes: number
+  lookback_minutes?: number
+  trade_limit?: number
+  required_profit?: number
+  only_per_symbol?: boolean
+  max_allowed_drawdown?: number
+  min_profit_ratio?: number
+  required_trades?: number
+}
+
+export interface ProtectionsConfig {
+  is_active: boolean
+  rules: ProtectionRuleConfig[]
+}
+
+export interface ActiveLock {
+  id: string
+  scope: LockScope
+  symbol: string | null
+  market: Market | null
+  reason: string
+  protection_type: ProtectionType
+  locked_at: string
+  until: string
+  active: boolean
+}
+
+// ── 多渠道通知 ─────────────────────────────────────────────────
+export type ChannelType = "telegram" | "webhook"
+export type WebhookFormat = "json" | "form" | "raw"
+
+export type NotifyEventType =
+  | "trade_fill"
+  | "order_reject"
+  | "pnl_update"
+  | "position"
+  | "daily_summary"
+  | "risk_alert"
+  | "protection"
+
+export interface TelegramChannelConfig {
+  bot_token: string
+  chat_id: string
+  parse_mode: "HTML" | "Markdown"
+}
+
+export interface WebhookChannelConfig {
+  url: string
+  format: WebhookFormat
+  timeout_seconds: number
+  retries: number
+  retry_delay_seconds: number
+  secret_header?: string | null
+  secret_value?: string | null
+}
+
+export interface ChannelConfig {
+  id: string
+  type: ChannelType
+  name: string
+  enabled: boolean
+  events: NotifyEventType[]
+  telegram?: TelegramChannelConfig | null
+  webhook?: WebhookChannelConfig | null
+}
+
+export interface NotifyConfig {
+  is_active: boolean
+  channels: ChannelConfig[]
+  min_pnl_notify_abs: number
+  daily_summary_time: string
+}
+
+export interface TelegramChannelStatus {
+  configured: boolean
+  token_hint: string | null
+  chat_id: string
+  parse_mode: "HTML" | "Markdown"
+}
+
+export interface WebhookChannelStatus {
+  url: string
+  format: WebhookFormat
+  timeout_seconds: number
+  retries: number
+  retry_delay_seconds: number
+  has_secret: boolean
+}
+
+export interface ChannelStatus {
+  id: string
+  type: ChannelType
+  name: string
+  enabled: boolean
+  events: NotifyEventType[]
+  telegram?: TelegramChannelStatus | null
+  webhook?: WebhookChannelStatus | null
+}
+
+export interface NotifyConfigStatus {
+  is_active: boolean
+  channels: ChannelStatus[]
+  min_pnl_notify_abs: number
+  daily_summary_time: string
+}
+
+export interface NotifyTestResponse {
+  ok: boolean
+  channel_id: string
+  detail: string | null
+  error: string | null
 }

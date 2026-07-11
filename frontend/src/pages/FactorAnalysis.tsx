@@ -18,6 +18,8 @@ import type { Market, Frequency } from "@/types"
 import { InsightBox } from "@/components/ui/InsightBox"
 import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 import { FormulaBuilder } from "./factor/FormulaBuilder"
+import { ProcessorPipeline } from "./factor/ProcessorPipeline"
+import { FactorFitness } from "./factor/FactorFitness"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -225,7 +227,14 @@ function FactorSeriesChart({ data }: { data: { time: string; value: number }[] }
 
 // ── Main Page ──────────────────────────────────────────────────────
 
-type FactorMode = "preset" | "formula"
+type FactorMode = "preset" | "formula" | "processors" | "fitness"
+
+const MODE_TABS: { key: FactorMode; label: string; accent: string }[] = [
+  { key: "preset",     label: "预设因子",       accent: "#bc8cff" },
+  { key: "formula",    label: "⚡ 公式因子",     accent: "#58a6ff" },
+  { key: "processors", label: "🧪 截面处理流水线", accent: "#3fb950" },
+  { key: "fitness",    label: "🎯 成本感知适应度", accent: "#e3b341" },
+]
 
 export function FactorAnalysis() {
   const { data: factorList = [], isLoading: factorsLoading } = useFactorList()
@@ -283,32 +292,34 @@ export function FactorAnalysis() {
 
   return (
     <AppShell title="因子分析" help={PAGE_HELP.factor}>
+      {/* ── 顶部页签 ── */}
+      <div className="flex flex-wrap gap-1 bg-[#161b22] rounded-lg p-1 border border-[#21262d] mb-6">
+        {MODE_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setMode(t.key)}
+            className={`flex-1 min-w-[120px] py-1.5 rounded text-xs font-medium transition-colors ${
+              mode === t.key ? "text-[#e6edf3]" : "text-[#8b949e] hover:text-[#e6edf3]"
+            }`}
+            style={mode === t.key ? { background: `${t.accent}22`, color: t.accent } : {}}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {mode === "processors" && (
+        <ProcessorPipeline factorList={factorList} formulaTokens={tokens} />
+      )}
+      {mode === "fitness" && (
+        <FactorFitness factorList={factorList} formulaTokens={tokens} />
+      )}
+
+      {(mode === "preset" || mode === "formula") && (
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
         {/* ── Config Panel ── */}
         <div className="xl:col-span-1 space-y-4">
-          {/* 模式切换 */}
-          <div className="flex gap-1 bg-[#161b22] rounded-lg p-1 border border-[#21262d]">
-            <button
-              onClick={() => setMode("preset")}
-              className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
-                mode === "preset"
-                  ? "bg-[#bc8cff]/20 text-[#bc8cff]"
-                  : "text-[#8b949e] hover:text-[#e6edf3]"
-              }`}>
-              预设因子
-            </button>
-            <button
-              onClick={() => setMode("formula")}
-              className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
-                mode === "formula"
-                  ? "bg-[#58a6ff]/20 text-[#58a6ff]"
-                  : "text-[#8b949e] hover:text-[#e6edf3]"
-              }`}>
-              ⚡ 公式因子
-            </button>
-          </div>
-
           <div className="card">
             <h3 className="text-sm font-semibold text-[#e6edf3] mb-4">
               {mode === "preset" ? "分析参数" : "标的与周期"}
@@ -679,6 +690,7 @@ export function FactorAnalysis() {
           )}
         </div>
       </div>
+      )}
     </AppShell>
   )
 }

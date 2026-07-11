@@ -6,6 +6,9 @@ import { EquityCurve } from "@/components/charts/EquityCurve"
 import { DrawdownChart } from "@/components/charts/DrawdownChart"
 import { MonthlyHeatmap } from "@/components/charts/MonthlyHeatmap"
 import { useStrategies, useRunBacktest, useOptimize, useMonteCarlo } from "@/hooks/useBacktest"
+import { useBacktestReport } from "@/hooks/useBacktestReport"
+import { TearsheetTab } from "@/components/backtest/TearsheetTab"
+import { TradeAnalyticsTab } from "@/components/backtest/TradeAnalyticsTab"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import {
@@ -171,6 +174,44 @@ function ConfigPanel({ form, strategies, isLoading, error, onChange, onSubmit, s
   )
 }
 
+// ── 扩展报告 Tab 加载/错误/空态包装 ──────────────────────────────
+interface ReportSectionProps {
+  loading: boolean
+  error: Error | null
+  hasForm: boolean
+  loadingLabel: string
+  children: React.ReactNode
+}
+function ReportSection({ loading, error, hasForm, loadingLabel, children }: ReportSectionProps) {
+  if (!hasForm) {
+    return (
+      <div className="card">
+        <EmptyState title="无法加载扩展分析" description="缺少回测配置，请重新运行回测" />
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div className="card flex items-center justify-center h-48">
+        <div className="text-center">
+          <Spinner size="lg" className="mx-auto mb-3" />
+          <p className="text-[#8b949e] text-sm">{loadingLabel}</p>
+        </div>
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="card">
+        <p className="text-[#f85149] text-xs bg-[#2a1b1b] border border-[#f85149]/30 rounded px-3 py-2">
+          {error.message}
+        </p>
+      </div>
+    )
+  }
+  return <>{children}</>
+}
+
 // ── Tab: 回测结果 ─────────────────────────────────────────────
 interface BacktestResultPanelProps {
   result: BacktestResult
@@ -178,10 +219,31 @@ interface BacktestResultPanelProps {
   form?: BacktestRequest
 }
 
+type ResultTab = "overview" | "tearsheet" | "trade_analytics" | "drawdown" | "monthly" | "trades"
+
 function BacktestResultPanel({ result, form }: BacktestResultPanelProps) {
   const navigate = useNavigate()
   const m = result.metrics
-  const [resultTab, setResultTab] = useState<"overview" | "drawdown" | "monthly" | "trades">("overview")
+  const [resultTab, setResultTab] = useState<ResultTab>("overview")
+
+  // ── C6/C7 扩展报告：按需在切换到 Tearsheet / 交易分析 Tab 时拉取 ──
+  const {
+    mutate: fetchReport, data: report, isPending: reportLoading,
+    error: reportError, reset: resetReport,
+  } = useBacktestReport()
+  const needsReport = resultTab === "tearsheet" || resultTab === "trade_analytics"
+
+  // 新回测结果到达时清空旧扩展报告，下次进入扩展 Tab 重新拉取
+  useEffect(() => {
+    resetReport()
+  }, [result.backtest_id, resetReport])
+
+  // 首次进入扩展 Tab 且尚未加载/出错时拉取
+  useEffect(() => {
+    if (needsReport && form && !report && !reportLoading && !reportError) {
+      fetchReport(form)
+    }
+  }, [needsReport, form, report, reportLoading, reportError, fetchReport])
 
   /** 是否达到模拟盘门槛（Sharpe>0.5, 回撤<30%, 正收益） */
   const isQualified = m.sharpe_ratio >= 0.5 && Math.abs(m.max_drawdown_pct) < 30 && m.total_return_pct > 0
@@ -199,11 +261,13 @@ function BacktestResultPanel({ result, form }: BacktestResultPanelProps) {
     navigate(`/live-strategy?${params.toString()}`)
   }
 
-  const RESULT_TABS = [
-    { key: "overview" as const, label: "总览" },
-    { key: "drawdown" as const, label: "回撤" },
-    { key: "monthly" as const, label: "月度收益" },
-    { key: "trades" as const, label: "交易记录" },
+  const RESULT_TABS: { key: ResultTab; label: string }[] = [
+    { key: "overview", label: "总览" },
+    { key: "tearsheet", label: "Tearsheet" },
+    { key: "trade_analytics", label: "交易分析" },
+    { key: "drawdown", label: "回撤" },
+    { key: "monthly", label: "月度收益" },
+    { key: "trades", label: "交易记录" },
   ]
 
   const excess = m.total_return_pct - m.buy_hold_return_pct
@@ -310,6 +374,27 @@ function BacktestResultPanel({ result, form }: BacktestResultPanelProps) {
             </div>
           </div>
         </>
+      )}
+
+      {/* Tearsheet (C7) */}
+      {resultTab === "tearsheet" && (
+        <ReportSection loading={reportLoading} error={reportError} hasForm={!!form} loadingLabel="生成 Tearsheet 中…">
+          <TearsheetTab
+            rolling={report?.rolling_stats}
+            drawdownPeriods={report?.drawdown_periods ?? []}
+          />
+        </ReportSection>
+      )}
+
+      {/* 交易分析 (C6/C7) */}
+      {resultTab === "trade_analytics" && (
+        <ReportSection loading={reportLoading} error={reportError} hasForm={!!form} loadingLabel="计算逐笔分析中…">
+          <TradeAnalyticsTab
+            analytics={report?.trade_analytics}
+            tagMetrics={report?.tag_metrics}
+            periodic={report?.periodic_stats}
+          />
+        </ReportSection>
       )}
 
       {/* 回撤 */}

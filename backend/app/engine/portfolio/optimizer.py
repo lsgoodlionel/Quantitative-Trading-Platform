@@ -22,6 +22,9 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize, OptimizeResult
 
+from app.engine.portfolio.expected_returns import ReturnsModel, expected_returns
+from app.engine.portfolio.risk_models import RiskModel, risk_matrix
+
 logger = logging.getLogger(__name__)
 
 RISK_FREE_RATE = 0.05  # 年化无风险利率
@@ -50,6 +53,9 @@ class PortfolioOptResult:
     frontier: list[dict] = field(default_factory=list)   # [{vol, ret, sharpe}]
     # 各资产风险贡献（风险平价时计算）
     risk_contributions: dict[str, float] = field(default_factory=dict)
+    # 回显所用估计器（供 UI 展示）
+    risk_model: str = RiskModel.SAMPLE_COV.value
+    expected_returns_method: str = ReturnsModel.MEAN_HISTORICAL.value
 
 
 # ── 核心数学函数 ───────────────────────────────────────────────
@@ -236,6 +242,9 @@ def optimize_portfolio(
     prices: pd.DataFrame,
     method: OptimizeMethod = OptimizeMethod.MAX_SHARPE,
     include_frontier: bool = True,
+    *,
+    risk_model: RiskModel = RiskModel.SAMPLE_COV,
+    expected_returns_method: ReturnsModel = ReturnsModel.MEAN_HISTORICAL,
 ) -> PortfolioOptResult:
     """
     对价格 DataFrame 进行组合优化。
@@ -244,6 +253,8 @@ def optimize_portfolio(
         prices: 收盘价 DataFrame，index=日期, columns=symbol
         method: 优化方法
         include_frontier: 是否计算有效前沿
+        risk_model: 协方差估计器（默认样本协方差，向后兼容）
+        expected_returns_method: 预期收益估计器（默认历史均值，向后兼容）
 
     Returns:
         PortfolioOptResult
@@ -256,13 +267,16 @@ def optimize_portfolio(
     if len(prices) < 60:
         raise ValueError("至少需要 60 个交易日数据")
 
-    # 计算日收益率
+    # CVaR 仍用原始日收益
     returns = prices.pct_change().dropna()
     returns_matrix = returns.values
 
-    # 年化统计量
-    mu = returns.mean().values * TRADING_DAYS          # 年化期望收益
-    cov = returns.cov().values * TRADING_DAYS          # 年化协方差矩阵
+    # 年化统计量（改用可插拔估计器，输出已年化）
+    mu_series = expected_returns(prices, expected_returns_method)
+    cov_df = risk_matrix(prices, risk_model)
+    # 按 symbols 顺序对齐
+    mu = mu_series.reindex(symbols).to_numpy()
+    cov = cov_df.reindex(index=symbols, columns=symbols).to_numpy()
 
     # 根据方法优化
     if method == OptimizeMethod.MAX_SHARPE:
@@ -311,4 +325,12 @@ def optimize_portfolio(
         cvar_95=round(cvar_val, 2),
         frontier=frontier,
         risk_contributions=rc_dict,
+        risk_model=(
+            risk_model.value if isinstance(risk_model, RiskModel) else str(risk_model)
+        ),
+        expected_returns_method=(
+            expected_returns_method.value
+            if isinstance(expected_returns_method, ReturnsModel)
+            else str(expected_returns_method)
+        ),
     )

@@ -12,6 +12,8 @@ import { useToast } from "@/components/ui/Toast"
 import type { RiskConfig, RiskRule, Market } from "@/types"
 import { InsightBox } from "@/components/ui/InsightBox"
 import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
+import { ProtectionsCard } from "@/components/risk/ProtectionsCard"
+import { ActiveLocksPanel } from "@/components/risk/ActiveLocksPanel"
 
 const RULE_LABELS: Record<string, string> = {
   max_position_pct:    "最大持仓比例 (%)",
@@ -347,6 +349,9 @@ export function Risk() {
               </div>
             )}
           </div>
+
+          {/* 动态保护 / 熔断 */}
+          <ProtectionsCard />
         </div>
 
         {/* Right sidebar: Summary + VaR */}
@@ -374,6 +379,9 @@ export function Risk() {
               <p className="text-[#6e7681] text-sm">加载中…</p>
             )}
           </div>
+
+          {/* 当前锁定（动态保护） */}
+          <ActiveLocksPanel />
 
           {/* Violations */}
           {summary && (summary.violations?.length ?? 0) > 0 && (

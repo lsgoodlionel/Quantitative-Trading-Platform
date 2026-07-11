@@ -20,6 +20,9 @@ from app.core.database import get_db
 from app.data.models import Market, Frequency
 from app.data.service import DataService
 from app.engine.portfolio.optimizer import OptimizeMethod, optimize_portfolio
+from app.engine.portfolio.risk_models import RiskModel
+from app.engine.portfolio.expected_returns import ReturnsModel
+from app.engine.portfolio.discrete_allocation import AllocationMethod, allocate
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,6 +37,9 @@ class OptimizePortfolioRequest(BaseModel):
     end_date: str = Field(..., description="YYYY-MM-DD")
     method: OptimizeMethod = OptimizeMethod.MAX_SHARPE
     include_frontier: bool = True
+    # ── D1：风险模型 & 预期收益估计（带默认值，向后兼容）──
+    risk_model: RiskModel = RiskModel.SAMPLE_COV
+    expected_returns_method: ReturnsModel = ReturnsModel.MEAN_HISTORICAL
 
     @field_validator("symbols")
     @classmethod
@@ -50,6 +56,38 @@ class PortfolioOptResponse(BaseModel):
     cvar_95: float
     frontier: list[dict]
     risk_contributions: dict[str, float]
+    # ── D1 回显：所用估计器 ──
+    risk_model: str
+    expected_returns_method: str
+
+
+# ── D2：离散配置 Schemas ──────────────────────────────────────
+
+class AllocateRequest(BaseModel):
+    weights: dict[str, float] = Field(..., description="symbol → 连续权重")
+    latest_prices: dict[str, float] = Field(..., description="symbol → 最新价格")
+    total_value: float = Field(..., gt=0, description="待配置现金预算")
+    method: AllocationMethod = AllocationMethod.GREEDY
+
+    @field_validator("weights")
+    @classmethod
+    def non_empty(cls, v: dict[str, float]) -> dict[str, float]:
+        if not v:
+            raise ValueError("weights must be non-empty")
+        if any(w < 0 for w in v.values()):
+            raise ValueError("negative weights not supported (long-only)")
+        return v
+
+
+class AllocateResponse(BaseModel):
+    method: str
+    shares: dict[str, int]
+    leftover_cash: float
+    allocated_value: float
+    total_value: float
+    allocation_weights: dict[str, float]
+    rmse: float
+    skipped: list[str]
 
 
 # ── 数据获取 ──────────────────────────────────────────────────
@@ -150,6 +188,8 @@ async def optimize(
             prices,
             body.method,
             body.include_frontier,
+            risk_model=body.risk_model,
+            expected_returns_method=body.expected_returns_method,
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
@@ -166,4 +206,42 @@ async def optimize(
         cvar_95=result.cvar_95,
         frontier=result.frontier,
         risk_contributions=result.risk_contributions,
+        risk_model=result.risk_model,
+        expected_returns_method=result.expected_returns_method,
+    )
+
+
+@router.post("/allocate", response_model=AllocateResponse)
+async def allocate_portfolio(body: AllocateRequest) -> AllocateResponse:
+    """
+    离散配置：将连续权重按现金预算与最新价格转换为整数股数。
+
+    - **greedy**: 贪心迭代（默认，无求解器，快速）
+    - **lp**: 整数线性规划（scipy.optimize.milp，L1 最优）
+
+    纯计算、无市场数据拉取；weights 中缺失价格的 symbol 计入 skipped。
+    """
+    try:
+        result = await asyncio.to_thread(
+            allocate,
+            body.weights,
+            body.latest_prices,
+            body.total_value,
+            body.method,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    except Exception as e:
+        logger.exception("Discrete allocation failed")
+        raise HTTPException(500, detail=f"Allocation failed: {e}")
+
+    return AllocateResponse(
+        method=result.method,
+        shares=result.shares,
+        leftover_cash=result.leftover_cash,
+        allocated_value=result.allocated_value,
+        total_value=result.total_value,
+        allocation_weights=result.allocation_weights,
+        rmse=result.rmse,
+        skipped=result.skipped,
     )

@@ -10,6 +10,7 @@ import {
   useTestAlpacaConnection,
 } from "@/hooks/useBrokerConfig"
 import { useDataConfigStatus, type FeedStatus, type MarketDataStatus } from "@/hooks/useDataConfig"
+import { NotifyChannelsSection } from "@/components/settings/NotifyChannelsSection"
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
 
@@ -525,6 +526,11 @@ export function Settings() {
         {/* Alpaca broker config */}
         <Section title="美股通道 — Alpaca Markets">
           <AlpacaConfigSection />
+        </Section>
+
+        {/* 多渠道通知 */}
+        <Section title="通知渠道 — Telegram / Webhook">
+          <NotifyChannelsSection />
         </Section>
 
         {/* A股 + 港股 data channel status */}
