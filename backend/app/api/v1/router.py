@@ -30,6 +30,8 @@ api_router.include_router(auth.router,          prefix="/auth",            tags=
 api_router.include_router(bars.router,          prefix="/bars",            tags=["Market Data"])
 api_router.include_router(strategies.router,    prefix="/strategies",      tags=["Strategies"])
 api_router.include_router(backtests.router,     prefix="/backtests",       tags=["Backtests"])
+# order_algos 必须在 orders 之前注册：否则 orders 的 /{order_id} 会吞掉 /orders/algo
+api_router.include_router(order_algos.router,    prefix="/orders",          tags=["Order Algos"])
 api_router.include_router(orders.router,        prefix="/orders",          tags=["Orders"])
 api_router.include_router(positions.router,     prefix="/positions",       tags=["Positions"])
 api_router.include_router(risk.router,          prefix="/risk",            tags=["Risk"])
@@ -54,7 +56,6 @@ api_router.include_router(backtest_validation.router, prefix="/backtests",   tag
 api_router.include_router(factor_mining.router,       prefix="/quant",        tags=["Factor Mining"])
 api_router.include_router(topk_portfolio.router,      prefix="/portfolio",    tags=["Portfolio Optimizer"])
 api_router.include_router(backtest_robustness.router, prefix="/backtests",    tags=["Backtest Robustness"])
-api_router.include_router(order_algos.router,         prefix="/orders",       tags=["Order Algos"])
 api_router.include_router(pairlist.router,            prefix="/screener",     tags=["Pairlist"])
 api_router.include_router(news.router,                prefix="/news",         tags=["News"])
 api_router.include_router(calendar.router,            prefix="/calendar",     tags=["Calendar"])
