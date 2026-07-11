@@ -5,17 +5,27 @@ import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { api } from "@/lib/api"
-import { usePortfolioOptimize, usePortfolioAllocate } from "@/hooks/usePortfolio"
+import { usePortfolioAllocate } from "@/hooks/usePortfolio"
+import { useAdvancedPortfolioOptimize } from "@/hooks/usePortfolioAdvanced"
+import type {
+  AdvancedOptMethod, AdvancedOptResult, AdvancedRiskModel,
+  AdvancedReturnsMethod, HrpLinkage, BLViewInput,
+} from "@/hooks/usePortfolioAdvanced"
 import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceDot, Cell, PieChart, Pie,
 } from "recharts"
 import type {
-  Bar, Market, PortfolioOptMethod, PortfolioOptResult,
-  RiskModel, ExpectedReturnsMethod, AllocationMethod, AllocateResult,
+  Bar, Market, AllocationMethod, AllocateResult,
 } from "@/types"
 import { InsightBox } from "@/components/ui/InsightBox"
 import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
+
+// 类型别名：沿用页面内既有命名，底层改用高级 hook 的超集类型
+type PortfolioOptMethod = AdvancedOptMethod
+type PortfolioOptResult = AdvancedOptResult
+type RiskModel = AdvancedRiskModel
+type ExpectedReturnsMethod = AdvancedReturnsMethod
 
 // ── 常量 ──────────────────────────────────────────────────────
 
@@ -23,9 +33,32 @@ const METHOD_OPTIONS: { value: PortfolioOptMethod; label: string; desc: string }
   { value: "max_sharpe",    label: "最大夏普",     desc: "最大化风险调整后收益" },
   { value: "min_volatility",label: "最小波动",     desc: "最小化组合波动率" },
   { value: "risk_parity",   label: "风险平价",     desc: "均等化各资产风险贡献" },
-  { value: "min_cvar",      label: "最小 CVaR",    desc: "最小化极端损失风险" },
+  { value: "hrp",           label: "层次风险平价 HRP", desc: "相关性聚类 + 递归二分，小样本更稳，无需求逆" },
+  { value: "black_litterman", label: "Black-Litterman", desc: "市场均衡先验 + 你的观点，Idzorek 置信度加权" },
+  { value: "min_cvar",      label: "最小 CVaR",    desc: "线性规划最小化尾部损失（条件风险价值）" },
+  { value: "min_cdar",      label: "最小 CDaR",    desc: "线性规划最小化条件回撤风险" },
   { value: "equal_weight",  label: "等权重基准",   desc: "等权对照组" },
 ]
+
+const HRP_LINKAGE_OPTIONS: { value: HrpLinkage; label: string }[] = [
+  { value: "single",   label: "single（最近邻）" },
+  { value: "complete", label: "complete（最远邻）" },
+  { value: "average",  label: "average（平均）" },
+  { value: "ward",     label: "ward（方差最小）" },
+]
+
+/** 需要 BL 观点输入的方法 */
+function isBlackLitterman(m: PortfolioOptMethod): boolean {
+  return m === "black_litterman"
+}
+/** 需要 HRP 连接方式选项的方法 */
+function isHrp(m: PortfolioOptMethod): boolean {
+  return m === "hrp"
+}
+/** 需要 CVaR/CDaR 置信水平选项的方法 */
+function isTailRisk(m: PortfolioOptMethod): boolean {
+  return m === "min_cvar" || m === "min_cdar"
+}
 
 const RISK_MODEL_OPTIONS: { value: RiskModel; label: string; desc: string }[] = [
   { value: "sample_cov",     label: "样本协方差",     desc: "历史样本协方差（基准）" },
@@ -416,6 +449,192 @@ function AllocationPanel({
   )
 }
 
+// ── Black-Litterman：观点编辑器 ───────────────────────────────
+
+const EMPTY_VIEW: BLViewInput = { kind: "absolute", assets: [""], value: 0.1, confidence: 0.5 }
+
+function SymbolSelect({
+  value,
+  symbols,
+  onChange,
+}: {
+  value: string
+  symbols: string[]
+  onChange: (s: string) => void
+}) {
+  return (
+    <select className="input flex-1 text-xs font-mono py-1"
+      value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">选择标的</option>
+      {symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+    </select>
+  )
+}
+
+function BLViewsEditor({
+  views,
+  symbols,
+  onChange,
+}: {
+  views: BLViewInput[]
+  symbols: string[]
+  onChange: (views: BLViewInput[]) => void
+}) {
+  function updateView(idx: number, patch: Partial<BLViewInput>) {
+    onChange(views.map((v, i) => (i === idx ? { ...v, ...patch } : v)))
+  }
+  function setKind(idx: number, kind: BLViewInput["kind"]) {
+    const v = views[idx]
+    const assets = kind === "relative"
+      ? [v.assets[0] ?? "", v.assets[1] ?? ""]
+      : [v.assets[0] ?? ""]
+    updateView(idx, { kind, assets })
+  }
+  function setAsset(idx: number, pos: number, sym: string) {
+    const assets = [...views[idx].assets]
+    assets[pos] = sym
+    updateView(idx, { assets })
+  }
+  function addView() {
+    onChange([...views, { ...EMPTY_VIEW, assets: [symbols[0] ?? ""] }])
+  }
+  function removeView(idx: number) {
+    onChange(views.filter((_, i) => i !== idx))
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="label">投资者观点（Black-Litterman）</label>
+        <button type="button" onClick={addView}
+          className="text-[11px] px-2 py-0.5 rounded border border-[#58a6ff]/40 text-[#58a6ff] hover:bg-[#1f6feb]/10">
+          + 添加观点
+        </button>
+      </div>
+      {views.length === 0 && (
+        <p className="text-[10px] text-[#e3b341]">至少添加 1 条观点后才能运行 BL 优化</p>
+      )}
+      <div className="space-y-2">
+        {views.map((v, idx) => (
+          <div key={idx} className="border border-[#30363d] rounded p-2 space-y-2 bg-[#0d1117]">
+            <div className="flex items-center gap-1">
+              {(["absolute", "relative"] as const).map((k) => (
+                <button key={k} type="button" onClick={() => setKind(idx, k)}
+                  className={`flex-1 py-1 rounded text-[10px] border transition-colors ${
+                    v.kind === k
+                      ? "bg-[#1f6feb]/20 text-[#58a6ff] border-[#58a6ff]/40"
+                      : "text-[#6e7681] border-[#30363d] hover:text-[#e6edf3]"
+                  }`}>
+                  {k === "absolute" ? "绝对（收益=）" : "相对（跑赢）"}
+                </button>
+              ))}
+              <button type="button" onClick={() => removeView(idx)}
+                title="删除观点"
+                className="px-1.5 py-1 rounded text-[10px] text-[#f85149] border border-[#f85149]/30 hover:bg-[#f85149]/10">
+                ✕
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <SymbolSelect value={v.assets[0] ?? ""} symbols={symbols}
+                onChange={(s) => setAsset(idx, 0, s)} />
+              {v.kind === "relative" && (
+                <>
+                  <span className="text-[#6e7681] text-[10px] shrink-0">跑赢</span>
+                  <SymbolSelect value={v.assets[1] ?? ""} symbols={symbols}
+                    onChange={(s) => setAsset(idx, 1, s)} />
+                </>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-[#6e7681]">
+                  {v.kind === "absolute" ? "年化收益 %" : "超额收益 %"}
+                </label>
+                <input type="number" step={1} className="input w-full mt-0.5 font-mono text-xs"
+                  value={Math.round(v.value * 1000) / 10}
+                  onChange={(e) => updateView(idx, { value: Number(e.target.value) / 100 })} />
+              </div>
+              <div>
+                <label className="text-[10px] text-[#6e7681]">置信度 {(v.confidence * 100).toFixed(0)}%</label>
+                <input type="range" min={0} max={1} step={0.05} className="w-full mt-2 accent-[#58a6ff]"
+                  value={v.confidence}
+                  onChange={(e) => updateView(idx, { confidence: Number(e.target.value) })} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Black-Litterman：先验 vs 后验回显 ──────────────────────────
+
+function BLPosteriorView({ result }: { result: PortfolioOptResult }) {
+  const prior = result.bl_prior_returns ?? {}
+  const posterior = result.bl_posterior_returns ?? {}
+  const symbols = Object.keys(posterior)
+  if (symbols.length === 0) return null
+
+  return (
+    <div className="card border-[#bc8cff]/25">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-[#e6edf3]">Black-Litterman 观点融合</h3>
+        {result.bl_risk_aversion != null && (
+          <span className="text-[11px] text-[#8b949e]">
+            风险厌恶 δ = <span className="font-mono text-[#bc8cff]">{result.bl_risk_aversion.toFixed(2)}</span>
+          </span>
+        )}
+      </div>
+      {(result.bl_views?.length ?? 0) > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {result.bl_views!.map((label, i) => (
+            <span key={i} className="text-[10px] bg-[#161b22] border border-[#bc8cff]/30 rounded px-2 py-0.5 text-[#bc8cff]">
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[#8b949e] text-xs border-b border-[#21262d]">
+              <th className="text-left py-2 pr-3">标的</th>
+              <th className="text-right py-2 pr-3">市场隐含先验</th>
+              <th className="text-right py-2 pr-3">融合后验</th>
+              <th className="text-right py-2">观点调整</th>
+            </tr>
+          </thead>
+          <tbody>
+            {symbols
+              .sort((a, b) => (posterior[b] ?? 0) - (posterior[a] ?? 0))
+              .map((sym) => {
+                const pri = prior[sym] ?? 0
+                const post = posterior[sym] ?? 0
+                const delta = post - pri
+                return (
+                  <tr key={sym} className="border-b border-[#21262d]/50 last:border-0">
+                    <td className="py-2 pr-3 font-mono text-[#e6edf3] font-medium">{sym}</td>
+                    <td className="py-2 pr-3 text-right font-mono text-[#8b949e]">{pri.toFixed(2)}%</td>
+                    <td className="py-2 pr-3 text-right font-mono text-[#e6edf3]">{post.toFixed(2)}%</td>
+                    <td className={`py-2 text-right font-mono text-xs ${
+                      delta > 0.05 ? "text-[#3fb950]" : delta < -0.05 ? "text-[#f85149]" : "text-[#6e7681]"
+                    }`}>
+                      {delta >= 0 ? "+" : ""}{delta.toFixed(2)}%
+                    </td>
+                  </tr>
+                )
+              })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-[#6e7681] mt-2">
+        先验来自市场组合的反向优化（δ·Σ·w_mkt）；后验按 Idzorek 置信度将观点与先验贝叶斯融合，再驱动最大夏普配权。
+      </p>
+    </div>
+  )
+}
+
 function ResultPanel({ result, market }: { result: PortfolioOptResult; market: Market }) {
   const methodLabel = METHOD_OPTIONS.find((m) => m.value === result.method)?.label ?? result.method
   const insight = buildPortfolioInsight(result)
@@ -452,7 +671,7 @@ function ResultPanel({ result, market }: { result: PortfolioOptResult; market: M
               </span>
             </span>
           )}
-          {result.expected_returns_method && (
+          {result.expected_returns_method && !isHrp(result.method as PortfolioOptMethod) && (
             <span className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-[#8b949e]">
               预期收益：
               <span className="text-[#58a6ff] ml-1">
@@ -460,8 +679,25 @@ function ResultPanel({ result, market }: { result: PortfolioOptResult; market: M
               </span>
             </span>
           )}
+          {result.linkage_method && (
+            <span className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-[#8b949e]">
+              聚类连接：
+              <span className="text-[#58a6ff] ml-1">
+                {HRP_LINKAGE_OPTIONS.find((o) => o.value === result.linkage_method)?.label ?? result.linkage_method}
+              </span>
+            </span>
+          )}
+          {result.cvar_beta != null && (
+            <span className="bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-[#8b949e]">
+              尾部置信水平：
+              <span className="text-[#58a6ff] ml-1">{(result.cvar_beta * 100).toFixed(0)}%</span>
+            </span>
+          )}
         </div>
       )}
+
+      {/* Black-Litterman 先验/后验融合 */}
+      <BLPosteriorView result={result} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* 权重分布饼图 */}
@@ -598,10 +834,21 @@ interface FormState {
   include_frontier: boolean
   risk_model: RiskModel
   expected_returns_method: ExpectedReturnsMethod
+  views: BLViewInput[]
+  linkage_method: HrpLinkage
+  cvar_beta: number
+}
+
+/** 从标的文本解析为大写代码数组 */
+function parseSymbols(text: string): string[] {
+  return text
+    .split(/[,\s\n]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean)
 }
 
 export function PortfolioOptimizer() {
-  const { mutate: runOpt, isPending, data: result, error } = usePortfolioOptimize()
+  const { mutate: runOpt, isPending, data: result, error } = useAdvancedPortfolioOptimize()
 
   const [form, setForm] = useState<FormState>({
     symbolsText: MARKET_DEFAULTS.US.join(", "),
@@ -612,7 +859,12 @@ export function PortfolioOptimizer() {
     include_frontier: true,
     risk_model: "sample_cov",
     expected_returns_method: "mean_historical",
+    views: [],
+    linkage_method: "single",
+    cvar_beta: 0.95,
   })
+
+  const currentSymbols = parseSymbols(form.symbolsText)
   // 记录发起优化时的市场，供离散配置拉取最新价格（表单市场可能后续被改动）
   const [submittedMarket, setSubmittedMarket] = useState<Market>("US")
 
@@ -627,14 +879,22 @@ export function PortfolioOptimizer() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    const symbols = form.symbolsText
-      .split(/[,\s\n]+/)
-      .map((s) => s.trim().toUpperCase())
-      .filter(Boolean)
+    const symbols = parseSymbols(form.symbolsText)
 
     if (symbols.length < 2) {
       alert("请输入至少 2 个标的代码")
       return
+    }
+
+    if (isBlackLitterman(form.method)) {
+      const cleanViews = form.views.filter(
+        (v) => v.assets.every((a) => a) &&
+          (v.kind === "absolute" ? v.assets.length >= 1 : v.assets.length >= 2),
+      )
+      if (cleanViews.length === 0) {
+        alert("Black-Litterman 需要至少 1 条完整观点（选择标的并填写收益）")
+        return
+      }
     }
 
     setSubmittedMarket(form.market)
@@ -647,6 +907,9 @@ export function PortfolioOptimizer() {
       include_frontier: form.include_frontier,
       risk_model: form.risk_model,
       expected_returns_method: form.expected_returns_method,
+      views: isBlackLitterman(form.method) ? form.views : undefined,
+      linkage_method: form.linkage_method,
+      cvar_beta: form.cvar_beta,
     })
   }
 
@@ -750,6 +1013,50 @@ export function PortfolioOptimizer() {
               ))}
             </div>
           </div>
+
+          {/* Black-Litterman 观点输入 */}
+          {isBlackLitterman(form.method) && (
+            <BLViewsEditor
+              views={form.views}
+              symbols={currentSymbols}
+              onChange={(views) => setForm((f) => ({ ...f, views }))}
+            />
+          )}
+
+          {/* HRP 聚类连接方式 */}
+          {isHrp(form.method) && (
+            <div>
+              <label className="label">聚类连接方式（HRP）</label>
+              <select
+                className="input w-full mt-1 text-xs"
+                value={form.linkage_method}
+                onChange={(e) => setForm((f) => ({ ...f, linkage_method: e.target.value as HrpLinkage }))}
+              >
+                {HRP_LINKAGE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* CVaR/CDaR 置信水平 */}
+          {isTailRisk(form.method) && (
+            <div>
+              <label className="label">
+                尾部置信水平 β
+                <span className="ml-1 text-[#58a6ff] font-mono">{(form.cvar_beta * 100).toFixed(0)}%</span>
+              </label>
+              <input
+                type="range" min={0.8} max={0.99} step={0.01}
+                className="w-full mt-2 accent-[#58a6ff]"
+                value={form.cvar_beta}
+                onChange={(e) => setForm((f) => ({ ...f, cvar_beta: Number(e.target.value) }))}
+              />
+              <p className="text-[10px] text-[#6e7681] mt-1">
+                关注最差 {((1 - form.cvar_beta) * 100).toFixed(0)}% 情景的{form.method === "min_cdar" ? "回撤" : "损失"}
+              </p>
+            </div>
+          )}
 
           {/* 风险模型 */}
           <div>

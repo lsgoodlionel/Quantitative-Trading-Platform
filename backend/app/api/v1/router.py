@@ -8,6 +8,9 @@ from app.api.v1.endpoints import live_strategy
 from app.api.v1.endpoints import (
     factor_processors, backtest_report, protections, notify,
 )
+from app.api.v1.endpoints import (
+    fundamentals, screener, factor_library, backtest_validation,
+)
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -37,3 +40,8 @@ api_router.include_router(factor_processors.router, prefix="/quant",       tags=
 api_router.include_router(backtest_report.router,   prefix="/backtests",   tags=["Backtest Report"])
 api_router.include_router(protections.router,       prefix="/protections", tags=["Protections"])
 api_router.include_router(notify.router,            prefix="/notify",      tags=["Notifications"])
+# ── v2.0 Wave 2 ──────────────────────────────────────────────────
+api_router.include_router(fundamentals.router,       prefix="/fundamentals", tags=["Fundamentals"])
+api_router.include_router(screener.router,           prefix="/screener",     tags=["Screener"])
+api_router.include_router(factor_library.router,     prefix="/quant",        tags=["Factor Library"])
+api_router.include_router(backtest_validation.router, prefix="/backtests",   tags=["Backtest Validation"])

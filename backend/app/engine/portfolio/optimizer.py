@@ -24,6 +24,17 @@ from scipy.optimize import minimize, OptimizeResult
 
 from app.engine.portfolio.expected_returns import ReturnsModel, expected_returns
 from app.engine.portfolio.risk_models import RiskModel, risk_matrix
+from app.engine.portfolio.black_litterman import (
+    BLResult,
+    InvestorView,
+    black_litterman,
+)
+from app.engine.portfolio.hrp import hrp_weights
+from app.engine.portfolio.cvar_opt import (
+    DEFAULT_BETA,
+    min_cdar_weights,
+    min_cvar_weights,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +50,10 @@ class OptimizeMethod(str, Enum):
     RISK_PARITY = "risk_parity"
     MIN_CVAR = "min_cvar"
     EQUAL_WEIGHT = "equal_weight"
+    # ── v2.0 Wave 2 (D3/D4/D5) ──
+    HRP = "hrp"                       # 层次风险平价
+    BLACK_LITTERMAN = "black_litterman"  # 市场均衡 + 投资者观点
+    MIN_CDAR = "min_cdar"             # 最小条件回撤风险
 
 
 @dataclass
@@ -56,6 +71,14 @@ class PortfolioOptResult:
     # 回显所用估计器（供 UI 展示）
     risk_model: str = RiskModel.SAMPLE_COV.value
     expected_returns_method: str = ReturnsModel.MEAN_HISTORICAL.value
+    # ── Black-Litterman 专属回显（其它方法为空/None）──
+    bl_prior_returns: dict[str, float] = field(default_factory=dict)      # 市场隐含先验（%）
+    bl_posterior_returns: dict[str, float] = field(default_factory=dict)  # 融合后验（%）
+    bl_risk_aversion: Optional[float] = None                              # δ
+    bl_views: list[str] = field(default_factory=list)                    # 观点文本
+    # ── HRP / CVaR 元信息 ──
+    linkage_method: Optional[str] = None       # HRP 聚类连接方式
+    cvar_beta: Optional[float] = None          # CVaR/CDaR 置信水平
 
 
 # ── 核心数学函数 ───────────────────────────────────────────────
@@ -159,31 +182,6 @@ def _risk_parity(
     return result.x
 
 
-def _min_cvar(
-    returns_matrix: np.ndarray,
-    n: int,
-) -> np.ndarray:
-    """最小化 95% CVaR。"""
-    def cvar_obj(w: np.ndarray) -> float:
-        pf_ret = returns_matrix @ w
-        var = np.percentile(pf_ret, 5)
-        tail = pf_ret[pf_ret <= var]
-        return float(-tail.mean()) if len(tail) > 0 else 0.0
-
-    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1.0}]
-    bounds = [(MIN_WEIGHT, MAX_WEIGHT)] * n
-    w0 = np.ones(n) / n
-
-    result: OptimizeResult = minimize(
-        cvar_obj, w0,
-        method="SLSQP",
-        bounds=bounds,
-        constraints=constraints,
-        options={"ftol": 1e-12, "maxiter": 1000},
-    )
-    return result.x
-
-
 # ── 有效前沿 ──────────────────────────────────────────────────
 
 def _compute_frontier(
@@ -236,6 +234,31 @@ def _compute_frontier(
     return frontier
 
 
+# ── Black-Litterman 分支 ─────────────────────────────────────
+
+def _run_black_litterman(
+    prices: pd.DataFrame,
+    cov_df: pd.DataFrame,
+    views: list[InvestorView],
+    *,
+    market_caps: dict[str, float] | None,
+    risk_aversion: float | None,
+    tau: float,
+) -> tuple[np.ndarray, np.ndarray, BLResult]:
+    """执行 BL 融合，返回 (后验收益向量, 后验协方差矩阵, BLResult)。"""
+    symbols = list(prices.columns)
+    bl = black_litterman(
+        cov_df.reindex(index=symbols, columns=symbols),
+        views,
+        market_caps=market_caps,
+        risk_aversion=risk_aversion,
+        tau=tau,
+    )
+    post_mu = bl.posterior_returns.reindex(symbols).to_numpy()
+    post_cov = bl.posterior_cov.reindex(index=symbols, columns=symbols).to_numpy()
+    return post_mu, post_cov, bl
+
+
 # ── 公共入口 ──────────────────────────────────────────────────
 
 def optimize_portfolio(
@@ -245,9 +268,15 @@ def optimize_portfolio(
     *,
     risk_model: RiskModel = RiskModel.SAMPLE_COV,
     expected_returns_method: ReturnsModel = ReturnsModel.MEAN_HISTORICAL,
+    views: list[InvestorView] | None = None,
+    market_caps: dict[str, float] | None = None,
+    bl_risk_aversion: float | None = None,
+    bl_tau: float = 0.05,
+    linkage_method: str = "single",
+    cvar_beta: float = DEFAULT_BETA,
 ) -> PortfolioOptResult:
     """
-    对价格 DataFrame 进行组合优化。
+    对价格 DataFrame 进行组合优化（支持 D3/D4/D5 新方法，向后兼容）。
 
     Args:
         prices: 收盘价 DataFrame，index=日期, columns=symbol
@@ -255,6 +284,12 @@ def optimize_portfolio(
         include_frontier: 是否计算有效前沿
         risk_model: 协方差估计器（默认样本协方差，向后兼容）
         expected_returns_method: 预期收益估计器（默认历史均值，向后兼容）
+        views: Black-Litterman 投资者观点（仅 black_litterman 使用）
+        market_caps: 市值字典（BL 先验；缺省用等权代理）
+        bl_risk_aversion: BL 风险厌恶 δ（缺省 2.5）
+        bl_tau: BL 先验不确定性缩放
+        linkage_method: HRP 层次聚类连接方式
+        cvar_beta: CVaR/CDaR 置信水平（默认 0.95）
 
     Returns:
         PortfolioOptResult
@@ -267,18 +302,18 @@ def optimize_portfolio(
     if len(prices) < 60:
         raise ValueError("至少需要 60 个交易日数据")
 
-    # CVaR 仍用原始日收益
     returns = prices.pct_change().dropna()
     returns_matrix = returns.values
 
-    # 年化统计量（改用可插拔估计器，输出已年化）
+    # 年化统计量（可插拔估计器，输出已年化）
     mu_series = expected_returns(prices, expected_returns_method)
     cov_df = risk_matrix(prices, risk_model)
-    # 按 symbols 顺序对齐
     mu = mu_series.reindex(symbols).to_numpy()
     cov = cov_df.reindex(index=symbols, columns=symbols).to_numpy()
 
-    # 根据方法优化
+    bl: BLResult | None = None
+
+    # 根据方法优化（stats 用的 mu/cov 可能被 BL 后验替换）
     if method == OptimizeMethod.MAX_SHARPE:
         weights = _max_sharpe(mu, cov, n)
         frontier = _compute_frontier(mu, cov, n) if include_frontier else []
@@ -289,8 +324,27 @@ def optimize_portfolio(
         weights = _risk_parity(cov, n)
         frontier = []
     elif method == OptimizeMethod.MIN_CVAR:
-        weights = _min_cvar(returns_matrix, n)
+        weights = min_cvar_weights(returns_matrix, beta=cvar_beta)
         frontier = []
+    elif method == OptimizeMethod.MIN_CDAR:
+        weights = min_cdar_weights(returns_matrix, beta=cvar_beta)
+        frontier = []
+    elif method == OptimizeMethod.HRP:
+        weights = hrp_weights(
+            returns, cov=cov_df, linkage_method=linkage_method
+        ).reindex(symbols).to_numpy()
+        frontier = []
+    elif method == OptimizeMethod.BLACK_LITTERMAN:
+        if not views:
+            raise ValueError("black_litterman 方法需要至少 1 条投资者观点（views）")
+        mu, cov, bl = _run_black_litterman(
+            prices, cov_df, views,
+            market_caps=market_caps,
+            risk_aversion=bl_risk_aversion,
+            tau=bl_tau,
+        )
+        weights = _max_sharpe(mu, cov, n)
+        frontier = _compute_frontier(mu, cov, n) if include_frontier else []
     else:  # EQUAL_WEIGHT
         weights = np.ones(n) / n
         frontier = _compute_frontier(mu, cov, n) if include_frontier else []
@@ -302,7 +356,7 @@ def optimize_portfolio(
     ret, vol, sharpe = _annual_stats(weights, mu, cov)
     cvar_val = _cvar_95(weights, returns_matrix)
 
-    # 风险贡献（各方法均计算）
+    # 风险贡献
     sigma = float(np.sqrt(weights @ cov @ weights))
     if sigma > 1e-10:
         mrc = (cov @ weights) / sigma
@@ -316,7 +370,7 @@ def optimize_portfolio(
         for i, sym in enumerate(symbols)
     }
 
-    return PortfolioOptResult(
+    result = PortfolioOptResult(
         method=method.value,
         weights=weights_dict,
         expected_return=round(ret * 100, 2),
@@ -334,3 +388,20 @@ def optimize_portfolio(
             else str(expected_returns_method)
         ),
     )
+
+    # 方法专属元信息回显
+    if method == OptimizeMethod.HRP:
+        result.linkage_method = linkage_method
+    elif method in (OptimizeMethod.MIN_CVAR, OptimizeMethod.MIN_CDAR):
+        result.cvar_beta = round(float(cvar_beta), 4)
+    elif method == OptimizeMethod.BLACK_LITTERMAN and bl is not None:
+        result.bl_prior_returns = {
+            s: round(float(v) * 100, 2) for s, v in bl.prior_returns.items()
+        }
+        result.bl_posterior_returns = {
+            s: round(float(v) * 100, 2) for s, v in bl.posterior_returns.items()
+        }
+        result.bl_risk_aversion = bl.risk_aversion
+        result.bl_views = bl.view_labels
+
+    return result

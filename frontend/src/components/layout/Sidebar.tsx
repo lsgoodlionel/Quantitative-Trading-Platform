@@ -24,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/alerts",        icon: "🔔", label: "价格预警"  },
   // ── 量化研究 ─────────────────────────────
   { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化"   },
+  { to: "/screener",            icon: "🔍", label: "选股器"     },
   { to: "/factor",              icon: "🔭", label: "因子分析"   },
   { to: "/algolab",             icon: "🧪", label: "算法实验室" },
   // ── 系统 ─────────────────────────────────

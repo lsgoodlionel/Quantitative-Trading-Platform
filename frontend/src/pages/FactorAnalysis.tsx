@@ -20,6 +20,7 @@ import type { InsightVerdict, InsightItem } from "@/components/ui/InsightBox"
 import { FormulaBuilder } from "./factor/FormulaBuilder"
 import { ProcessorPipeline } from "./factor/ProcessorPipeline"
 import { FactorFitness } from "./factor/FactorFitness"
+import { FactorLibrary } from "./factor/FactorLibrary"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -227,11 +228,12 @@ function FactorSeriesChart({ data }: { data: { time: string; value: number }[] }
 
 // ── Main Page ──────────────────────────────────────────────────────
 
-type FactorMode = "preset" | "formula" | "processors" | "fitness"
+type FactorMode = "preset" | "formula" | "library" | "processors" | "fitness"
 
 const MODE_TABS: { key: FactorMode; label: string; accent: string }[] = [
   { key: "preset",     label: "预设因子",       accent: "#bc8cff" },
   { key: "formula",    label: "⚡ 公式因子",     accent: "#58a6ff" },
+  { key: "library",    label: "📚 因子库",       accent: "#e3b341" },
   { key: "processors", label: "🧪 截面处理流水线", accent: "#3fb950" },
   { key: "fitness",    label: "🎯 成本感知适应度", accent: "#e3b341" },
 ]
@@ -308,6 +310,9 @@ export function FactorAnalysis() {
         ))}
       </div>
 
+      {mode === "library" && (
+        <FactorLibrary market={market} freq={freq} />
+      )}
       {mode === "processors" && (
         <ProcessorPipeline factorList={factorList} formulaTokens={tokens} />
       )}

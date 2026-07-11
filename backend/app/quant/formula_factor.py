@@ -27,6 +27,19 @@ import pandas as pd
 from app.quant.indicators import (
     rsi, sma, bollinger_bands, atr, obv, macd, adx, mfi,
 )
+from app.quant.factor_lib.operators import (
+    ema as _op_ema,
+    rolling_corr,
+    rolling_cov,
+    rolling_idxmax,
+    rolling_idxmin,
+    rolling_mad,
+    rolling_quantile,
+    rolling_resi,
+    rolling_rsquare,
+    rolling_slope,
+    wma as _op_wma,
+)
 
 
 # ── 基础特征（叶子节点）─────────────────────────────────────────
@@ -147,6 +160,43 @@ OPS: list[OpSpec] = [
     OpSpec("RANK",   _op_rank,                         1, "滚动分位排名",     "截面"),
     OpSpec("ZSCORE", _op_zscore,                       1, "滚动Z标准化",      "统计"),
 ]
+
+# ── 带窗口的扩展算子（B3，移植自 qlib data/ops.py 定义）─────────────
+# RPN token 为固定名，故把窗口烘焙进算子名（如 SLOPE10 / CORR20）。
+# 复用 factor_lib/operators.py 的原语，与声明式因子库共享同一份实现（DRY）。
+
+_OP_WINDOWS: tuple[int, ...] = (10, 20)
+
+
+def _windowed_unary_ops() -> list[OpSpec]:
+    ops: list[OpSpec] = []
+    for w in _OP_WINDOWS:
+        ops += [
+            OpSpec(f"SLOPE{w}", lambda x, n=w: rolling_slope(x, n),        1, f"{w}期回归斜率",   "回归"),
+            OpSpec(f"RSQR{w}",  lambda x, n=w: rolling_rsquare(x, n),      1, f"{w}期回归拟合度", "回归"),
+            OpSpec(f"RESI{w}",  lambda x, n=w: rolling_resi(x, n),         1, f"{w}期回归残差",   "回归"),
+            OpSpec(f"WMA{w}",   lambda x, n=w: _op_wma(x, n),             1, f"{w}期加权均值",   "时序"),
+            OpSpec(f"EMA{w}",   lambda x, n=w: _op_ema(x, n),             1, f"{w}期指数均值",   "时序"),
+            OpSpec(f"MAD{w}",   lambda x, n=w: rolling_mad(x, n),          1, f"{w}期平均偏差",   "统计"),
+            OpSpec(f"QTLU{w}",  lambda x, n=w: rolling_quantile(x, n, 0.8), 1, f"{w}期80%分位",  "分位"),
+            OpSpec(f"QTLD{w}",  lambda x, n=w: rolling_quantile(x, n, 0.2), 1, f"{w}期20%分位",  "分位"),
+            OpSpec(f"IMAX{w}",  lambda x, n=w: rolling_idxmax(x, n) / n,   1, f"{w}期最大值位置", "位置"),
+            OpSpec(f"IMIN{w}",  lambda x, n=w: rolling_idxmin(x, n) / n,   1, f"{w}期最小值位置", "位置"),
+        ]
+    return ops
+
+
+def _windowed_binary_ops() -> list[OpSpec]:
+    ops: list[OpSpec] = []
+    for w in _OP_WINDOWS:
+        ops += [
+            OpSpec(f"CORR{w}", lambda x, y, n=w: rolling_corr(x, y, n), 2, f"{w}期相关系数", "量价"),
+            OpSpec(f"COV{w}",  lambda x, y, n=w: rolling_cov(x, y, n),  2, f"{w}期协方差",   "量价"),
+        ]
+    return ops
+
+
+OPS += _windowed_unary_ops() + _windowed_binary_ops()
 
 _OP_BY_NAME = {op.name: op for op in OPS}
 

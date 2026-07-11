@@ -47,6 +47,7 @@ import { Risk } from "@/pages/Risk"
 import { AlgoLab } from "@/pages/AlgoLab"
 import { PortfolioOptimizer } from "@/pages/PortfolioOptimizer"
 import { FactorAnalysis } from "@/pages/FactorAnalysis"
+import { Screener } from "@/pages/Screener"
 import { AlertsPage } from "@/pages/Alerts"
 import { LiveStrategy } from "@/pages/LiveStrategy"
 import { Settings } from "@/pages/Settings"
@@ -88,6 +89,7 @@ export default function App() {
               <Route path="/risk"        element={<Protected element={<Risk />} />} />
               <Route path="/algolab"       element={<Protected element={<AlgoLab />} />} />
               <Route path="/factor"        element={<Protected element={<FactorAnalysis />} />} />
+              <Route path="/screener"      element={<Protected element={<Screener />} />} />
               <Route path="/alerts"          element={<Protected element={<AlertsPage />} />} />
               <Route path="/live-strategy" element={<Protected element={<LiveStrategy />} />} />
               <Route path="/settings"      element={<Protected element={<Settings />} />} />

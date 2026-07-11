@@ -9,11 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date as Date
-from typing import Annotated
+from typing import Annotated, Literal
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -23,12 +23,49 @@ from app.engine.portfolio.optimizer import OptimizeMethod, optimize_portfolio
 from app.engine.portfolio.risk_models import RiskModel
 from app.engine.portfolio.expected_returns import ReturnsModel
 from app.engine.portfolio.discrete_allocation import AllocationMethod, allocate
+from app.engine.portfolio.black_litterman import InvestorView, ViewKind
+from app.engine.portfolio.cvar_opt import DEFAULT_BETA
+from app.engine.portfolio.hrp import VALID_LINKAGE
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 # ── Schemas ───────────────────────────────────────────────────
+
+class BLViewInput(BaseModel):
+    """
+    单条 Black-Litterman 投资者观点。
+
+    - absolute：assets=[sym]，value = 该标的年化预期收益（如 0.12 = 12%）
+    - relative：assets=[long, short]，value = long 相对 short 的年化超额收益
+    """
+    kind: Literal["absolute", "relative"] = "absolute"
+    assets: list[str] = Field(..., min_length=1, max_length=2)
+    value: float = Field(..., ge=-1.0, le=2.0, description="年化收益/超额收益，小数形式")
+    confidence: float = Field(0.5, ge=0.0, le=1.0, description="Idzorek 置信度 0~1")
+
+    @field_validator("assets")
+    @classmethod
+    def upper_assets(cls, v: list[str]) -> list[str]:
+        return [s.strip().upper() for s in v]
+
+    @model_validator(mode="after")
+    def check_arity(self) -> "BLViewInput":
+        if self.kind == "absolute" and len(self.assets) != 1:
+            raise ValueError("绝对观点必须且仅含 1 个标的")
+        if self.kind == "relative" and len(self.assets) != 2:
+            raise ValueError("相对观点必须含 2 个标的（long, short）")
+        return self
+
+    def to_view(self) -> InvestorView:
+        return InvestorView(
+            kind=ViewKind(self.kind),
+            assets=tuple(self.assets),
+            value=self.value,
+            confidence=self.confidence,
+        )
+
 
 class OptimizePortfolioRequest(BaseModel):
     symbols: list[str] = Field(..., min_length=2, max_length=20)
@@ -40,11 +77,35 @@ class OptimizePortfolioRequest(BaseModel):
     # ── D1：风险模型 & 预期收益估计（带默认值，向后兼容）──
     risk_model: RiskModel = RiskModel.SAMPLE_COV
     expected_returns_method: ReturnsModel = ReturnsModel.MEAN_HISTORICAL
+    # ── D3：Black-Litterman 观点（仅 method=black_litterman 使用）──
+    views: list[BLViewInput] = Field(default_factory=list)
+    market_caps: dict[str, float] | None = Field(
+        None, description="symbol → 市值，缺省用等权代理"
+    )
+    bl_risk_aversion: float | None = Field(None, gt=0, description="BL 风险厌恶 δ，缺省 2.5")
+    bl_tau: float = Field(0.05, gt=0, le=1.0, description="BL 先验不确定性缩放 τ")
+    # ── D4：HRP 聚类连接方式 ──
+    linkage_method: str = Field("single", description="HRP scipy 连接方式")
+    # ── D5：CVaR/CDaR 置信水平 ──
+    cvar_beta: float = Field(DEFAULT_BETA, gt=0.5, lt=1.0, description="尾部置信水平")
 
     @field_validator("symbols")
     @classmethod
     def upper_symbols(cls, v: list[str]) -> list[str]:
         return [s.strip().upper() for s in v]
+
+    @field_validator("linkage_method")
+    @classmethod
+    def valid_linkage(cls, v: str) -> str:
+        if v not in VALID_LINKAGE:
+            raise ValueError(f"linkage_method 必须为 {VALID_LINKAGE} 之一")
+        return v
+
+    @model_validator(mode="after")
+    def require_views_for_bl(self) -> "OptimizePortfolioRequest":
+        if self.method == OptimizeMethod.BLACK_LITTERMAN and not self.views:
+            raise ValueError("black_litterman 方法需要至少 1 条投资者观点（views）")
+        return self
 
 
 class PortfolioOptResponse(BaseModel):
@@ -59,6 +120,13 @@ class PortfolioOptResponse(BaseModel):
     # ── D1 回显：所用估计器 ──
     risk_model: str
     expected_returns_method: str
+    # ── D3/D4/D5 回显（可选，按方法填充）──
+    bl_prior_returns: dict[str, float] = Field(default_factory=dict)
+    bl_posterior_returns: dict[str, float] = Field(default_factory=dict)
+    bl_risk_aversion: float | None = None
+    bl_views: list[str] = Field(default_factory=list)
+    linkage_method: str | None = None
+    cvar_beta: float | None = None
 
 
 # ── D2：离散配置 Schemas ──────────────────────────────────────
@@ -171,7 +239,10 @@ async def optimize(
     - **max_sharpe**: 最大化夏普比率
     - **min_volatility**: 最小化波动率
     - **risk_parity**: 风险平价（均等风险贡献）
-    - **min_cvar**: 最小化 95% CVaR（条件风险价值）
+    - **min_cvar**: 最小化 95% CVaR（LP，条件风险价值）
+    - **min_cdar**: 最小化条件回撤风险（LP）
+    - **hrp**: 层次风险平价（相关性聚类 + 递归二分，无需求逆）
+    - **black_litterman**: 市场均衡先验 + 投资者观点（需传 views）
     - **equal_weight**: 等权重基准对照
     """
     prices = await _fetch_prices(
@@ -182,6 +253,8 @@ async def optimize(
         session=session,
     )
 
+    views = [v.to_view() for v in body.views]
+
     try:
         result = await asyncio.to_thread(
             optimize_portfolio,
@@ -190,6 +263,12 @@ async def optimize(
             body.include_frontier,
             risk_model=body.risk_model,
             expected_returns_method=body.expected_returns_method,
+            views=views,
+            market_caps=body.market_caps,
+            bl_risk_aversion=body.bl_risk_aversion,
+            bl_tau=body.bl_tau,
+            linkage_method=body.linkage_method,
+            cvar_beta=body.cvar_beta,
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
@@ -208,6 +287,12 @@ async def optimize(
         risk_contributions=result.risk_contributions,
         risk_model=result.risk_model,
         expected_returns_method=result.expected_returns_method,
+        bl_prior_returns=result.bl_prior_returns,
+        bl_posterior_returns=result.bl_posterior_returns,
+        bl_risk_aversion=result.bl_risk_aversion,
+        bl_views=result.bl_views,
+        linkage_method=result.linkage_method,
+        cvar_beta=result.cvar_beta,
     )
 
 
