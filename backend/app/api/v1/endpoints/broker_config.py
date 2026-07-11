@@ -13,6 +13,9 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.api.v1.endpoints.auth import UserInfo
+from app.core.audit import AuditAction, audit_log
+from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
 
 router = APIRouter()
@@ -101,8 +104,9 @@ async def get_all_broker_config(
 async def save_alpaca_config(
     body: AlpacaSaveRequest,
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    user: Annotated[UserInfo, Depends(require_role(Role.ADMIN))],
 ) -> BrokerStatus:
-    """保存 Alpaca API 密钥（存入 Redis，立即生效）。"""
+    """保存 Alpaca API 密钥（存入 Redis，立即生效）。需 Admin 角色。"""
     key = _redis_key("alpaca")
     await redis.hset(key, mapping={
         "api_key": body.api_key,
@@ -112,6 +116,19 @@ async def save_alpaca_config(
     })
     # 写入配置版本号，触发 AlpacaDataFeed 自动重建客户端
     await redis.incr(f"{key}:version")
+
+    # 审计留痕（脱敏：只记 key 提示与模式，绝不记录完整密钥）
+    await audit_log(
+        AuditAction.BROKER_CONFIG_SAVE,
+        actor=user.email or user.id,
+        detail={
+            "gateway": "alpaca",
+            "key_hint": _mask(body.api_key),
+            "paper_mode": body.paper_mode,
+            "base_url": body.base_url,
+        },
+        redis=redis,
+    )
 
     return BrokerStatus(
         gateway="alpaca",
@@ -125,17 +142,26 @@ async def save_alpaca_config(
 @router.delete("/alpaca", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alpaca_config(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    user: Annotated[UserInfo, Depends(require_role(Role.ADMIN))],
 ) -> None:
-    """清除 Alpaca 配置（回退到环境变量或演示数据）。"""
+    """清除 Alpaca 配置（回退到环境变量或演示数据）。需 Admin 角色。"""
     await redis.delete(_redis_key("alpaca"))
     await redis.delete(f"{_redis_key('alpaca')}:version")
+
+    await audit_log(
+        AuditAction.BROKER_CONFIG_DELETE,
+        actor=user.email or user.id,
+        detail={"gateway": "alpaca"},
+        redis=redis,
+    )
 
 
 @router.post("/alpaca/test", response_model=TestConnectionResponse)
 async def test_alpaca_connection(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    _user: Annotated[UserInfo, Depends(require_role(Role.TRADER))],
 ) -> TestConnectionResponse:
-    """测试当前 Alpaca 配置是否可连通（需先保存）。"""
+    """测试当前 Alpaca 配置连通性（需先保存）。需 Trader 及以上（会用真实密钥调外部 API）。"""
     raw = await _get_alpaca_raw(redis)
     if not raw:
         raise HTTPException(

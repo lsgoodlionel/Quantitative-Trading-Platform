@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.core.audit import AuditAction, audit_log
 from app.gateway.base import TradingGateway
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 
@@ -182,6 +183,7 @@ class OrderManager:
         self._orders[order.order_id] = order
 
         await self._publish_order_event(order)
+        await self._audit_order(AuditAction.ORDER_SUBMIT, order)
         return order
 
     async def cancel_order(self, order_id: str) -> LiveOrder:
@@ -199,6 +201,7 @@ class OrderManager:
         order.status = LiveOrderStatus.CANCELLED
         order.updated_at = datetime.now(timezone.utc)
         await self._publish_order_event(order)
+        await self._audit_order(AuditAction.ORDER_CANCEL, order)
         return order
 
     # ── 查询接口 ──────────────────────────────────────────────
@@ -345,6 +348,26 @@ class OrderManager:
             )
         except Exception:
             logger.debug("Failed to publish order event to Redis")
+
+    # ── 审计留痕（fire-and-forget，不阻塞热路径） ──────────────
+
+    async def _audit_order(self, action: str, order: LiveOrder) -> None:
+        """下单 / 撤单成功后写审计留痕（audit_log 内部永不抛出）。"""
+        await audit_log(
+            action,
+            actor=order.strategy_id or "system",
+            detail={
+                "order_id": order.order_id,
+                "symbol": order.symbol,
+                "market": order.market,
+                "side": order.side.value,
+                "qty": order.qty,
+                "order_type": order.order_type.value,
+                "status": order.status.value,
+                "paper_mode": getattr(order, "paper_mode", False),
+            },
+            redis=self._redis,
+        )
 
     # ── 通知分发（fire-and-forget，不阻塞热路径） ──────────────
 

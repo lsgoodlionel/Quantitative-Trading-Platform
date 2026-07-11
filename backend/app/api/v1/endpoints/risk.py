@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, HTTPException, status
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.core.audit import AuditAction, audit_log
+from app.core.rbac import Role, require_role
+from app.core.redis import get_redis
 from app.risk.engine import get_risk_engine, init_risk_engine
 from app.risk.models import (
     RiskConfig,
@@ -91,8 +95,12 @@ async def get_risk_config() -> RiskConfigResponse:
 
 
 @router.put("", response_model=RiskConfigResponse, status_code=status.HTTP_200_OK)
-async def update_risk_config(body: RiskConfigSchema) -> RiskConfigResponse:
-    """热更新风控配置（立即生效）。"""
+async def update_risk_config(
+    body: RiskConfigSchema,
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    _user: Annotated[object, Depends(require_role(Role.TRADER))],
+) -> RiskConfigResponse:
+    """热更新风控配置（立即生效）。需 Trader 及以上角色。"""
     try:
         rules = [
             RiskRule(
@@ -109,6 +117,19 @@ async def update_risk_config(body: RiskConfigSchema) -> RiskConfigResponse:
     new_config = RiskConfig(name=body.name, rules=rules, is_active=body.is_active)
     engine = get_risk_engine()
     engine.update_config(new_config)
+
+    # 审计留痕（actor 暂记 system；RBAC 接入 risk 端点后可替换为真实用户）
+    await audit_log(
+        AuditAction.RISK_CONFIG_UPDATE,
+        actor="system",
+        detail={
+            "name": new_config.name,
+            "is_active": new_config.is_active,
+            "rule_count": len(rules),
+            "rules": [r.rule_type for r in body.rules],
+        },
+        redis=redis,
+    )
 
     return RiskConfigResponse(
         name=new_config.name,

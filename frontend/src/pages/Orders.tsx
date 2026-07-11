@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { useOrders, useCreateOrder, useCancelOrder } from "@/hooks/useOrders"
 import { useTradingMode } from "@/hooks/useBrokerConfig"
+import { usePermissions } from "@/hooks/useRbac"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { StatusBadge } from "@/components/ui/StatusBadge"
@@ -59,10 +60,11 @@ interface OrderEntryPanelProps {
   onFormChange: (key: keyof NewOrderForm, val: string) => void
   onSubmit: (e: React.FormEvent) => void
   isSubmitting: boolean
+  canTrade: boolean
 }
 
 function OrderEntryPanel({
-  form, onFormChange, onSubmit, isSubmitting, tradingMode
+  form, onFormChange, onSubmit, isSubmitting, canTrade, tradingMode
 }: OrderEntryPanelProps & { tradingMode?: import("@/hooks/useBrokerConfig").TradingMode }) {
   const isBuy = form.side === "BUY"
   const marketCfg = MARKET_CFGS.find((m) => m.value === form.market) ?? MARKET_CFGS[0]
@@ -182,24 +184,33 @@ function OrderEntryPanel({
           </div>
         )}
 
-        {/* 提交按钮 */}
+        {/* 提交按钮 — Viewer 角色无交易权限，置灰 */}
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !canTrade}
+          title={canTrade ? undefined : "当前角色（只读用户）无下单权限，请联系管理员升级为交易员"}
           className={`w-full py-2.5 rounded-md text-sm font-semibold mt-2 transition-all ${
             isBuy
               ? "bg-[#1a3a24] text-[#3fb950] border border-[#3fb950]/40 hover:bg-[#1e4a2c] hover:border-[#3fb950]/60"
               : "bg-[#2a1b1b] text-[#f85149] border border-[#f85149]/40 hover:bg-[#3a1e1e] hover:border-[#f85149]/60"
-          } disabled:opacity-50`}
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {isSubmitting ? (
             <Spinner size="sm" className="mx-auto" />
+          ) : !canTrade ? (
+            `无下单权限`
           ) : isBuy ? (
             `确认买入`
           ) : (
             `确认卖出`
           )}
         </button>
+
+        {!canTrade && (
+          <p className="text-[10px] text-[#e3b341] text-center bg-[#272111]/60 border border-[#e3b341]/30 rounded px-2 py-1.5">
+            只读用户不可下单 · 交易操作需交易员及以上角色
+          </p>
+        )}
 
         <p className="text-[10px] text-[#6e7681] text-center">
           {gwType === "local_paper"
@@ -375,6 +386,7 @@ export function Orders() {
   const { mutate: createOrder, isPending: creating } = useCreateOrder()
   const { mutate: cancelOrder } = useCancelOrder()
   const { data: tradingMode } = useTradingMode()
+  const { canTrade } = usePermissions()
   const { toast } = useToast()
 
   const [form, setForm] = useState<NewOrderForm>(DEFAULT_FORM)
@@ -394,6 +406,7 @@ export function Orders() {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!canTrade) { toast("当前角色无下单权限", "warning"); return }
     const qty = parseInt(form.qty, 10)
     if (!qty || qty <= 0) { toast("请输入有效数量", "warning"); return }
     if (!form.symbol.trim()) { toast("请输入标的代码", "warning"); return }
@@ -501,6 +514,7 @@ export function Orders() {
             onFormChange={handleFormChange}
             onSubmit={handleSubmit}
             isSubmitting={creating}
+            canTrade={canTrade}
             tradingMode={tradingMode}
           />
         </div>

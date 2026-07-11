@@ -7,6 +7,44 @@ import {
 } from "recharts"
 import { useMLTrain, type MLModelType } from "@/hooks/useMLStrategy"
 import { SectionCard, ParamRow, MetaGrid } from "./shared"
+import { SequencePanel } from "./SequenceModelPanel"
+
+// ── 模型系列切换 ───────────────────────────────────────────────────
+
+type ModelFamily = "classic" | "sequence"
+
+const FAMILY_TABS: { value: ModelFamily; label: string; sub: string }[] = [
+  { value: "classic",  label: "经典模型", sub: "sklearn 分类器" },
+  { value: "sequence", label: "序列模型", sub: "LSTM · GRU · ALSTM" },
+]
+
+/**
+ * ML 策略面板入口：在「经典模型」与「序列模型」两个系列间切换。
+ * 序列模型依赖 PyTorch（可选），未安装时子面板自身会禁用并提示。
+ */
+export function MLPanel() {
+  const [family, setFamily] = useState<ModelFamily>("classic")
+
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-lg border border-[#30363d] bg-[#161b22] p-1">
+        {FAMILY_TABS.map(t => (
+          <button key={t.value} onClick={() => setFamily(t.value)}
+            className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              family === t.value
+                ? "bg-[#1f6feb]/20 text-[#58a6ff]"
+                : "text-[#8b949e] hover:text-[#e6edf3]"
+            }`}>
+            {t.label}
+            <span className="ml-1.5 text-[10px] text-[#6e7681]">{t.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {family === "classic" ? <ClassicMLPanel /> : <SequencePanel />}
+    </div>
+  )
+}
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -23,9 +61,9 @@ const SIGNAL_CFG = {
   NEUTRAL: { color: "#8b949e", bg: "bg-[#1c2128] border-[#30363d]",    label: "中性信号" },
 }
 
-// ── MLPanel ───────────────────────────────────────────────────────
+// ── ClassicMLPanel（sklearn 分类器）────────────────────────────────
 
-export function MLPanel() {
+function ClassicMLPanel() {
   const { mutate: train, isPending, data: result, error } = useMLTrain()
   const { toast } = useToast()
 

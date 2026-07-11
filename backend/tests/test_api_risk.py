@@ -7,13 +7,19 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.risk.engine import init_risk_engine
+from app.api.v1.endpoints.auth import get_current_user, UserInfo
 
 
 @pytest.fixture(autouse=True)
 def fresh_risk_engine():
     """每个测试用新引擎，避免日计数器等状态污染。"""
     init_risk_engine()
+    # PUT /risk 需 Trader 角色；覆盖 get_current_user 为管理员绕过 RBAC
+    app.dependency_overrides[get_current_user] = lambda: UserInfo(
+        id="test-admin", email="admin@test.local", role="admin"
+    )
     yield
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

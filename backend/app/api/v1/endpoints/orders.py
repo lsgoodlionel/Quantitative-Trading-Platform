@@ -7,6 +7,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from app.core.rbac import Role, require_role
 from app.oms.manager import OrderManager, RiskViolation
 from app.oms.order import LiveOrderSide, LiveOrderType
 
@@ -129,8 +130,9 @@ async def get_trading_mode() -> dict:
 async def submit_order(
     body: SubmitOrderRequest,
     oms: Annotated[OrderManager, Depends(get_oms)],
+    _user: Annotated[object, Depends(require_role(Role.TRADER))],
 ) -> OrderResponse:
-    """提交实盘订单。"""
+    """提交实盘订单。需 Trader 及以上角色（Viewer 会收到 403）。"""
     try:
         side = LiveOrderSide(body.side.upper())
     except ValueError:
@@ -189,8 +191,9 @@ async def get_order(
 async def cancel_order(
     order_id: str,
     oms: Annotated[OrderManager, Depends(get_oms)],
+    _user: Annotated[object, Depends(require_role(Role.TRADER))],
 ) -> OrderResponse:
-    """撤销指定订单。"""
+    """撤销指定订单。需 Trader 及以上角色（Viewer 会收到 403）。"""
     try:
         order = await oms.cancel_order(order_id)
     except ValueError as e:

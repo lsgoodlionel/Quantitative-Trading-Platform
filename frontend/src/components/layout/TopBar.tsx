@@ -1,5 +1,7 @@
 import { useAuthStore } from "@/stores/auth"
 import { PageHelp } from "@/components/ui/PageHelp"
+import { RoleBadge } from "@/components/rbac/RoleBadge"
+import { useCurrentUser } from "@/hooks/useRbac"
 import type { PageHelpData } from "@/data/pageHelp"
 
 interface TopBarProps {
@@ -9,6 +11,9 @@ interface TopBarProps {
 
 export function TopBar({ title, help }: TopBarProps) {
   const user = useAuthStore((s) => s.user)
+  const role = useAuthStore((s) => s.role)
+  // 登录后拉取 /auth/me，把权威 role 同步回 store
+  useCurrentUser()
 
   return (
     <header className="h-12 flex items-center justify-between px-4 lg:px-6 border-b border-[#21262d] bg-[#0d1117] shrink-0">
@@ -30,6 +35,7 @@ export function TopBar({ title, help }: TopBarProps) {
         {user && (
           <span className="font-mono text-[#6e7681]">{user}</span>
         )}
+        <RoleBadge role={role} size="sm" />
       </div>
     </header>
   )

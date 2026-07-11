@@ -11,6 +11,12 @@ from app.oms.manager import OrderManager
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 from app.api.v1.endpoints.orders import get_oms
 from app.api.v1.endpoints.positions import _try_get_oms as get_oms_pos
+from app.api.v1.endpoints.auth import get_current_user, UserInfo
+
+
+def _admin_user() -> UserInfo:
+    """测试用管理员身份，绕过 RBAC（require_role 依赖 get_current_user）。"""
+    return UserInfo(id="test-admin", email="admin@test.local", role="admin")
 
 
 def _make_order(**kwargs) -> LiveOrder:
@@ -59,6 +65,8 @@ def mock_oms() -> MagicMock:
 def override_oms(mock_oms: MagicMock):
     # 写端点用 Depends(get_oms)，可用 dependency_overrides
     app.dependency_overrides[get_oms] = lambda: mock_oms
+    # RBAC：require_role 依赖 get_current_user，覆盖为管理员绕过权限校验
+    app.dependency_overrides[get_current_user] = _admin_user
     # 读端点（list_orders/positions/account）内部直接调用 _try_get_oms()（非 Depends），需 patch
     with patch("app.api.v1.endpoints.orders._try_get_oms", lambda: mock_oms), \
          patch("app.api.v1.endpoints.positions._try_get_oms", lambda: mock_oms):

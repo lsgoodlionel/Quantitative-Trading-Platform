@@ -2,6 +2,8 @@ import { useState } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { useAuthStore } from "@/stores/auth"
+import { RoleBadge } from "@/components/rbac/RoleBadge"
+import { usePermissions } from "@/hooks/useRbac"
 import { Spinner } from "@/components/ui/Spinner"
 import {
   useBrokerConfig,
@@ -11,6 +13,7 @@ import {
 } from "@/hooks/useBrokerConfig"
 import { useDataConfigStatus, type FeedStatus, type MarketDataStatus } from "@/hooks/useDataConfig"
 import { NotifyChannelsSection } from "@/components/settings/NotifyChannelsSection"
+import { AuditLogSection } from "@/components/settings/AuditLogSection"
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
 
@@ -233,6 +236,7 @@ function AlpacaConfigSection() {
   const save   = useSaveAlpacaConfig()
   const del    = useDeleteAlpacaConfig()
   const test   = useTestAlpacaConnection()
+  const { canAdmin } = usePermissions()
 
   const alpaca = config?.alpaca
 
@@ -365,21 +369,32 @@ function AlpacaConfigSection() {
             </button>
           )}
           {!editing && (
-            <button className="btn btn-ghost text-xs py-1 px-3" onClick={startEdit}>
+            <button
+              className="btn btn-ghost text-xs py-1 px-3 disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={startEdit}
+              disabled={!canAdmin}
+              title={canAdmin ? undefined : "仅管理员可修改券商密钥"}
+            >
               {isConfigured ? "修改密钥" : "配置密钥"}
             </button>
           )}
           {isConfigured && !editing && (
             <button
-              className="btn btn-danger text-xs py-1 px-3"
+              className="btn btn-danger text-xs py-1 px-3 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={handleDelete}
-              disabled={isDeleting}
+              disabled={isDeleting || !canAdmin}
+              title={canAdmin ? undefined : "仅管理员可清除券商密钥"}
             >
               {isDeleting ? <Spinner size="sm" /> : "清除"}
             </button>
           )}
         </div>
       </div>
+      {!canAdmin && (
+        <p className="text-xs text-[#8b949e] bg-[#161b22] border border-[#30363d] rounded px-3 py-2">
+          当前角色无券商配置权限，如需修改请联系管理员。
+        </p>
+      )}
 
       {/* Test result */}
       {testResult && (
@@ -511,6 +526,7 @@ const VERSION_INFO = [
 export function Settings() {
   const user   = useAuthStore((s) => s.user)
   const logout = useAuthStore((s) => s.logout)
+  const { role, canTrade, canAdmin } = usePermissions()
 
   return (
     <AppShell title="系统设置" help={PAGE_HELP["settings"]}>
@@ -518,6 +534,20 @@ export function Settings() {
         {/* Account */}
         <Section title="账号信息">
           <InfoRow label="当前用户" value={user ?? "—"} />
+          <div className="flex items-center justify-between py-2 border-b border-[#21262d]/50 text-sm">
+            <span className="text-[#8b949e]">当前角色</span>
+            <RoleBadge role={role} />
+          </div>
+          <div className="flex items-center justify-between py-2 border-b border-[#21262d]/50 last:border-0 text-sm">
+            <span className="text-[#8b949e]">权限范围</span>
+            <span className="text-[#8b949e] text-xs">
+              {canAdmin
+                ? "读取 · 交易 · 系统配置"
+                : canTrade
+                  ? "读取 · 交易（不含系统配置）"
+                  : "仅读取（下单 / 配置受限）"}
+            </span>
+          </div>
           <div className="pt-3">
             <button className="btn btn-danger text-sm" onClick={logout}>退出登录</button>
           </div>
@@ -536,6 +566,11 @@ export function Settings() {
         {/* A股 + 港股 data channel status */}
         <Section title="A 股 / 港股数据通道">
           <MarketDataChannels />
+        </Section>
+
+        {/* 审计日志 */}
+        <Section title="审计日志 — 关键操作留痕">
+          <AuditLogSection />
         </Section>
 
         {/* Platform */}

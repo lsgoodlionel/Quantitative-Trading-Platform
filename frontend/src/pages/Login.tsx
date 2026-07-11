@@ -37,6 +37,7 @@ export function Login() {
         throw new ApiError(resp.status, (data as { detail?: string }).detail ?? "登录失败")
       }
       const data = (await resp.json()) as LoginResponse
+      // role 由 store 从 JWT payload 自动解析；随后 useCurrentUser 会用 /auth/me 校准
       login(data.access_token, username)
       navigate("/", { replace: true })
     } catch (err) {

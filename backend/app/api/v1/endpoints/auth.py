@@ -17,6 +17,7 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 # ── 内置账户（种子数据同步） ──────────────────────────────────────
 # 生产环境应改用数据库查询；此处保持 Phase 1 的内置账户以支持零配置启动
+# role 字段对应 RBAC 角色（app/core/rbac.py）：admin / trader / viewer
 _BUILTIN_USERS: dict[str, dict[str, str]] = {
     "admin": {
         "id": "00000000-0000-0000-0000-000000000001",
@@ -24,7 +25,23 @@ _BUILTIN_USERS: dict[str, dict[str, str]] = {
         "role": "admin",
         # bcrypt hash 对应 "admin123" (bcrypt 5.x 生成)
         "hashed_pw": "$2b$12$0kMLEk./lr7l8hLBc4MIaeZTrJwp03XI3Zjw2LmiBjp5Of.KqvwWC",
-    }
+    },
+    # 示范账户：Trader 可下单但不可改系统配置
+    "trader": {
+        "id": "00000000-0000-0000-0000-000000000002",
+        "email": "trader@quantbot.local",
+        "role": "trader",
+        # bcrypt hash 对应 "trader123"
+        "hashed_pw": "$2b$12$c1/sv7s00LizRZTO1rrO/eDRIYo3YReJ//Cdk8cNBNZfIPENRYvDS",
+    },
+    # 示范账户：Viewer 只读，写操作会被 RBAC 拦截为 403
+    "viewer": {
+        "id": "00000000-0000-0000-0000-000000000003",
+        "email": "viewer@quantbot.local",
+        "role": "viewer",
+        # bcrypt hash 对应 "viewer123"
+        "hashed_pw": "$2b$12$Hr02dEzvB8GmnjWP2eR7yektufn5V3wmgrV6pjgMClFSMM1qMZgXK",
+    },
 }
 
 
@@ -58,7 +75,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInfo:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
         user_id: str | None = payload.get("sub")
-        role: str = payload.get("role", "trader")
+        # fail-safe：缺失 role 时降级为最低权限 viewer（绝不默认提权）
+        role: str = payload.get("role", "viewer")
         email: str = payload.get("email", "")
         if user_id is None:
             raise credentials_exc
