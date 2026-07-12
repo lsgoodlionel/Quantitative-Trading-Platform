@@ -48,7 +48,8 @@ class DataService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._repo = TimeseriesRepository(session)
-        self._registry = _FeedRegistry.instance()
+        from app.data.source_registry import DataSourceRegistry
+        self._registry = DataSourceRegistry.instance()
 
     async def get_bars(
         self,
@@ -78,26 +79,22 @@ class DataService:
                     logger.debug("Cache hit", symbol=symbol, count=len(cached))
                     return cached
 
-        # 缓存未命中，调用数据源
-        primary, fallback = self._registry.get_feeds(market)
+        # 缓存未命中，按配置的有序数据源链逐个尝试（动态切换 / 手动强制）
+        chain = self._registry.get_feed_chain(market)
         bars: list[Bar] = []
 
-        try:
-            bars = await primary.get_bars(symbol, frequency, start, end)
-        except Exception as e:
-            logger.warning(
-                "Primary feed failed, trying fallback",
-                feed=primary.name,
-                error=str(e),
-                symbol=symbol,
-            )
-            if fallback:
-                try:
-                    bars = await fallback.get_bars(symbol, frequency, start, end)
-                except Exception as e2:
-                    logger.error("Fallback feed also failed", error=str(e2))
+        for feed in chain:
+            try:
+                bars = await feed.get_bars(symbol, frequency, start, end)
+                if bars:
+                    break
+            except Exception as e:
+                logger.warning(
+                    "Data source failed, trying next",
+                    feed=feed.name, error=str(e), symbol=symbol,
+                )
 
-        # 所有真实数据源失败 → 使用合成演示数据兜底
+        # 所有真实数据源失败 → 使用合成演示数据兜底（平台永不断供）
         if not bars:
             demo = self._registry.get_demo_feed(market)
             try:
@@ -123,18 +120,25 @@ class DataService:
         if cached:
             return cached
 
-        primary, fallback = self._registry.get_feeds(market)
-        try:
-            return await primary.get_latest_bar(symbol, frequency)
-        except Exception as e:
-            logger.warning("get_latest_bar failed", error=str(e))
-            if fallback:
-                return await fallback.get_latest_bar(symbol, frequency)
+        # 按配置源链逐个尝试
+        for feed in self._registry.get_feed_chain(market):
+            try:
+                bar = await feed.get_latest_bar(symbol, frequency)
+                if bar:
+                    return bar
+            except Exception as e:
+                logger.warning("get_latest_bar failed", feed=feed.name, error=str(e))
         return None
 
     async def get_latest_tick(self, symbol: str, market: Market) -> Tick | None:
-        primary, _ = self._registry.get_feeds(market)
-        return await primary.get_latest_tick(symbol)
+        for feed in self._registry.get_feed_chain(market):
+            try:
+                tick = await feed.get_latest_tick(symbol)
+                if tick:
+                    return tick
+            except Exception:
+                continue
+        return None
 
     async def subscribe_bars(
         self,
@@ -142,21 +146,15 @@ class DataService:
         market: Market,
         frequency: Frequency,
     ) -> AsyncIterator[Bar]:
-        """实时 K 线订阅，写库并 yield 给调用方。"""
-        primary, fallback = self._registry.get_feeds(market)
-
-        feed: DataFeed | None = None
-        if primary.supports_realtime:
-            feed = primary
-        elif fallback and fallback.supports_realtime:
-            feed = fallback
-
+        """实时 K 线订阅，写库并 yield 给调用方。选链中首个支持实时的源。"""
+        feed: DataFeed | None = next(
+            (f for f in self._registry.get_feed_chain(market) if f.supports_realtime), None
+        )
         if feed is None:
             logger.warning("No realtime feed available", market=market)
             return
 
         async for bar in feed.subscribe_bars(symbols, frequency):
-            # 实时数据也写入 TimescaleDB
             await self._repo.save_bars([bar])
             yield bar
 
@@ -164,9 +162,11 @@ class DataService:
         results: list[SymbolInfo] = []
         markets = [market] if market else list(Market)
         for m in markets:
-            primary, _ = self._registry.get_feeds(m)
+            chain = self._registry.get_feed_chain(m)
+            if not chain:
+                continue
             try:
-                found = await primary.search_symbols(query)
+                found = await chain[0].search_symbols(query)
                 results.extend(found)
             except Exception as e:
                 logger.debug("Symbol search failed", market=m, error=str(e))

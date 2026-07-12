@@ -34,6 +34,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         redis_client = None
         logger.warning("Redis unavailable, OMS events will not be published")
+    # 载入多源数据通道配置（顺序/禁用/强制），缺失时用默认
+    try:
+        from app.data.source_registry import DataSourceRegistry
+        await DataSourceRegistry.instance().load_config(redis_client)
+        logger.info("Data source config loaded")
+    except Exception as e:
+        logger.warning("Data source config load skipped: %s", e)
+
     manager = await init_hybrid_order_manager(redis_client=redis_client)
     # 富途 HK 网关：配置存在时接入 OMS（否则 HK 保持 PaperGateway）
     try:

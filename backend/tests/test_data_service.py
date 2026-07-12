@@ -42,7 +42,7 @@ class TestDataServiceRouting:
         mock_alpaca = AsyncMock()
         mock_alpaca.get_bars.return_value = mock_bars
 
-        with patch.object(svc._registry, "get_feeds", return_value=(mock_alpaca, None)):
+        with patch.object(svc._registry, "get_feed_chain", return_value=[mock_alpaca]):
             result = await svc.get_bars("AAPL", Market.US, Frequency.DAY_1, date(2024, 1, 15), date(2024, 1, 15))
 
         mock_alpaca.get_bars.assert_called_once()
@@ -60,7 +60,7 @@ class TestDataServiceRouting:
         svc._repo = mock_repo
 
         mock_alpaca = AsyncMock()
-        with patch.object(svc._registry, "get_feeds", return_value=(mock_alpaca, None)):
+        with patch.object(svc._registry, "get_feed_chain", return_value=[mock_alpaca]):
             result = await svc.get_bars(
                 "AAPL", Market.US, Frequency.DAY_1,
                 date(2024, 1, 1), date(2024, 1, 15)
@@ -87,7 +87,7 @@ class TestDataServiceRouting:
         mock_fallback = AsyncMock()
         mock_fallback.get_bars.return_value = fallback_bars
 
-        with patch.object(svc._registry, "get_feeds", return_value=(mock_primary, mock_fallback)):
+        with patch.object(svc._registry, "get_feed_chain", return_value=[mock_primary, mock_fallback]):
             result = await svc.get_bars("AAPL", Market.US, Frequency.DAY_1, date(2024, 1, 15), date(2024, 1, 15))
 
         mock_fallback.get_bars.assert_called_once()
@@ -108,7 +108,7 @@ class TestDataServiceRouting:
         mock_feed = AsyncMock()
         mock_feed.get_bars.return_value = api_bars
 
-        with patch.object(svc._registry, "get_feeds", return_value=(mock_feed, None)):
+        with patch.object(svc._registry, "get_feed_chain", return_value=[mock_feed]):
             bars = await svc.get_bars(
                 "000001", Market.A, Frequency.DAY_1, date(2024, 1, 1), date(2024, 1, 15)
             )
@@ -128,27 +128,53 @@ class TestDataServiceRouting:
         mock_feed = AsyncMock()
         mock_feed.get_bars.return_value = api_bars
 
-        with patch.object(svc._registry, "get_feeds", return_value=(mock_feed, None)):
+        with patch.object(svc._registry, "get_feed_chain", return_value=[mock_feed]):
             await svc.get_bars("AAPL", Market.US, Frequency.DAY_1, date(2024, 1, 15), date(2024, 1, 15))
 
         mock_repo.save_bars.assert_called_once_with(api_bars)
 
 
-class TestFeedRegistry:
-    def test_us_market_returns_alpaca_primary(self) -> None:
-        registry = _FeedRegistry.instance()
-        primary, fallback = registry.get_feeds(Market.US)
-        assert "Alpaca" in primary.__class__.__name__
-        assert fallback is not None
+class TestDataSourceRegistry:
+    """多源数据通道注册表（DataService 实际使用的注册表）。"""
 
-    def test_hk_market_returns_futu_primary(self) -> None:
-        registry = _FeedRegistry.instance()
-        primary, fallback = registry.get_feeds(Market.HK)
-        assert "Futu" in primary.__class__.__name__
-        assert fallback is not None
+    def test_us_chain_starts_with_alpaca_and_has_multiple(self) -> None:
+        from app.data.source_registry import DataSourceRegistry
+        chain = DataSourceRegistry.instance().get_feed_chain(Market.US)
+        assert "Alpaca" in chain[0].__class__.__name__
+        assert len(chain) >= 2   # 多源冗余：Alpaca + yfinance + akshare + stooq
 
-    def test_a_share_market_returns_akshare_primary(self) -> None:
-        # A 股已接入 AkShare（原「not yet supported」断言已过时）
-        registry = _FeedRegistry.instance()
-        primary, _fallback = registry.get_feeds(Market.A)
-        assert "AkShare" in primary.__class__.__name__
+    def test_hk_chain_starts_with_futu(self) -> None:
+        from app.data.source_registry import DataSourceRegistry
+        chain = DataSourceRegistry.instance().get_feed_chain(Market.HK)
+        assert "Futu" in chain[0].__class__.__name__
+        assert len(chain) >= 2
+
+    def test_a_chain_uses_akshare(self) -> None:
+        from app.data.source_registry import DataSourceRegistry
+        chain = DataSourceRegistry.instance().get_feed_chain(Market.A)
+        assert "AkShare" in chain[0].__class__.__name__
+
+    def test_pin_restricts_to_single_source(self) -> None:
+        from app.data.source_registry import DataSourceRegistry, MarketSourceConfig
+        reg = DataSourceRegistry.instance()
+        try:
+            reg.set_market_config("US", MarketSourceConfig(
+                order=["alpaca", "yfinance", "akshare_us", "stooq"], pinned="stooq"))
+            chain = reg.get_feed_chain(Market.US)
+            assert len(chain) == 1
+            assert "Stooq" in chain[0].__class__.__name__
+        finally:
+            reg.set_market_config("US", MarketSourceConfig(
+                order=["alpaca", "yfinance", "akshare_us", "stooq"]))
+
+    def test_disable_removes_source_from_chain(self) -> None:
+        from app.data.source_registry import DataSourceRegistry, MarketSourceConfig
+        reg = DataSourceRegistry.instance()
+        try:
+            reg.set_market_config("US", MarketSourceConfig(
+                order=["alpaca", "yfinance", "akshare_us", "stooq"], disabled=["alpaca"]))
+            names = [f.__class__.__name__ for f in reg.get_feed_chain(Market.US)]
+            assert not any("Alpaca" in n for n in names)
+        finally:
+            reg.set_market_config("US", MarketSourceConfig(
+                order=["alpaca", "yfinance", "akshare_us", "stooq"]))

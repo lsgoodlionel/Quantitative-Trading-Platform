@@ -11,7 +11,8 @@ import {
   useDeleteAlpacaConfig,
   useTestAlpacaConnection,
 } from "@/hooks/useBrokerConfig"
-import { useDataConfigStatus, type FeedStatus, type MarketDataStatus } from "@/hooks/useDataConfig"
+
+import { DataSourcePanel } from "@/components/settings/DataSourcePanel"
 import { NotifyChannelsSection } from "@/components/settings/NotifyChannelsSection"
 import { AuditLogSection } from "@/components/settings/AuditLogSection"
 
@@ -35,201 +36,10 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-// ── Market data channel status ────────────────────────────────────────────────
-
-const KIND_LABEL: Record<FeedStatus["kind"], string> = {
-  primary:  "主通道",
-  fallback: "备用",
-  demo:     "兜底",
-}
-
-const KIND_COLOR: Record<FeedStatus["kind"], string> = {
-  primary:  "text-[#58a6ff] bg-[#1c2a3a] border-[#388bfd]/30",
-  fallback: "text-[#e3b341] bg-[#2a2415] border-[#e3b341]/30",
-  demo:     "text-[#6e7681] bg-[#161b22] border-[#30363d]",
-}
-
-function FeedRow({ feed }: { feed: FeedStatus }) {
-  const isOk = feed.ok
-  const isDemo = feed.kind === "demo"
-
-  return (
-    <div className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border ${
-      isDemo ? "border-[#21262d]/60 bg-[#0d1117]/40" : "border-[#21262d] bg-[#0d1117]/70"
-    }`}>
-      {/* Status dot */}
-      <div className="mt-0.5 shrink-0">
-        <span className={`inline-block w-2 h-2 rounded-full mt-1 ${
-          isOk ? "bg-[#3fb950]" : isDemo ? "bg-[#3fb950]/40" : "bg-[#f85149]"
-        }`} />
-      </div>
-
-      <div className="flex-1 min-w-0">
-        {/* Name row */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm text-[#e6edf3] font-medium">{feed.name}</span>
-          {feed.version && (
-            <span className="text-[10px] font-mono text-[#6e7681]">v{feed.version}</span>
-          )}
-          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${KIND_COLOR[feed.kind]}`}>
-            {KIND_LABEL[feed.kind]}
-          </span>
-          {!isDemo && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-              isOk
-                ? "text-[#3fb950] bg-[#1a2a1a]"
-                : "text-[#f85149] bg-[#2a1b1b]"
-            }`}>
-              {isOk ? "✓ 可用" : "✗ 不可用"}
-            </span>
-          )}
-        </div>
-
-        {/* Note */}
-        {feed.note && (
-          <p className="text-[11px] text-[#6e7681] mt-0.5">{feed.note}</p>
-        )}
-
-        {/* Error */}
-        {feed.error && !isOk && (
-          <p className="text-[11px] text-[#f85149] mt-0.5 leading-relaxed">{feed.error}</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-interface MarketDataSectionProps {
-  market: MarketDataStatus
-  isLoading: boolean
-  onRefresh: () => void
-  isRefreshing: boolean
-}
-
-function MarketDataSection({ market, isLoading, onRefresh, isRefreshing }: MarketDataSectionProps) {
-  const primaryOk = market.feeds.find(f => f.kind === "primary")?.ok ?? false
-  const fallbackOk = market.feeds.find(f => f.kind === "fallback")?.ok ?? false
-  const activeChannelCount = market.feeds.filter(f => f.kind !== "demo" && f.ok).length
-
-  return (
-    <div className="space-y-3">
-      {/* Header summary */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className={`w-2 h-2 rounded-full ${primaryOk || fallbackOk ? "bg-[#3fb950]" : "bg-[#e3b341]"}`} />
-          <span className="text-sm text-[#e6edf3]">
-            {primaryOk
-              ? "主通道连接正常"
-              : fallbackOk
-                ? "主通道不可用，使用备用通道"
-                : "真实数据源不可用，使用合成演示数据"}
-          </span>
-          {activeChannelCount > 0 && (
-            <span className="text-xs text-[#6e7681]">
-              {activeChannelCount} 个通道可用
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {market.realtime && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded border border-[#3fb950]/30 text-[#3fb950]">
-              实时行情
-            </span>
-          )}
-          <button
-            className="btn btn-ghost text-xs py-1 px-3"
-            onClick={onRefresh}
-            disabled={isLoading || isRefreshing}
-          >
-            {isLoading || isRefreshing ? <Spinner size="sm" /> : "重新检测"}
-          </button>
-        </div>
-      </div>
-
-      {/* Feed list */}
-      <div className="space-y-2">
-        {isLoading
-          ? [1, 2, 3].map(i => (
-              <div key={i} className="h-14 bg-[#21262d] rounded-lg animate-pulse" />
-            ))
-          : market.feeds.map(feed => (
-              <FeedRow key={feed.name} feed={feed} />
-            ))
-        }
-      </div>
-    </div>
-  )
-}
-
-/** Wrapper 负责一次加载、两个市场共享数据 */
-function MarketDataChannels() {
-  const { data, isLoading, isError, refetch, isFetching } = useDataConfigStatus()
-
-  if (isError && !data) {
-    return (
-      <div className="flex items-center gap-3 py-2">
-        <span className="w-2 h-2 rounded-full bg-[#f85149] shrink-0" />
-        <p className="text-xs text-[#8b949e] flex-1">
-          无法连接后端，数据通道状态暂不可用
-        </p>
-        <button
-          className="btn btn-ghost text-xs py-1 px-3 shrink-0"
-          onClick={() => refetch()}
-          disabled={isFetching}
-        >
-          {isFetching ? <Spinner size="sm" /> : "重新检测"}
-        </button>
-      </div>
-    )
-  }
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="h-14 bg-[#21262d] rounded-lg animate-pulse" />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* A股 */}
-      <div>
-        <h3 className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-3">
-          🇨🇳 沪深 A 股
-        </h3>
-        <MarketDataSection
-          market={data?.a_share ?? { market: "A", label: "沪深 A 股", feeds: [], realtime: false }}
-          isLoading={isLoading}
-          onRefresh={() => refetch()}
-          isRefreshing={isFetching && !isLoading}
-        />
-      </div>
-
-      <div className="border-t border-[#21262d]" />
-
-      {/* 港股 */}
-      <div>
-        <h3 className="text-xs font-semibold text-[#8b949e] uppercase tracking-wider mb-3">
-          🇭🇰 港股
-        </h3>
-        <MarketDataSection
-          market={data?.hk ?? { market: "HK", label: "港股", feeds: [], realtime: false }}
-          isLoading={isLoading}
-          onRefresh={() => refetch()}
-          isRefreshing={isFetching && !isLoading}
-        />
-      </div>
-    </div>
-  )
-}
-
-// ── Alpaca config form ────────────────────────────────────────────────────────
+// ── Alpaca 券商配置 ───────────────────────────────────────────────────────────
 
 const ALPACA_PAPER_URL = "https://paper-api.alpaca.markets"
-const ALPACA_LIVE_URL  = "https://api.alpaca.markets"
+const ALPACA_LIVE_URL = "https://api.alpaca.markets"
 
 function AlpacaConfigSection() {
   const { data: config, isLoading } = useBrokerConfig()
@@ -563,9 +373,9 @@ export function Settings() {
           <NotifyChannelsSection />
         </Section>
 
-        {/* A股 + 港股 data channel status */}
-        <Section title="A 股 / 港股数据通道">
-          <MarketDataChannels />
+        {/* 多源数据通道：多源可配置 + 动态切换 + 手动强制 + 实时状态 */}
+        <Section title="行情数据通道 — 多源冗余">
+          <DataSourcePanel />
         </Section>
 
         {/* 审计日志 */}

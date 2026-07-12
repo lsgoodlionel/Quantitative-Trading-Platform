@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     pairlist, news, calendar, options, futu_config,
 )
 from app.api.v1.endpoints import sequence_models, audit
+from app.api.v1.endpoints import data_sources
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -64,3 +65,4 @@ api_router.include_router(futu_config.router,         prefix="/broker-config", t
 # ── v2.0 补充：序列模型 + 审计 ────────────────────────────────────
 api_router.include_router(sequence_models.router,     prefix="/quant",        tags=["Sequence Models"])
 api_router.include_router(audit.router,               prefix="/audit",        tags=["Audit"])
+api_router.include_router(data_sources.router,        prefix="/data-sources", tags=["Data Sources"])
