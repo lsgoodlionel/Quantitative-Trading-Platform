@@ -1,6 +1,9 @@
-# QuantBot — 多市场量化交易平台
+# QuantBot — 多市场 AI 量化交易平台
 
-> 支持美股 / 港股 / 沪深A股的一站式量化交易系统，集行情、回测、策略、风控、实盘于一体。
+> 支持美股 / 港股 / 沪深A股的专业级 AI 量化研究与实盘工作站：
+> 选股 · 因子研究(含AI挖掘) · 策略验证 · 组合构建 · 实盘执行 · 多用户/审计，全流程闭环。
+>
+> **版本 v2.0** · [更新日志](CHANGELOG.md) · [移交文档](HANDOFF.md) · [升级蓝图](DEVPLAN_V2.md)
 
 ![Platform](https://img.shields.io/badge/platform-Docker-2496ED?logo=docker)
 ![Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python%203.11-009688?logo=fastapi)
@@ -25,17 +28,25 @@
 
 ## 功能概览
 
+> **v2.0 已交付**（Wave 1-3 + 平台化）：从「能用的量化平台」升级为「专业级 AI 量化研究 + 稳健实盘工作站」。
+> 118 API 端点 · 16 页面 · 593 单元测试 · 6 真实数据源 + 演示兜底。
+> 详见 [CHANGELOG.md](CHANGELOG.md)（行程）· [HANDOFF.md](HANDOFF.md)（移交/后续）· [DEVPLAN_V2.md](DEVPLAN_V2.md)（蓝图）。
+
+**完整量化工作流：选股 → 因子研究 → 策略验证 → 组合构建 → 实盘执行 → 多用户/审计**
+
 | 模块 | 功能 |
 |------|------|
-| 📊 **行情** | 三市实时/延迟报价、K线图、16种技术指标 |
-| 🔬 **回测** | 策略回测、蒙特卡洛模拟、参数优化 |
-| 🤖 **策略** | 8种预设策略、自定义代码编辑器、实盘运行 |
-| 💼 **持仓** | 多市场持仓聚合、绩效归因分析 |
-| ⚠️ **风控** | 多维风控规则、VaR/CVaR、组合优化、再平衡 |
-| 📈 **量化实验室** | GBM/BSM/GARCH/HMM、因子分析、Kelly公式、ML策略 |
-| 📋 **订单** | 模拟盘/实盘区分、实时下单、取消管理 |
-| 🔔 **价格预警** | 价格阈值告警、条件触发通知 |
-| ⚙️ **设置** | 券商配置、数据通道状态检测 |
+| 🔍 **选股** | 多条件筛选器、涨跌榜、动态标的池规则链、基本面（PE/营收/利润率/现金流） |
+| 📊 **行情/事件** | 三市实时/延迟报价、K线、16指标、新闻+财报/分红日历、期权链+Greeks |
+| 🔭 **因子研究** | 横截面处理(防泄漏)、公式因子(RPN)、声明式因子库(Alpha158式)、遗传AI挖掘、实验排行榜 |
+| 🔬 **回测/验证** | 回测、Hyperopt(11损失)、Walk-Forward、前视/递归偏差检测、蒙特卡洛稳健性、显著性检验、Pyfolio tearsheet |
+| 🤖 **策略** | 16种预设策略、代码编辑器、策略自动交易(模拟/实盘) |
+| 🎯 **组合优化** | Black-Litterman、HRP、CVaR/CDaR、Ledoit-Wolf收缩、Topk-Dropout、离散分配 |
+| 📋 **执行** | 手动/策略下单、TWAP/VWAP/冰山算法单、Dry-Run/Live一致、Alpaca+富途网关 |
+| ⚠️ **风控** | 多维规则、VaR/CVaR、动态防护熔断(止损守卫/冷却/回撤)、Telegram/Webhook通知 |
+| 📈 **算法实验室** | GBM/BSM/GARCH/HMM/PCA/Copula/Kelly/协整、ML策略、DoubleEnsemble、序列模型(LSTM/GRU/ALSTM) |
+| 💼 **持仓** | 多市场聚合、绩效归因 |
+| ⚙️ **平台** | 多源数据通道(动态切换/手动强制/实时状态)、券商配置、RBAC角色权限、审计日志 |
 
 ---
 
@@ -79,11 +90,11 @@
 - Zustand（客户端状态）
 - Tailwind CSS（深色主题 UI）
 
-**数据通道**
-- 美股：Alpaca Markets API（实时成交价）
-- 港股：yfinance 批量下载（日线收盘价）
-- A股：AkShare 东方财富（本地网络环境）
-- 历史数据：Alpaca Bars / yfinance / AkShare → TimescaleDB
+**数据通道（多源冗余，可配置动态切换 + 手动强制）**
+- 美股：Alpaca(实时) → yfinance → AkShare美股 → Stooq → 演示
+- 港股：富途OpenD(实时) → yfinance → AkShare港股 → Stooq → 演示
+- A股：AkShare → 演示
+- 历史数据统一缓存进 TimescaleDB；真实源全失败自动降级演示，永不断供
 
 ---
 
@@ -261,18 +272,14 @@ GRAFANA_PASSWORD=CHANGE_ME
 
 ### 🤖 策略页（Strategies）
 
-**8种预设策略**
+**16种预设策略**
 
-| 策略 | 描述 |
+| 类型 | 策略 |
 |------|------|
-| `double_ma` | 双均线金叉死叉 |
-| `bollinger` | 布林带突破 / 均值回归 |
-| `macd` | MACD 金叉死叉 |
-| `rsi_mean_reversion` | RSI 超买超卖均值回归 |
-| `momentum` | 动量策略（N日涨跌幅排序） |
-| `grid_trading` | 网格交易 |
-| `pairs_trading` | 配对交易（协整） |
-| `multi_factor` | 多因子选股 |
+| 趋势 | `double_ma` 双均线 · `triple_ma` 三均线 · `macd` MACD · `supertrend` · `adx_trend` |
+| 均值回归 | `bollinger` 布林带 · `rsi_mean_reversion` RSI · `stochastic` KD · `vwap_reversion` |
+| 突破 | `atr_breakout` · `donchian_breakout` 唐奇安 · `keltner_breakout` 凯尔特纳 |
+| 其他 | `momentum` 动量 · `grid_trading` 网格 · `pairs_trading` 配对套利 · `multi_factor` 多因子 |
 
 **自定义策略**
 - 继承 `StrategyBase`，实现 `on_bar()` / `on_start()` / `on_stop()`
@@ -432,42 +439,24 @@ GET  /api/v1/data-config/status      # 数据通道状态
 
 ---
 
-## 数据通道
+## 数据通道（多源冗余）
 
-### 美股（US）
+每个市场支持**多个数据源**，按优先级**自动动态切换**；可在 **设置 → 行情数据通道** 排序、禁用、
+或 **★ 强制**只用某一源，并实时查看每个源的状态与延迟。真实源全部失败时自动降级为合成演示数据，
+**平台永不断供**。配置持久化于 Redis，重启不丢。
 
-| 用途 | 数据源 | 延迟 |
-|------|--------|------|
-| 实时报价 | Alpaca StockLatestTrade | 模拟盘免费 |
-| 历史K线 | Alpaca Bars API | T+0 |
-| 配置 | Settings → Alpaca | API Key 需在官网申请 |
+| 市场 | 数据源链（默认优先级） | 兜底 |
+|------|----------------------|------|
+| 🇺🇸 美股 | Alpaca(需Key,实时) → yfinance → AkShare美股 → Stooq | 演示 |
+| 🇭🇰 港股 | 富途OpenD(需本地,实时) → yfinance → AkShare港股 → Stooq | 演示 |
+| 🇨🇳 A股 | AkShare | 演示 |
 
-申请地址：https://alpaca.markets/
+- **Alpaca**（美股，申请 https://alpaca.markets/）：`PK` 开头为模拟盘，系统自动用 `paper-api.alpaca.markets`。
+- **富途 OpenD**（港股/美股实时+实盘）：下载 https://www.futunn.com/download/OpenAPI，登录后监听 `11111`，Docker 经 `host.docker.internal:11111` 连接。
+- **AkShare / yfinance / Stooq**：免费无需 Key，自动兜底。
 
-> **注意**：API Key 以 `PK` 开头为模拟盘，系统自动使用 `paper-api.alpaca.markets`。
-
-### 港股（HK）
-
-| 用途 | 数据源 | 延迟 |
-|------|--------|------|
-| 行情快照 | yfinance（Yahoo Finance） | T+0 收盘 |
-| 实时报价 | Futu OpenD（需本地安装） | 15分钟 |
-| 实盘下单 | Futu OpenD | 需本地安装 |
-
-**Futu OpenD 安装**：
-1. 下载 https://www.futunn.com/download/OpenAPI
-2. 登录富途牛牛账号
-3. 确认监听端口 `11111`
-4. Docker 通过 `host.docker.internal:11111` 连接
-
-### A股（沪深）
-
-| 用途 | 数据源 | 延迟 |
-|------|--------|------|
-| 实时行情 | AkShare 东方财富 | 实时（需中国大陆网络） |
-| 历史数据 | AkShare | T+1 |
-
-> A股行情在 Docker 容器内访问中国金融 API 可能受网络限制，建议在本地网络环境部署。
+> A股行情在 Docker 容器内访问中国金融 API 可能受网络限制，建议在本地网络环境部署（容器内会自动降级演示）。
+> 新增数据源：在 `backend/app/data/feeds/` 加 `DataFeed` 子类，并在 `source_registry.SOURCE_CATALOG` 登记（详见 [HANDOFF.md](HANDOFF.md)）。
 
 ---
 
@@ -508,7 +497,7 @@ quantbot/
 │   │   │   ├── base.py          # StrategyBase ABC
 │   │   │   ├── context.py       # StrategyContext（buy/sell API）
 │   │   │   ├── indicators.py    # 技术指标库
-│   │   │   └── presets/         # 8种预设策略
+│   │   │   └── presets/         # 16种预设策略
 │   │   └── tasks/               # Celery 异步任务
 │   ├── tests/                   # 16个测试文件，174个测试用例
 │   └── requirements.txt
