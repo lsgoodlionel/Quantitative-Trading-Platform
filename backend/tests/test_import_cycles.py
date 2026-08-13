@@ -38,6 +38,23 @@ _ENTRY_MODULES = [
     "app.strategy.factor_store",
     "app.quant.experiments.recorder",
     "app.api.v1.endpoints.factor_strategy",
+    # Wave M-a 归档/宇宙：data.service → data.archive 与
+    # data.pairlist.plugins → data.universe → data.screener 都必须是单向的
+    "app.data.archive",
+    "app.data.universe",
+    "app.data.pairlist",
+    "app.data.pairlist.plugins",
+    "app.tasks.archive",
+    "app.api.v1.endpoints.data_archive",
+    # Wave M-b 截面算子：cross_section 被公式引擎与因子库同时引用
+    "app.quant.cross_section",
+    "app.quant.factor_lib.alpha101",
+    # Wave M-c 产物库与模型模板：适配层横跨 app.quant 的三个既有实现，
+    # 产物库又被端点与实验记录器引用，最容易在这里补出一条环
+    "app.quant.lab.store",
+    "app.quant.models.template",
+    "app.quant.models.legacy_adapters",
+    "app.api.v1.endpoints.lab",
 ]
 
 

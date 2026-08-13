@@ -17,12 +17,13 @@ import pytest
 from app.data.pairlist import (
     PairlistRule,
     PairMetrics,
-    _apply_rule,
-    _compute_bar_metrics,
     apply_chain,
     clamp_lookback,
     metrics_to_dict,
 )
+
+# 私有内部函数从实现模块导入（M7 把 pairlist 拆成包后，包根只再导出公开 API）
+from app.data.pairlist.core import _apply_rule, _compute_bar_metrics
 
 # ── 公用构造器 ─────────────────────────────────────────────────
 

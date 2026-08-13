@@ -24,6 +24,16 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from app.quant.cross_section import (
+    cs_apply,
+    cs_demean,
+    cs_mean,
+    cs_rank,
+    cs_scale,
+    cs_std,
+    cs_zscore,
+    validate_panel_index,
+)
 from app.quant.factor_lib.operators import (
     ema as _op_ema,
 )
@@ -128,7 +138,11 @@ def _op_decay(x: pd.Series) -> pd.Series:
 
 
 def _op_rank(x: pd.Series) -> pd.Series:
-    """滚动分位排名（经典 alpha 截面 rank 的时序近似）。"""
+    """滚动分位排名（经典 alpha 截面 rank 的**时序近似**，非真截面）。
+
+    真正的「同一时刻跨标的排名」请用 `CS_RANK`（需 panel 模式，见
+    `evaluate_formula_panel`）。本算子保留原样是为了兼容既有公式与已保存策略。
+    """
     return x.rolling(60, min_periods=10).apply(
         lambda w: (w.argsort().argsort()[-1] + 1) / len(w), raw=False
     )
@@ -167,7 +181,9 @@ OPS: list[OpSpec] = [
     OpSpec("DECAY",  _op_decay,                        1, "线性衰减加权",     "时序"),
     OpSpec("DELAY1", lambda x: _ts_delay(x, 1),        1, "滞后1期",         "时序"),
     OpSpec("TS_MEAN5", _op_tsmean5,                    1, "5期均值",         "时序"),
-    OpSpec("RANK",   _op_rank,                         1, "滚动分位排名",     "截面"),
+    # 分类是「时序」而非「截面」：实现就是 rolling(60) 的时序近似（见 _op_rank）。
+    # 早期把它标成「截面」是错的，名不副实的标签会误导用户选错算子。
+    OpSpec("RANK",   _op_rank,                         1, "滚动分位排名(时序近似)", "时序"),
     OpSpec("ZSCORE", _op_zscore,                       1, "滚动Z标准化",      "统计"),
 ]
 
@@ -211,10 +227,47 @@ OPS += _windowed_unary_ops() + _windowed_binary_ops()
 _OP_BY_NAME = {op.name: op for op in OPS}
 
 
+# ── 截面算子（M2，仅 panel 模式可用）─────────────────────────────────
+# 刻意**不并入 `OPS`**：`OPS` 是单标的路径的词表，遗传挖掘
+# （`mining/expression_tree._vocab`）直接以它为搜索空间。把只在 panel 下
+# 有意义的算子混进去，会让挖掘生成一堆在单标的路径上必然报错的公式。
+
+CS_OPS: list[OpSpec] = [
+    OpSpec("CS_RANK",   cs_rank,   1, "截面分位排名(0,1]", "截面"),
+    OpSpec("CS_ZSCORE", cs_zscore, 1, "截面Z标准化",       "截面"),
+    OpSpec("CS_DEMEAN", cs_demean, 1, "截面去均值",        "截面"),
+    OpSpec("CS_SCALE",  cs_scale,  1, "截面缩放Σ|x|=1",    "截面"),
+    OpSpec("CS_MEAN",   cs_mean,   1, "截面均值(广播)",     "截面"),
+    OpSpec("CS_STD",    cs_std,    1, "截面标准差(广播)",   "截面"),
+]
+
+#: panel 模式下可用的完整词表 = 时序算子 + 截面算子
+PANEL_OPS: list[OpSpec] = OPS + CS_OPS
+_PANEL_OP_BY_NAME = {op.name: op for op in PANEL_OPS}
+_CS_OP_NAMES = frozenset(op.name for op in CS_OPS)
+
+
+def formula_requires_panel(tokens: list[str]) -> bool:
+    """公式是否含截面算子（含则必须走 `evaluate_formula_panel`）。"""
+    return any(tok in _CS_OP_NAMES for tok in tokens)
+
+
 # ── 栈式虚拟机（RPN 执行器）─────────────────────────────────────
+
+#: 公式 token 数硬上限
+MAX_TOKENS: int = 32
+
 
 class FormulaError(ValueError):
     """公式非法或求值失败。"""
+
+
+def _validate_tokens(tokens: list[str]) -> None:
+    """两条路径共用的 token 数量前置校验。"""
+    if not tokens:
+        raise FormulaError("公式为空")
+    if len(tokens) > MAX_TOKENS:
+        raise FormulaError(f"公式过长（最多 {MAX_TOKENS} 个 token）")
 
 
 def evaluate_formula(df: pd.DataFrame, tokens: list[str]) -> pd.Series:
@@ -228,12 +281,16 @@ def evaluate_formula(df: pd.DataFrame, tokens: list[str]) -> pd.Series:
 
     Raises
     ------
-    FormulaError : token 非法 / 栈不平衡 / 求值异常
+    FormulaError : token 非法 / 栈不平衡 / 求值异常 / 公式含截面算子
     """
-    if not tokens:
-        raise FormulaError("公式为空")
-    if len(tokens) > 32:
-        raise FormulaError("公式过长（最多 32 个 token）")
+    _validate_tokens(tokens)
+    if formula_requires_panel(tokens):
+        used = sorted({t for t in tokens if t in _CS_OP_NAMES})
+        raise FormulaError(
+            f"公式含截面算子 {', '.join(used)}，单标的帧上没有截面可言。"
+            f"请改用 evaluate_formula_panel(panel, tokens)（panel 为 "
+            f"(datetime, instrument) 双层索引面板，见 app/quant/panel.py）"
+        )
 
     features = _feature_map()
     stack: list[pd.Series] = []
@@ -264,6 +321,107 @@ def evaluate_formula(df: pd.DataFrame, tokens: list[str]) -> pd.Series:
     return stack[0]
 
 
+# ── 面板（panel）求值路径 ───────────────────────────────────────
+# 与 `evaluate_formula` 是**两条独立路径**，刻意不合并：
+# 一个函数按入参形态分叉行为，是最容易出错的设计，而 `evaluate_formula`
+# 的调用方（挖掘、适应度、AlphaModel、API）众多，任何行为分叉都代价高昂。
+
+_PANEL_REQUIRED_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
+
+
+def _validate_panel(panel: pd.DataFrame) -> None:
+    """面板必须是带 OHLCV 列的 (datetime, instrument) 双层索引帧。"""
+    if not isinstance(panel, pd.DataFrame):
+        raise FormulaError(f"panel 必须是 DataFrame，实得 {type(panel).__name__}")
+    try:
+        validate_panel_index(panel.index)
+    except ValueError as e:
+        raise FormulaError(str(e)) from e
+    missing = [c for c in _PANEL_REQUIRED_COLUMNS if c not in panel.columns]
+    if missing:
+        raise FormulaError(f"面板缺少必需列: {', '.join(missing)}")
+
+
+def _per_instrument(func: Callable, args: list[pd.Series]) -> pd.Series:
+    """逐标的执行时序算子/特征：切出该标的的时间序列 → 求值 → 拼回面板。"""
+    frame = pd.concat(args, axis=1, keys=range(len(args)))
+    parts: list[pd.Series] = []
+    for _, sub in frame.groupby(level="instrument", sort=False):
+        flat = sub.droplevel("instrument")
+        res = func(*(flat[col] for col in flat.columns))
+        if not isinstance(res, pd.Series):
+            res = pd.Series(res, index=flat.index)
+        res = pd.Series(res.to_numpy(dtype=float), index=sub.index)
+        parts.append(res)
+    return pd.concat(parts) if parts else pd.Series(dtype=float)
+
+
+def _panel_feature(panel: pd.DataFrame, fn: Callable[[pd.DataFrame], pd.Series]) -> pd.Series:
+    """逐标的计算基础特征（特征函数吃的是单标的 OHLCV 帧）。"""
+    parts: list[pd.Series] = []
+    for _, sub in panel.groupby(level="instrument", sort=False):
+        flat = sub.droplevel("instrument")
+        values = pd.Series(fn(flat), index=flat.index).astype(float)
+        parts.append(pd.Series(values.to_numpy(dtype=float), index=sub.index))
+    return pd.concat(parts) if parts else pd.Series(dtype=float)
+
+
+def evaluate_formula_panel(panel: pd.DataFrame, tokens: list[str]) -> pd.Series:
+    """
+    在面板上执行 RPN 公式，返回 (datetime, instrument) 双层索引的因子序列。
+
+    - **时序算子与基础特征**逐标的分组计算（与单标的路径同一份实现）。
+    - **CS_\\* 截面算子**按 datetime 分组跨标的计算（见 `app/quant/cross_section.py`）。
+
+    Parameters
+    ----------
+    panel  : (datetime, instrument) 双层索引面板，列含 OHLCV（见 `app/quant/panel.py`）
+    tokens : RPN token 列表，如 ["MOM20", "CS_RANK"]
+
+    Raises
+    ------
+    FormulaError : 面板形态非法 / token 非法 / 栈不平衡 / 求值异常
+    """
+    _validate_tokens(tokens)
+    _validate_panel(panel)
+
+    # 分组算子依赖组内时间有序；面板来源多样，这里统一排序后再算，
+    # 最终按调用方传入的原索引对齐返回（不改变调用方看到的行顺序）。
+    ordered = panel.sort_index()
+    features = _feature_map()
+    stack: list[pd.Series] = []
+
+    for tok in tokens:
+        if tok in features:
+            stack.append(_panel_feature(ordered, features[tok]))
+            continue
+        op = _PANEL_OP_BY_NAME.get(tok)
+        if op is None:
+            raise FormulaError(f"未知 token: {tok}（既非特征也非算子）")
+        if len(stack) < op.arity:
+            raise FormulaError(f"算子 {tok} 需要 {op.arity} 个操作数，栈中只有 {len(stack)} 个")
+        args = [stack.pop() for _ in range(op.arity)]
+        args.reverse()
+        stack.append(_eval_panel_op(op, args))
+
+    if len(stack) != 1:
+        raise FormulaError(f"公式不平衡：执行完毕后栈中剩余 {len(stack)} 个值（应为 1 个）")
+
+    return stack[0].reindex(panel.index)
+
+
+def _eval_panel_op(op: OpSpec, args: list[pd.Series]) -> pd.Series:
+    """执行单个 panel 算子：截面算子整截面算，其余逐标的算。"""
+    try:
+        if op.name in _CS_OP_NAMES:
+            res = cs_apply(args[0], op.func)
+        else:
+            res = _per_instrument(op.func, args)
+    except Exception as e:
+        raise FormulaError(f"算子 {op.name} 求值失败: {e}") from e
+    return res.replace([np.inf, -np.inf], np.nan)
+
+
 # ── 元数据（供前端构建器）─────────────────────────────────────
 
 FEATURE_META = [
@@ -287,8 +445,15 @@ FEATURE_META = [
 ]
 
 OP_META = [
-    {"name": op.name, "label": op.label, "arity": op.arity, "group": op.group}
-    for op in OPS
+    {
+        "name": op.name,
+        "label": op.label,
+        "arity": op.arity,
+        "group": op.group,
+        # 截面算子只在 panel 模式可用；前端据此提示「该公式需多标的截面」
+        "requires_panel": op.name in _CS_OP_NAMES,
+    }
+    for op in PANEL_OPS
 ]
 
 # 预设公式示例（RPN），帮助用户上手
@@ -322,5 +487,20 @@ PRESET_FORMULAS = [
         "name": "布林带排名",
         "tokens": ["BB_POS", "RANK"],
         "desc": "布林带位置的滚动分位排名，识别相对超买超卖",
+    },
+]
+
+# 需要多标的面板的预设公式（截面型）。**刻意与 PRESET_FORMULAS 分开**：
+# 后者服务于单标的公式分析页，混进 CS_* 会让用户一点就报错。
+PANEL_PRESET_FORMULAS = [
+    {
+        "name": "截面动量排名",
+        "tokens": ["MOM20", "CS_RANK"],
+        "desc": "同一时刻跨标的的动量排名，选股型 alpha 的基本形态",
+    },
+    {
+        "name": "截面反转",
+        "tokens": ["RET1", "NEG", "CS_ZSCORE"],
+        "desc": "1日收益取负后做截面标准化，多空对冲的经典短周期反转",
     },
 ]

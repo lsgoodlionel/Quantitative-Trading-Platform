@@ -229,13 +229,19 @@ export function FormulaBuilder({
               <p className="text-[10px] text-[#6e7681] mb-1">{group}</p>
               <div className="flex flex-wrap gap-1.5">
                 {ops.map((op) => {
-                  const canApply = stack.depth >= op.arity
+                  // 截面算子要跨标的比较，单标的分析页给不出面板 —— 直接禁用，
+                  // 而不是让用户点完再吃一个 400
+                  const isPanelOnly = op.requires_panel === true
+                  const canApply = !isPanelOnly && stack.depth >= op.arity
                   return (
                     <button key={op.name} onClick={() => pushToken(op.name)}
-                      title={`${op.label}（需 ${op.arity} 个操作数）`}
+                      disabled={isPanelOnly}
+                      title={isPanelOnly
+                        ? `${op.label} — 截面算子需多标的面板，请在「因子库 / 因子策略」中使用`
+                        : `${op.label}（需 ${op.arity} 个操作数）`}
                       className={`text-[11px] font-mono px-2 py-1 rounded border transition-colors ${OP_GROUP_COLOR} ${
                         canApply ? "" : "opacity-40"
-                      }`}>
+                      } ${isPanelOnly ? "cursor-not-allowed line-through" : ""}`}>
                       {op.name}
                       <span className="ml-1 text-[9px] text-[#6e7681]">{op.arity}</span>
                     </button>
@@ -245,7 +251,10 @@ export function FormulaBuilder({
             </div>
           ))}
         </div>
-        <p className="text-[9px] text-[#6e7681] mt-2">数字表示算子所需操作数个数（arity）。灰色表示当前栈深不足。</p>
+        <p className="text-[9px] text-[#6e7681] mt-2">
+          数字表示算子所需操作数个数（arity）。灰色表示当前栈深不足；划掉的是截面算子（CS_*），
+          需要多标的面板，本页为单标的分析故不可用。
+        </p>
       </div>
     </div>
   )

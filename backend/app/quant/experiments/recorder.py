@@ -66,6 +66,9 @@ class ExperimentRecord:
     created_at: float = 0.0
     #: 已被提升成的命名策略（G1）；None = 尚未提升
     promoted_strategy: str | None = None
+    #: 引用的投研产物 ID（V4 · M4，见 `app/quant/lab`）。
+    #: 产物有独立生命周期：本记录被 MAX_RECORDS 淘汰后，这些产物照样加载得到。
+    artifact_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -96,6 +99,7 @@ def build_record(
     tokens: list[str] | None = None,
     params: dict | None = None,
     note: str = "",
+    artifact_ids: list[str] | None = None,
 ) -> ExperimentRecord:
     """构造一条带 id / 时间戳的实验记录（不落库）。"""
     return ExperimentRecord(
@@ -109,6 +113,7 @@ def build_record(
         metrics=metrics,
         note=note,
         created_at=time.time(),
+        artifact_ids=list(artifact_ids or []),
     )
 
 
@@ -201,6 +206,7 @@ def _parse_record(raw: str) -> ExperimentRecord | None:
             note=data.get("note", ""),
             created_at=float(data.get("created_at", 0.0)),
             promoted_strategy=data.get("promoted_strategy"),
+            artifact_ids=data.get("artifact_ids", []),
         )
     except (json.JSONDecodeError, KeyError, TypeError):
         return None

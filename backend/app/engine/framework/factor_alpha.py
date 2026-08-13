@@ -14,13 +14,18 @@ import math
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
+import pandas as pd
+
 from app.engine.framework.alpha import AlphaModel
 from app.engine.framework.insight import Insight, InsightDirection
-from app.quant.formula_factor import evaluate_formula
+from app.quant.cross_section import to_wide
+from app.quant.formula_factor import (
+    evaluate_formula,
+    evaluate_formula_panel,
+    formula_requires_panel,
+)
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from app.strategy.context import PortfolioContext
 
 logger = logging.getLogger(__name__)
@@ -64,6 +69,8 @@ class FormulaFactorAlphaModel(AlphaModel):
             raise ValueError("short_quantile 必须小于 long_quantile 且非负")
 
         self._tokens = list(tokens)
+        # 含 CS_* 的公式必须整块 universe 一起算，走 panel 路径（M2）
+        self._needs_panel = formula_requires_panel(self._tokens)
         self._period = period
         self._long_q = long_quantile
         self._short_q = short_quantile
@@ -100,6 +107,9 @@ class FormulaFactorAlphaModel(AlphaModel):
 
     def _scores(self, ctx: PortfolioContext) -> dict[str, float]:
         """各标的当前的因子值（历史不足或求值为 NaN 的标的直接不参与截面）。"""
+        if self._needs_panel:
+            return self._panel_scores(ctx)
+
         scores: dict[str, float] = {}
         for symbol in ctx.bars:
             history = ctx.histories[symbol]
@@ -114,6 +124,48 @@ class FormulaFactorAlphaModel(AlphaModel):
         """单标的的因子值。子类可覆写以换掉打分方式，分位→观点的逻辑完全复用。"""
         values = evaluate_formula(history, self._tokens)
         return float(values.iloc[-1]) if len(values) else math.nan
+
+    # ── 面板（截面）打分路径 ─────────────────────────────────
+
+    def _panel_scores(self, ctx: PortfolioContext) -> dict[str, float]:
+        """把整个 universe 拼成面板一次算完，取最后一个时点的截面因子值。"""
+        panel = self._build_panel(ctx)
+        if panel is None:
+            return {}
+        try:
+            values = self._score_panel(panel)
+        except Exception:
+            logger.exception("面板因子求值失败（本轮不出观点）")
+            return {}
+        if values.empty:
+            return {}
+
+        latest = to_wide(values).iloc[-1]
+        return {
+            str(symbol): float(score)
+            for symbol, score in latest.items()
+            if math.isfinite(float(score))
+        }
+
+    def _build_panel(self, ctx: PortfolioContext) -> pd.DataFrame | None:
+        """由 ctx.histories 构建 (datetime, instrument) 面板；标的不足 2 个则放弃。"""
+        frames: list[pd.DataFrame] = []
+        for symbol in sorted(ctx.bars):
+            history = ctx.histories[symbol]
+            if len(history) < self._min_history:
+                continue
+            frame = history.tail(self._eval_window).copy()
+            frame.index = pd.Index(frame.index, name="datetime")
+            frame["instrument"] = symbol
+            frames.append(frame.set_index("instrument", append=True))
+
+        if len(frames) < MIN_CROSS_SECTION:
+            return None
+        return pd.concat(frames).sort_index()
+
+    def _score_panel(self, panel: pd.DataFrame) -> pd.Series:
+        """面板打分。子类可覆写以换掉打分方式（如因子库的面板型条目）。"""
+        return evaluate_formula_panel(panel, self._tokens)
 
 
 def _quantile(ordered: list[float], q: float) -> float:
@@ -169,6 +221,10 @@ class LibraryFactorAlphaModel(FormulaFactorAlphaModel):
     """
 
     def __init__(self, spec, **kwargs) -> None:
+        if getattr(spec, "is_panel", False):
+            raise ValueError(
+                f"因子 {spec.name} 是面板型（截面），请改用 PanelLibraryFactorAlphaModel"
+            )
         # 因子库条目自带滚动窗口；历史不足窗口长度时算不出有意义的值。
         # 调用方没显式给 min_history 时按窗口推一个下界，避免早期用一堆 NaN 建仓。
         kwargs.setdefault("min_history", max(getattr(spec, "window", 0) * 2, 60))
@@ -182,4 +238,33 @@ class LibraryFactorAlphaModel(FormulaFactorAlphaModel):
         return float(values.iloc[-1]) if len(values) else math.nan
 
 
-__all__ = ["FormulaFactorAlphaModel", "LibraryFactorAlphaModel"]
+class PanelLibraryFactorAlphaModel(FormulaFactorAlphaModel):
+    """
+    用**面板型**因子库条目（Alpha101）打分。
+
+    与 `LibraryFactorAlphaModel` 的唯一差别是求值粒度：截面型 alpha 必须拿到整个
+    universe 才有意义，所以覆写的是 `_score_panel` 而非 `_score_one`。
+    分位 → 观点 → 权重的逻辑与另外两条路径完全一致。
+    """
+
+    def __init__(self, spec, **kwargs) -> None:
+        if not getattr(spec, "is_panel", False):
+            raise ValueError(
+                f"因子 {spec.name} 是单标的型，请改用 LibraryFactorAlphaModel"
+            )
+        kwargs.setdefault("min_history", max(getattr(spec, "window", 0) * 2, 60))
+        kwargs.setdefault("name", f"panel_factor:{spec.name}")
+        super().__init__(["ZERO"], **kwargs)
+        # 父类按 tokens 判定路径；这里是面板型条目，直接置位
+        self._needs_panel = True
+        self._spec = spec
+
+    def _score_panel(self, panel: pd.DataFrame) -> pd.Series:
+        return self._spec.compute_panel(panel)
+
+
+__all__ = [
+    "FormulaFactorAlphaModel",
+    "LibraryFactorAlphaModel",
+    "PanelLibraryFactorAlphaModel",
+]

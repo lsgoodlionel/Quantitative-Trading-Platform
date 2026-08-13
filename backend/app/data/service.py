@@ -19,8 +19,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:  # 仅类型标注，避免 service 在导入期就拉起归档模块
+    from app.data.archive import ArchiveHandler, ArchiveKey, Gap
 
 from app.core.logging import get_logger
 from app.data.feeds.akshare_feed import AkShareDataFeed
@@ -61,6 +65,31 @@ class DataService:
         """
         获取历史 K 线。
 
+        `settings.archive_enabled` 关闭（默认）时走 `fetch_direct`，
+        行为与本地归档上线前**完全一致**；开启时先查本地归档、只补缺口。
+        """
+        from app.core.config import settings
+
+        if not settings.archive_enabled:
+            bars, _ = await self.fetch_direct(symbol, market, frequency, start, end, use_cache)
+            return bars
+        return await self._get_bars_archived(symbol, market, frequency, start, end, use_cache)
+
+    async def fetch_direct(
+        self,
+        symbol: str,
+        market: Market,
+        frequency: Frequency,
+        start: date,
+        end: date,
+        use_cache: bool = True,
+    ) -> tuple[list[Bar], bool]:
+        """
+        原始取数路径（TimescaleDB 缓存 → 数据源链 → 演示数据兜底）。
+
+        额外返回 `is_synthetic`：为 True 表示 bar 来自 DemoDataFeed 合成数据，
+        调用方**不得**把它写进归档 —— 合成数据一旦落盘就再也分辨不出来了。
+
         缓存策略:
         1. 查 TimescaleDB，命中则直接返回
         2. 缓存未命中 → 调用数据源 API
@@ -75,7 +104,7 @@ class DataService:
                 coverage = len(cached) / expected_days
                 if coverage >= 0.5:
                     logger.debug("Cache hit", symbol=symbol, count=len(cached))
-                    return cached
+                    return cached, False
 
         # 缓存未命中，按配置的有序数据源链逐个尝试（动态切换 / 手动强制）
         chain = self._registry.get_feed_chain(market)
@@ -93,10 +122,12 @@ class DataService:
                 )
 
         # 所有真实数据源失败 → 使用合成演示数据兜底（平台永不断供）
+        is_synthetic = False
         if not bars:
             demo = self._registry.get_demo_feed(market)
             try:
                 bars = await demo.get_bars(symbol, frequency, start, end)
+                is_synthetic = bool(bars)
             except Exception as e:
                 logger.error("Demo feed also failed", error=str(e))
 
@@ -105,7 +136,69 @@ class DataService:
             saved = await self._repo.save_bars(bars)
             logger.debug("Cached bars", symbol=symbol, count=saved)
 
-        return bars
+        return bars, is_synthetic
+
+    async def _get_bars_archived(
+        self,
+        symbol: str,
+        market: Market,
+        frequency: Frequency,
+        start: date,
+        end: date,
+        use_cache: bool,
+    ) -> list[Bar]:
+        """
+        归档优先取数：完整命中直接返回；部分命中只补两端缺口并写回归档。
+
+        任一环节出错都退回 `fetch_direct` —— 归档是加速手段，不该成为取数的
+        单点故障。
+        """
+        from app.data.archive import ArchiveError, ArchiveKey, boundary_gaps, get_archive
+
+        archive = get_archive()
+        if archive is None:
+            bars, _ = await self.fetch_direct(symbol, market, frequency, start, end, use_cache)
+            return bars
+
+        try:
+            key = ArchiveKey(symbol=symbol, market=market, frequency=frequency)
+            coverage = archive.coverage(key)
+            archived = archive.read(key, start, end) if coverage else []
+            gaps = boundary_gaps(coverage, start, end)
+        except (ArchiveError, ValueError) as e:
+            logger.warning("Archive read failed, falling back online", symbol=symbol, error=str(e))
+            bars, _ = await self.fetch_direct(symbol, market, frequency, start, end, use_cache)
+            return bars
+
+        if archived and not gaps:
+            _warn_if_sparse(symbol, archived, start, end)
+            logger.debug("Archive hit", symbol=symbol, count=len(archived))
+            return archived
+
+        fetched = await self._fill_gaps(key, gaps, use_cache, archive)
+        return _merge_bars(archived, fetched, start, end)
+
+    async def _fill_gaps(
+        self, key: ArchiveKey, gaps: list[Gap], use_cache: bool, archive: ArchiveHandler
+    ) -> list[Bar]:
+        """逐段在线补齐并写回归档（合成数据不写回）。"""
+        from app.data.archive import ArchiveError
+
+        fetched: list[Bar] = []
+        for gap in gaps:
+            bars, is_synthetic = await self.fetch_direct(
+                key.symbol, key.market, key.frequency, gap.start, gap.end, use_cache
+            )
+            if not bars:
+                continue
+            fetched.extend(bars)
+            if is_synthetic:
+                continue
+            try:
+                archive.write(key, bars)
+            except ArchiveError as e:
+                logger.warning("Archive write failed", symbol=key.symbol, error=str(e))
+        return fetched
 
     async def get_latest_bar(
         self,
@@ -182,6 +275,40 @@ class DataService:
         start = end - timedelta(days=days)
         bars = await self.get_bars(symbol, market, frequency, start, end, use_cache=False)
         return len(bars)
+
+
+# 日线归档里每个自然日至少应有约 0.5 根 bar（周末/假日占掉约 2/7）；
+# 低于这个比例说明归档内部很可能有空洞，而 boundary_gaps 只看两端、看不到它。
+_SPARSE_ARCHIVE_RATIO = 0.4
+
+
+def _warn_if_sparse(symbol: str, archived: list[Bar], start: date, end: date) -> None:
+    """
+    归档「完整命中」但 bar 数明显偏少时告警。
+
+    `boundary_gaps` 刻意不看内部空洞（否则周末会让归档每次都退化成全量请求），
+    代价是「某天下载失败留下的洞」会被静默吞掉。这里至少让它在日志里留下痕迹，
+    而不是让回测悄悄少几根 bar。
+    """
+    expected_days = max(1, (end - start).days + 1)
+    if len(archived) / expected_days >= _SPARSE_ARCHIVE_RATIO:
+        return
+    logger.warning(
+        "Archive looks sparse; may have internal holes — 用 archive download 重下该区间",
+        symbol=symbol, bars=len(archived), span_days=expected_days,
+    )
+
+
+def _merge_bars(
+    archived: list[Bar], fetched: list[Bar], start: date, end: date
+) -> list[Bar]:
+    """按时间合并归档与在线两份 bar（在线覆盖归档），裁剪到 [start, end] 并升序。"""
+    merged: dict = {b.time: b for b in archived}
+    merged.update({b.time: b for b in fetched})
+    return sorted(
+        (b for b in merged.values() if start <= b.time.date() <= end),
+        key=lambda b: b.time,
+    )
 
 
 class _FeedRegistry:

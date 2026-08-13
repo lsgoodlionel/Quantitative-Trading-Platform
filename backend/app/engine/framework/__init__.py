@@ -18,7 +18,11 @@ from app.engine.framework.execution import (
     StandardDeviationExecution,
     VolumeWeightedAveragePriceExecution,
 )
-from app.engine.framework.factor_alpha import FormulaFactorAlphaModel
+from app.engine.framework.factor_alpha import (
+    FormulaFactorAlphaModel,
+    LibraryFactorAlphaModel,
+    PanelLibraryFactorAlphaModel,
+)
 from app.engine.framework.insight import (
     NEVER_EXPIRES,
     Insight,
@@ -49,6 +53,8 @@ __all__ = [
     "EqualWeightingPCM",
     "ExecutionModel",
     "FormulaFactorAlphaModel",
+    "LibraryFactorAlphaModel",
+    "PanelLibraryFactorAlphaModel",
     "FrameworkStrategy",
     "ImmediateExecutionModel",
     "Insight",

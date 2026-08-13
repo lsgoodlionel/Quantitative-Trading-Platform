@@ -128,18 +128,27 @@ async def get_factor_library(
 @router.post("/factor/library/analyze")
 async def analyze_factor_library(req: LibraryAnalyzeRequest) -> dict:
     """批量计算因子库在 universe 上的横截面 IC，并按 IC/RankIC 排行。"""
-    from app.quant.factor_lib.loader import build_feature_fn
+    from app.quant.factor_lib.loader import (
+        attach_panel_factors,
+        build_feature_fn,
+        split_by_mode,
+    )
     from app.quant.factor_lib.ranking import rank_factor_library
     from app.quant.panel import attach_forward_label, bars_to_panel
 
     specs = _build_specs(req.groups, req.windows)
+    if not specs:
+        raise HTTPException(status_code=400, detail="过滤条件未匹配到任何因子")
     bars_by_symbol = await _fetch_universe(
         req.symbols, req.market, req.frequency, req.start, req.end,
     )
 
-    feature_fn = build_feature_fn(specs)
+    # 单标的型因子在 bars_to_panel 里逐标的算；面板型（Alpha101）要等面板成型后再算。
+    single_specs, panel_specs = split_by_mode(specs)
+    feature_fn = build_feature_fn(single_specs) if single_specs else None
     try:
         panel = bars_to_panel(bars_by_symbol, feature_fn=feature_fn)
+        panel = attach_panel_factors(panel, panel_specs)
     except Exception as e:  # noqa: BLE001 — 因子计算错误映射为 400
         raise HTTPException(status_code=400, detail=f"因子计算失败: {e}") from e
 

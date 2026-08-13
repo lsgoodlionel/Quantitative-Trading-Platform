@@ -321,13 +321,21 @@ def train_double_ensemble(
     X = _build_features(df)
     close = df["close"]
     fwd_ret = close.pct_change(forward_days).shift(-forward_days)
-    y = (fwd_ret > 0).astype(int)
+    # 末尾 forward_days 根 bar 的未来收益是 NaN（shift(-n) 的必然结果）。
+    # 直接 `(fwd_ret > 0).astype(int)` 会把 NaN 判成 False → 0，也就是把
+    # 「未来未知」标成「跌」，而下一行的 dropna() 剔不掉（标签已是 0 而非 NaN）。
+    # 后果是每次训练都掺进 forward_days 条噪音样本且系统性偏向「跌」。
+    # 用 where 保住 NaN，交给 dropna() 剔除。
+    y = (fwd_ret > 0).astype(float).where(fwd_ret.notna())
 
     combined = pd.concat([X, y.rename("target")], axis=1).dropna()
     if len(combined) < MIN_SAMPLES:
         raise ValueError(f"Not enough clean samples: {len(combined)} (need >= {MIN_SAMPLES})")
 
     X_clean = combined[FEATURE_NAMES].values
+    # 最新信号取「特征齐全但标签未知」的最后一根：训练排除它，预测不需要标签。
+    # 沿用 combined 会让最新信号滞后 forward_days 根（与 ml_strategy 同一处理）。
+    X_latest = X.dropna()[FEATURE_NAMES].values
     y_clean = combined["target"].values
     times = combined.index.tolist()
 
@@ -341,7 +349,7 @@ def train_double_ensemble(
     cv_mean, cv_std = _cross_validate(X_train, y_train, cfg)
 
     predictions = _recent_predictions(clf, X_test, y_test, times, n_train)
-    signal, latest_prob = _latest_signal(clf, X_clean)
+    signal, latest_prob = _latest_signal(clf, X_latest)
 
     return DoubleEnsembleResult(
         model_type="double_ensemble",

@@ -490,7 +490,10 @@ class TestLibraryFactorAlpha:
         from app.quant.factor_lib.loader import generate_factor_library
 
         spec = self._spec_named("KMID")
-        windowed = next(s for s in generate_factor_library() if s.window >= 20)
+        # 只看单标的型条目：面板型（Alpha101）走 PanelLibraryFactorAlphaModel
+        windowed = next(
+            s for s in generate_factor_library() if s.window >= 20 and not s.is_panel
+        )
 
         assert LibraryFactorAlphaModel(spec)._min_history >= 60
         assert LibraryFactorAlphaModel(windowed)._min_history >= windowed.window * 2

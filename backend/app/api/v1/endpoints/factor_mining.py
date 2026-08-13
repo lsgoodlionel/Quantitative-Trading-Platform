@@ -51,6 +51,9 @@ class MineRequest(BaseModel):
     max_depth: int = Field(default=4, ge=2, le=6)
     top_k: int = Field(default=10, ge=1, le=30)
     seed: int = Field(default=42, ge=0, le=2**31 - 1)
+    # 是否把 CS_* 截面算子并入搜索空间（M2）。默认关闭：开启会改变
+    # 「相同 seed → 相同结果」的映射，已记录的实验必须保持可复现。
+    use_cross_section: bool = False
     # 成本感知适应度覆盖（None → 用默认）
     fee_rate: float | None = Field(default=None, ge=0, le=0.05)
     entry_threshold: float | None = Field(default=None, gt=0, lt=1)
@@ -175,6 +178,7 @@ async def mine_factors(
         max_depth=req.max_depth,
         top_k=req.top_k,
         seed=req.seed,
+        use_cross_section=req.use_cross_section,
     )
     fitness_config = _make_fitness_config(req)
 

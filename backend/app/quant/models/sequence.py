@@ -101,7 +101,12 @@ def _build_sequences(
     features = _build_features(df)
     close = df["close"]
     fwd_ret = close.pct_change(forward_days).shift(-forward_days)
-    target = (fwd_ret > 0).astype(float)
+    # 末尾 forward_days 根 bar 的未来收益是 NaN（shift(-n) 的必然结果）。
+    # 直接 `(fwd_ret > 0).astype(int)` 会把 NaN 判成 False → 0，也就是把
+    # 「未来未知」标成「跌」，而下一行的 dropna() 剔不掉（标签已是 0 而非 NaN）。
+    # 后果是每次训练都掺进 forward_days 条噪音样本且系统性偏向「跌」。
+    # 用 where 保住 NaN，交给 dropna() 剔除。
+    target = (fwd_ret > 0).astype(float).where(fwd_ret.notna())
 
     combined = pd.concat([features, target.rename("target")], axis=1).dropna()
     if len(combined) < seq_len + 1:
@@ -303,7 +308,14 @@ def _assemble_result(
         )
     ]
 
-    # 最后一个测试样本窗口即最新时点，其概率作为当前信号
+    # 最后一个测试样本窗口即最新时点，其概率作为当前信号。
+    #
+    # ⚠️ 与 ml_strategy / double_ensemble 的不一致（已知，未修）：
+    # 那两处把「训练集」与「预测集」分开了 —— 训练排除标签未知的末尾 forward_days
+    # 根，但最新信号仍取真正最新的那根。这里做不到同样处理，因为 `_build_sequences`
+    # 把特征窗口与标签绑在一起返回，拆开需要重构它并新增一条无标签窗口路径。
+    # 后果：本模型的最新信号比另两个滞后 forward_days 根。
+    # 修它需要 torch 环境来验证等值性（本环境未安装），故留作已知缺口。
     latest_prob = round(float(prob_test[-1]), 4)
     signal = _latest_signal(latest_prob)
 

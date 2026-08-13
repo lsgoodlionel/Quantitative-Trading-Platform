@@ -15,12 +15,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
+from app.quant.factor_lib.alpha101 import ALPHA101_GROUP, compute_alpha
+from app.quant.factor_lib.alpha101_exprs import ALPHA_EXPRESSIONS
 from app.quant.factor_lib.operators import (
     EPS,
     ema,
@@ -36,24 +39,52 @@ from app.quant.factor_lib.operators import (
     wma,
 )
 
+logger = logging.getLogger(__name__)
+
 # 默认滚动窗口（对齐 Alpha158 的 [5,10,20,30,60]）
 DEFAULT_WINDOWS: tuple[int, ...] = (5, 10, 20, 30, 60)
 # 硬上限：一次生成的因子数（防止 universe × 因子数 计算爆炸）
 MAX_FACTORS: int = 240
 
+#: 单标的求值：OHLCV 帧 → 因子序列
 FactorFn = Callable[[pd.DataFrame], pd.Series]
+#: 面板求值：(datetime, instrument) 面板 → 同索引因子序列
+PanelFactorFn = Callable[[pd.DataFrame], pd.Series]
 
 
 @dataclass(frozen=True)
 class FactorSpec:
-    """单个因子的定义。compute 不参与相等比较/序列化。"""
+    """单个因子的定义。compute / compute_panel 不参与相等比较/序列化。
+
+    **两种求值形态、一个类型**（M3 的设计决定）：
+    截面型 alpha（Alpha101 的绝大多数）需要「同一时刻跨标的」的信息，装不进
+    `compute` 的单标的签名，于是补一个 `compute_panel`。选择扩展本类而非另建
+    `PanelFactorSpec`，是因为差异只是「在哪一层调用」这一条数据，而不是行为：
+    `generate_factor_library()` 仍返回一个同质列表，`to_meta()` / IC 排行 /
+    分组汇总 / 策略校验全部无需按类型分叉 —— 只有真正求值的两处需要看 `is_panel`。
+
+    两者必须**恰好给一个**，缺一个或都给都是定义错误，构造时即失败。
+    """
 
     name: str
     label: str
     group: str
     window: int
     expr: str
-    compute: FactorFn = field(compare=False, repr=False)
+    compute: FactorFn | None = field(default=None, compare=False, repr=False)
+    compute_panel: PanelFactorFn | None = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if (self.compute is None) == (self.compute_panel is None):
+            raise ValueError(
+                f"因子 {self.name}: compute 与 compute_panel 必须恰好给一个"
+                "（单标的求值 / 面板求值二选一）"
+            )
+
+    @property
+    def is_panel(self) -> bool:
+        """是否为截面型因子（求值需要整个 universe 的面板）。"""
+        return self.compute_panel is not None
 
     def to_meta(self) -> dict:
         return {
@@ -62,6 +93,8 @@ class FactorSpec:
             "group": self.group,
             "window": self.window,
             "expr": self.expr,
+            # 面板型因子单标的算不出来，前端据此禁用「单标的预览」入口
+            "is_panel": self.is_panel,
         }
 
 
@@ -214,7 +247,23 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "量价":  "价格与成交量的滚动相关性",
     "涨跌":  "窗口内上涨/下跌天数占比",
     "成交量": "成交量的滚动均值/波动相对现量",
+    ALPHA101_GROUP: "WorldQuant 101 公式化 alpha（截面型，求值需要整个 universe 面板）",
 }
+
+
+def _alpha101_specs() -> list[FactorSpec]:
+    """Alpha101 因子（面板型）。表达式原文随因子暴露，便于事后对拍审计。"""
+    return [
+        FactorSpec(
+            name=name,
+            label=f"WQ {name}",
+            group=ALPHA101_GROUP,
+            window=window,
+            expr=expr,
+            compute_panel=(lambda panel, _n=name: compute_alpha(panel, _n)),
+        )
+        for name, (expr, window) in ALPHA_EXPRESSIONS.items()
+    ]
 
 
 def generate_factor_library(
@@ -236,6 +285,9 @@ def generate_factor_library(
     if groups is None or "K线" in groups:
         specs.extend(_kbar_specs())
 
+    alpha_specs = _alpha101_specs() if (groups is None or ALPHA101_GROUP in groups) else []
+    specs.extend(alpha_specs)
+
     for fam in _FAMILIES:
         if groups is not None and fam.group not in groups:
             continue
@@ -251,17 +303,38 @@ def generate_factor_library(
                 )
             )
 
-    if len(specs) > MAX_FACTORS:
+    # 上限只约束「窗口 × 家族」组合生成的因子：那才是会随 windows 爆炸的部分。
+    # Alpha101 是固定 52 条的目录，条数不随任何参数增长，计入配额只会让
+    # 「多选几个窗口」平白撞墙，所以排除在外。
+    combinatorial = len(specs) - len(alpha_specs)
+    if combinatorial > MAX_FACTORS:
         raise ValueError(
-            f"生成因子数 {len(specs)} 超过上限 {MAX_FACTORS}，请缩小 windows/groups 范围"
+            f"生成因子数 {combinatorial} 超过上限 {MAX_FACTORS}，请缩小 windows/groups 范围"
         )
     return specs
 
 
+def split_by_mode(specs: list[FactorSpec]) -> tuple[list[FactorSpec], list[FactorSpec]]:
+    """把因子列表拆成 (单标的型, 面板型)，两条求值路径各取所需。"""
+    single = [s for s in specs if not s.is_panel]
+    panel = [s for s in specs if s.is_panel]
+    return single, panel
+
+
 def build_feature_fn(specs: list[FactorSpec]) -> FactorFn:
-    """把因子列表编译为 单标的 OHLCV → 多列因子帧 的映射（供 bars_to_panel）。"""
+    """把**单标的型**因子列表编译为 OHLCV → 多列因子帧 的映射（供 bars_to_panel）。
+
+    面板型因子在这一层算不出来（此时还没有 universe），必须显式拒绝而不是
+    悄悄跳过 —— 静默少算几列因子，会让下游 IC 排行结果无声地缺项。
+    """
     if not specs:
         raise ValueError("因子列表为空：请检查分组/窗口过滤条件是否匹配到因子")
+    panel_names = [s.name for s in specs if s.is_panel]
+    if panel_names:
+        raise ValueError(
+            f"build_feature_fn 只接受单标的型因子，收到面板型: {', '.join(panel_names)}"
+            "（请先用 split_by_mode 拆分，面板型走 attach_panel_factors）"
+        )
 
     def feature_fn(ohlcv: pd.DataFrame) -> pd.DataFrame:
         # 一次性 concat 所有列，避免逐列 insert 造成 DataFrame 碎片化
@@ -273,6 +346,30 @@ def build_feature_fn(specs: list[FactorSpec]) -> FactorFn:
         return out.replace([np.inf, -np.inf], np.nan)
 
     return feature_fn
+
+
+def attach_panel_factors(panel: pd.DataFrame, specs: list[FactorSpec]) -> pd.DataFrame:
+    """在面板上计算面板型因子并追加为列，返回**新面板**（不修改入参）。
+
+    单个因子求值失败不拖垮整批：该列记为全 NaN 并保留，IC 排行会因 coverage=0
+    自然把它排到最后 —— 但失败本身会记日志，不做静默吞没。
+    """
+    if not specs:
+        return panel
+
+    columns: dict[str, pd.Series] = {}
+    for spec in specs:
+        if not spec.is_panel:
+            raise ValueError(f"attach_panel_factors 收到非面板型因子: {spec.name}")
+        try:
+            values = spec.compute_panel(panel)
+        except Exception:
+            logger.exception("面板因子 %s 计算失败，该列记为全 NaN", spec.name)
+            values = pd.Series(np.nan, index=panel.index)
+        columns[spec.name] = pd.Series(values, index=panel.index).astype(float)
+
+    added = pd.concat(columns, axis=1).replace([np.inf, -np.inf], np.nan)
+    return pd.concat([panel, added], axis=1)
 
 
 def library_group_meta(specs: list[FactorSpec]) -> list[dict]:

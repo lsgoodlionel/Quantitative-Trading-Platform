@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     bars,
     broker_config,
     calendar,
+    data_archive,
     data_config,
     data_sources,
     factor_library,
@@ -22,6 +23,7 @@ from app.api.v1.endpoints import (
     factor_strategy,
     fundamentals,
     futu_config,
+    lab,
     live_strategy,
     news,
     notifications,
@@ -42,6 +44,7 @@ from app.api.v1.endpoints import (
     strategies,
     stream,
     topk_portfolio,
+    universe,
 )
 from app.core.config import settings
 
@@ -104,3 +107,8 @@ api_router.include_router(backtest_full_validation.router, prefix="/backtests", 
 api_router.include_router(backtest_history.router,       prefix="/backtests", tags=["Backtest History"])
 api_router.include_router(portfolio_backtest.router,      prefix="/backtests", tags=["Portfolio Backtest"])
 api_router.include_router(notifications.router,          prefix="/notify",    tags=["Notifications"])
+
+# ── v4.0 Wave M ──────────────────────────────────────────────────
+api_router.include_router(data_archive.router, prefix="/data",     tags=["Data Archive"])
+api_router.include_router(universe.router,     prefix="/universe", tags=["Universe"])
+api_router.include_router(lab.router,          prefix="/lab",      tags=["Lab Artifacts"])

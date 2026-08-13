@@ -141,7 +141,8 @@ testpaths = ["tests"]
 #   2026-08-07  57.40% → 59.47%（Wave K-a 订单类型/做空 + K-b 滑点/日历/复权），ratchet 设为 59
 #   2026-08-07  59.47% → 61.88%（Wave K-c 组合引擎 + K-d 止损/Insight 框架），ratchet 设为 61
 #   2026-08-11  61.88% → 67.49%（Wave L 控制/风控/执行/钩子/实盘接线 + V3 Wave A），ratchet 设为 67
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=67"
+#   2026-08-11  67.49% → 69.59%（Wave M 归档/宇宙/截面算子/Alpha101/产物库/模型模板），ratchet 设为 69
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=69"
 
 [tool.coverage.run]
 omit = ["tests/*", "alembic/*"]

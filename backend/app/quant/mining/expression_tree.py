@@ -33,14 +33,20 @@ class Node:
 
 # ── 词表（惰性构建，来自 formula_factor 单一真源，避免漂移）─────────────
 
-@lru_cache(maxsize=1)
-def _vocab() -> tuple[list[str], dict[int, list[str]]]:
-    """返回 (叶子特征名列表, {arity: 算子名列表})，与公式引擎共享同一份定义。"""
-    from app.quant.formula_factor import FEATURE_META, OPS
+@lru_cache(maxsize=2)
+def _vocab(include_cross_section: bool = False) -> tuple[list[str], dict[int, list[str]]]:
+    """返回 (叶子特征名列表, {arity: 算子名列表})，与公式引擎共享同一份定义。
+
+    `include_cross_section=True` 时把 CS_* 截面算子并入搜索空间 —— 只有当挖掘走
+    panel 求值路径时才可以打开，否则搜出来的公式在单标的路径上必然报错。
+    默认关闭，因此既有实验的 seed → 结果映射保持不变。
+    """
+    from app.quant.formula_factor import CS_OPS, FEATURE_META, OPS
 
     leaves = [m["name"] for m in FEATURE_META]
+    ops = [*OPS, *CS_OPS] if include_cross_section else list(OPS)
     ops_by_arity: dict[int, list[str]] = {}
-    for op in OPS:
+    for op in ops:
         ops_by_arity.setdefault(op.arity, []).append(op.name)
     return leaves, ops_by_arity
 
@@ -49,8 +55,8 @@ def leaf_names() -> list[str]:
     return list(_vocab()[0])
 
 
-def op_names_by_arity() -> dict[int, list[str]]:
-    return {a: list(names) for a, names in _vocab()[1].items()}
+def op_names_by_arity(include_cross_section: bool = False) -> dict[int, list[str]]:
+    return {a: list(names) for a, names in _vocab(include_cross_section)[1].items()}
 
 
 # ── 结构工具 ──────────────────────────────────────────────────────
@@ -85,20 +91,22 @@ def to_expr(node: Node) -> str:
 
 # ── 随机生成（grow 法）────────────────────────────────────────────
 
-def random_tree(rng: random.Random, max_depth: int) -> Node:
+def random_tree(
+    rng: random.Random, max_depth: int, include_cross_section: bool = False
+) -> Node:
     """按 grow 法随机生成一棵表达式树。"""
-    return _grow(rng, depth=0, max_depth=max_depth)
+    return _grow(rng, depth=0, max_depth=max_depth, include_cs=include_cross_section)
 
 
-def _grow(rng: random.Random, depth: int, max_depth: int) -> Node:
-    leaves, ops_by_arity = _vocab()
+def _grow(rng: random.Random, depth: int, max_depth: int, include_cs: bool = False) -> Node:
+    leaves, ops_by_arity = _vocab(include_cs)
     leaf_prob = 0.3 + 0.7 * (depth / max(max_depth, 1))
     if depth >= max_depth or rng.random() < leaf_prob:
         return Node("leaf", rng.choice(leaves))
 
     arity = _pick_arity(rng, ops_by_arity)
     op_name = rng.choice(ops_by_arity[arity])
-    children = tuple(_grow(rng, depth + 1, max_depth) for _ in range(arity))
+    children = tuple(_grow(rng, depth + 1, max_depth, include_cs) for _ in range(arity))
     return Node("op", op_name, children)
 
 
@@ -154,19 +162,31 @@ def crossover(rng: random.Random, parent_a: Node, parent_b: Node) -> Node:
     return replace_random_subtree(rng, parent_a, donor)
 
 
-def mutate(rng: random.Random, tree: Node, max_depth: int, subtree_depth: int = 2) -> Node:
+def mutate(
+    rng: random.Random,
+    tree: Node,
+    max_depth: int,
+    subtree_depth: int = 2,
+    include_cross_section: bool = False,
+) -> Node:
     """点变异：把随机子树替换为一棵新的小随机树。"""
-    fresh = random_tree(rng, max_depth=subtree_depth)
+    fresh = random_tree(rng, max_depth=subtree_depth, include_cross_section=include_cross_section)
     mutated = replace_random_subtree(rng, tree, fresh)
-    return mutated if tree_size(mutated) <= _MAX_NODES else random_tree(rng, max_depth)
+    if tree_size(mutated) <= _MAX_NODES:
+        return mutated
+    return random_tree(rng, max_depth, include_cross_section=include_cross_section)
 
 
 # 节点数硬上限（对应 evaluate_formula 的 32-token 约束，留裕量）
 _MAX_NODES = 24
 
 
-def clamp_size(rng: random.Random, tree: Node, max_depth: int) -> Node:
+def clamp_size(
+    rng: random.Random, tree: Node, max_depth: int, include_cross_section: bool = False
+) -> Node:
     """若树过大（超过 RPN token 上限）则回退为一棵小树。"""
     if tree_size(tree) <= _MAX_NODES and len(to_rpn(tree)) <= 30:
         return tree
-    return random_tree(rng, max_depth=min(max_depth, 3))
+    return random_tree(
+        rng, max_depth=min(max_depth, 3), include_cross_section=include_cross_section
+    )

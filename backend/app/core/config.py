@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     notify_email_from: str = ""
     notify_email_to: str = ""
 
+    # 本地数据归档（M1）
+    # 默认关闭：归档是缓存，缓存出错的表现是「回测结果莫名其妙变了」，
+    # 属于最难排查的一类问题。关闭时 DataService 行为与归档上线前完全一致。
+    archive_enabled: bool = False
+    archive_root: str = "./data/archive"
+
     # 监控
     prometheus_enabled: bool = True
 

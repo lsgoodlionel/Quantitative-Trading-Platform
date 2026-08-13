@@ -26,6 +26,7 @@ from app.engine.framework.alpha import AlphaModel
 from app.engine.framework.factor_alpha import (
     FormulaFactorAlphaModel,
     LibraryFactorAlphaModel,
+    PanelLibraryFactorAlphaModel,
 )
 from app.engine.framework.insight import Insight
 from app.engine.framework.optimizer_pcm import OptimizerPCM
@@ -240,10 +241,13 @@ def build_factor_strategy(spec: FactorStrategySpec) -> FrameworkStrategy:
             tokens=spec.tokens, min_history=MIN_HISTORY, **common
         )
     else:
-        # min_history 交给 LibraryFactorAlphaModel 按因子自带窗口推
-        factor = LibraryFactorAlphaModel(
-            library_factor_specs()[spec.library_factor], **common
+        # min_history 交给 Library*FactorAlphaModel 按因子自带窗口推。
+        # 面板型（Alpha101 等截面 alpha）与单标的型走不同的求值粒度。
+        entry = library_factor_specs()[spec.library_factor]
+        model_cls = (
+            PanelLibraryFactorAlphaModel if entry.is_panel else LibraryFactorAlphaModel
         )
+        factor = model_cls(entry, **common)
     return FrameworkStrategy(
         alpha=_RebalanceThrottledAlpha(factor, period),
         portfolio_construction=_build_pcm(spec, period),

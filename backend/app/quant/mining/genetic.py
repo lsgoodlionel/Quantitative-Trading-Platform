@@ -24,7 +24,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from app.quant.formula_factor import FormulaError, evaluate_formula
+from app.quant.formula_factor import (
+    FormulaError,
+    evaluate_formula,
+    evaluate_formula_panel,
+    formula_requires_panel,
+)
 from app.quant.mining.expression_tree import (
     Node,
     clamp_size,
@@ -49,6 +54,10 @@ class GAConfig:
     max_depth: int = 4
     top_k: int = 10
     seed: int = 42
+    #: 是否把 CS_* 截面算子并入搜索空间（M2）。开启后含 CS_* 的个体走 panel 求值路径。
+    #: 默认关闭：搜索空间变化会改变「相同 seed → 相同结果」的映射，
+    #: 既有实验记录必须保持可复现。
+    use_cross_section: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,22 @@ def _build_factor_panel(
     return pd.concat(parts).sort_index()
 
 
+def _ohlcv_to_panel(ohlcv_by_symbol: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """每标的 OHLCV 帧 → (datetime, instrument) 面板（截面求值的输入形态）。"""
+    parts: list[pd.DataFrame] = []
+    for symbol, frame in ohlcv_by_symbol.items():
+        df = frame.copy()
+        df.index = pd.Index(df.index, name="datetime")
+        df["instrument"] = symbol
+        parts.append(df.set_index("instrument", append=True))
+    return pd.concat(parts).sort_index()
+
+
+def _build_cs_factor_panel(panel: pd.DataFrame, tokens: list[str]) -> pd.DataFrame:
+    """含 CS_* 的公式：整块面板一次求值，输出同样的单列因子面板。"""
+    return evaluate_formula_panel(panel, tokens).astype(float).to_frame("factor")
+
+
 def _cross_sectional_ic_stats(
     factor: pd.Series, forward_return: pd.Series,
 ) -> tuple[float, float, float]:
@@ -156,7 +181,18 @@ class _Evaluator:
         self._liq = liquidity_panel
         self._fit_cfg = fitness_config
         self._cache: dict[tuple[str, ...], Candidate] = {}
+        #: OHLCV 面板惰性构建一次，供所有含 CS_* 的候选公式复用
+        self._panel: pd.DataFrame | None = None
         self.n_evaluated = 0
+
+    def _factor_panel(self, tokens: tuple[str, ...]) -> pd.DataFrame:
+        """按公式形态选择求值路径：含 CS_* 走面板，否则逐标的。"""
+        token_list = list(tokens)
+        if not formula_requires_panel(token_list):
+            return _build_factor_panel(self._ohlcv, token_list)
+        if self._panel is None:
+            self._panel = _ohlcv_to_panel(self._ohlcv)
+        return _build_cs_factor_panel(self._panel, token_list)
 
     def evaluate(self, tree: Node) -> Candidate:
         tokens = tuple(to_rpn(tree))
@@ -173,7 +209,7 @@ class _Evaluator:
 
         floor = float(self._fit_cfg.inactivity_floor)
         try:
-            factor_panel = _build_factor_panel(self._ohlcv, list(tokens))
+            factor_panel = self._factor_panel(tokens)
         except FormulaError:
             return _floor_candidate(tokens, floor)
 
@@ -230,8 +266,12 @@ def _breed_offspring(
     else:
         child = parent
     if rng.random() < config.mutation_rate:
-        child = mutate(rng, child, config.max_depth)
-    return clamp_size(rng, child, config.max_depth)
+        child = mutate(
+            rng, child, config.max_depth, include_cross_section=config.use_cross_section
+        )
+    return clamp_size(
+        rng, child, config.max_depth, include_cross_section=config.use_cross_section
+    )
 
 
 def _next_population(
@@ -273,7 +313,10 @@ def evolve(
         ohlcv_by_symbol, forward_return_panel, liquidity_panel, fitness_config,
     )
 
-    population = [random_tree(rng, config.max_depth) for _ in range(config.population_size)]
+    population = [
+        random_tree(rng, config.max_depth, include_cross_section=config.use_cross_section)
+        for _ in range(config.population_size)
+    ]
     history: list[GenerationStat] = []
 
     for gen in range(config.generations):

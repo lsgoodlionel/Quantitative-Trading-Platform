@@ -237,7 +237,12 @@ def train_ml_strategy(
     X = _build_features(df)
     close   = df["close"]
     fwd_ret = close.pct_change(forward_days).shift(-forward_days)
-    y       = (fwd_ret > 0).astype(int)
+    # 末尾 forward_days 根 bar 的未来收益是 NaN（shift(-n) 的必然结果）。
+    # 直接 `(fwd_ret > 0).astype(int)` 会把 NaN 判成 False → 0，也就是把
+    # 「未来未知」标成「跌」，而下一行的 dropna() 剔不掉（标签已是 0 而非 NaN）。
+    # 后果是每次训练都掺进 forward_days 条噪音样本且系统性偏向「跌」。
+    # 用 where 保住 NaN，交给 dropna() 剔除。
+    y       = (fwd_ret > 0).astype(float).where(fwd_ret.notna())
 
     # 2. Align, drop NaNs
     combined = pd.concat([X, y.rename("target")], axis=1).dropna()
@@ -245,6 +250,11 @@ def train_ml_strategy(
         raise ValueError(f"Not enough clean samples: {len(combined)} (need >= 100)")
 
     X_clean = combined[FEATURE_NAMES].values
+
+    # 最新信号要用**特征齐全但标签未知**的那几根 bar：训练必须排除它们
+    # （未来收益未知），但预测根本不需要标签。若沿用带标签的 combined，
+    # 「最新信号」会滞后 forward_days 根 —— 那才是用户真正在意的那一根。
+    X_latest = X.dropna()
     y_clean = combined["target"].values
     times   = combined.index.tolist()
 
@@ -281,7 +291,7 @@ def train_ml_strategy(
     ]
 
     # 9. Latest signal
-    signal, latest_prob = _latest_signal(clf, X_clean)
+    signal, latest_prob = _latest_signal(clf, X_latest[FEATURE_NAMES].values)
 
     return MLTrainResult(
         model_type=model_type,
