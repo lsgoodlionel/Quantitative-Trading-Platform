@@ -15,6 +15,7 @@ import pytest
 from app.quant.formula_factor import (
     OP_META,
     OPS,
+    PRESET_FORMULAS,
     FormulaError,
     evaluate_formula,
 )
@@ -219,3 +220,38 @@ class TestRollingRank:
 
         assert len(values) == 100
         assert values.notna().any()
+
+
+# ── 预设公式：出厂就必须能跑 ──────────────────────────────────────
+#
+# 「布林带排名」= ["BB_POS", "RANK"] 长期是坏的（RANK 对任何输入都抛
+# FormulaError），却没有任何用例发现 —— 因为从来没有一条断言真的**执行**过
+# 预设公式。逐条跑一遍是最便宜的兜底：预设是用户点开公式页看到的第一批东西。
+
+class TestPresetFormulasAreRunnable:
+    @pytest.mark.parametrize(
+        "preset", PRESET_FORMULAS, ids=[p["name"] for p in PRESET_FORMULAS],
+    )
+    def test_preset_evaluates_to_finite_values(self, preset: dict) -> None:
+        # Arrange
+        df = _make_ohlcv(n_days=120)
+
+        # Act
+        values = evaluate_formula(df, list(preset["tokens"]))
+
+        # Assert：不抛异常，且暖机之后确实产出有限值（而非整列 NaN）
+        assert len(values) == len(df)
+        assert np.isfinite(values.to_numpy(dtype=float)).any()
+
+    def test_bollinger_rank_preset_stays_within_unit_interval(self) -> None:
+        # Arrange：这条是 RANK 回归的「产品口径」版本 —— 走的是出厂预设本身
+        df = _make_ohlcv(n_days=120)
+
+        # Act
+        values = evaluate_formula(df, ["BB_POS", "RANK"]).dropna()
+
+        # Assert：滚动分位 = 名次/窗口长度，落在 (0, 1]
+        assert len(values) > 0
+        assert np.isfinite(values.to_numpy(dtype=float)).all()
+        assert (values > 0.0).all()
+        assert (values <= 1.0).all()

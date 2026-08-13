@@ -247,3 +247,68 @@ class TestEvolveRobustness:
         # Assert
         assert isinstance(result, GAResult)
         assert len(result.history) == 2
+
+
+# ── 公式求值失败必须留痕 ────────────────────────────────────────
+#
+# 历史教训：RANK 对任何输入都抛 FormulaError，而 `_score` 捕获后直接给候选
+# 打底分、不留任何日志 —— 于是含 RANK 的个体全被静默淘汰，搜索空间悄悄少了
+# 一块，而运维侧看到的只是「这轮挖掘没挖出什么好东西」。
+# 算子级的系统性故障必须能从日志里看出来。
+
+class TestFormulaErrorIsLogged:
+    @staticmethod
+    def _evaluator() -> object:
+        from app.quant.mining.genetic import _Evaluator
+
+        ohlcv, fwd = _make_universe(["A", "B", "C"], seed_base=0)
+        return _Evaluator(ohlcv, fwd, None, FitnessConfig())
+
+    def test_broken_formula_emits_warning_and_floors_candidate(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange: 栈不平衡的 token 串 —— 求值必抛 FormulaError
+        evaluator = self._evaluator()
+        tokens = ("MOM20", "RET1", "SLOPE10")
+
+        # Act
+        with caplog.at_level("WARNING", logger="app.quant.mining.genetic"):
+            candidate = evaluator._score(tokens)
+
+        # Assert: 既回落到触底适应度，又在日志里留下了原因与公式
+        assert candidate.fitness == pytest.approx(FitnessConfig().inactivity_floor)
+        assert len(caplog.records) == 1
+        assert "MOM20 RET1 SLOPE10" in caplog.text
+
+    def test_repeated_same_failure_logs_once_but_keeps_counting(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange: 同一原因重复上千次是常态（一轮进化要评上千个个体），
+        # 逐条打日志会把有用信息淹掉 —— 首次告警 + 计数才是可用的信号
+        evaluator = self._evaluator()
+
+        # Act
+        with caplog.at_level("WARNING", logger="app.quant.mining.genetic"):
+            for _ in range(5):
+                evaluator._score(("MOM20", "RET1", "SLOPE10"))
+
+        # Assert
+        assert len(caplog.records) == 1
+        assert sum(evaluator.formula_errors.values()) == 5
+
+    def test_healthy_operator_set_evolves_without_any_warning(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Arrange / Act: 现役算子集整体健康时，不该有候选因求值失败被打底分。
+        # 这条断言的价值在于「以后再坏一个算子，测试会红」—— 正是 RANK 缺的那道防线。
+        ohlcv, fwd = _make_universe(["A", "B", "C", "D"], seed_base=5)
+
+        with caplog.at_level("WARNING", logger="app.quant.mining.genetic"):
+            result = evolve(ohlcv, fwd, None, FitnessConfig(), GAConfig(
+                population_size=10, generations=3, seed=11,
+                use_cross_section=True,
+            ))
+
+        # Assert
+        assert isinstance(result, GAResult)
+        assert caplog.records == []

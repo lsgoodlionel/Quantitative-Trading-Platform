@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from dataclasses import dataclass
 
@@ -39,8 +40,13 @@ from app.quant.mining.expression_tree import (
     to_rpn,
 )
 
+logger = logging.getLogger(__name__)
+
 # 单日横截面 IC 所需最少标的数（与 factor_lib/ranking 口径一致）
 _MIN_NAMES = 3
+
+# 汇总日志里最多列出几种失败原因（同一算子坏掉时原因高度重复，列几条就够定位）
+_MAX_REPORTED_ERROR_REASONS = 5
 
 
 @dataclass(frozen=True)
@@ -184,6 +190,13 @@ class _Evaluator:
         #: OHLCV 面板惰性构建一次，供所有含 CS_* 的候选公式复用
         self._panel: pd.DataFrame | None = None
         self.n_evaluated = 0
+        #: 公式求值失败原因 → 次数。按原因去重记账，见 _record_formula_error
+        self._formula_errors: dict[str, int] = {}
+
+    @property
+    def formula_errors(self) -> dict[str, int]:
+        """公式求值失败原因 → 次数（只读快照）。"""
+        return dict(self._formula_errors)
 
     def _factor_panel(self, tokens: tuple[str, ...]) -> pd.DataFrame:
         """按公式形态选择求值路径：含 CS_* 走面板，否则逐标的。"""
@@ -204,13 +217,31 @@ class _Evaluator:
         self.n_evaluated += 1
         return candidate
 
+    def _record_formula_error(self, exc: FormulaError, tokens: tuple[str, ...]) -> None:
+        """按原因去重记账：首次出现打一条 WARNING，之后只累加计数。
+
+        求值失败本身是正常的（随机生成的个体确实可能退化），所以这里不能抛；
+        但也不能像以前那样一声不吭 —— RANK 曾经对**任何**输入都失败，含它的
+        个体全被静默打底分，搜索空间悄悄缺了一块，运维侧只看到「这轮没挖出
+        好东西」。逐条打日志又会被淹没（一轮进化要评上千个个体），
+        故首次告警 + 计数，收尾时再由 _log_formula_error_summary 汇总。
+        """
+        reason = str(exc)
+        seen = self._formula_errors.get(reason, 0)
+        self._formula_errors[reason] = seen + 1
+        if seen == 0:
+            logger.warning(
+                "公式求值失败，候选记为触底适应度：%s（公式 %s）", reason, " ".join(tokens),
+            )
+
     def _score(self, tokens: tuple[str, ...]) -> Candidate:
         from app.quant.factor_fitness import compute_factor_fitness
 
         floor = float(self._fit_cfg.inactivity_floor)
         try:
             factor_panel = self._factor_panel(tokens)
-        except FormulaError:
+        except FormulaError as exc:
+            self._record_formula_error(exc, tokens)
             return _floor_candidate(tokens, floor)
 
         try:
@@ -325,7 +356,23 @@ def evolve(
         if gen < config.generations - 1:
             population = _next_population(rng, scored, config)
 
+    _log_formula_error_summary(evaluator)
     return _finalize(evaluator, history, config.top_k)
+
+
+def _log_formula_error_summary(evaluator: _Evaluator) -> None:
+    """收尾汇总求值失败：单条告警看不出「偶发退化」还是「算子整体坏掉」，计数能。"""
+    errors = evaluator.formula_errors
+    if not errors:
+        return
+    top = sorted(errors.items(), key=lambda kv: kv[1], reverse=True)
+    listed = "；".join(
+        f"{reason} ×{count}" for reason, count in top[:_MAX_REPORTED_ERROR_REASONS]
+    )
+    logger.warning(
+        "本轮进化共 %d 次公式求值失败（%d 种原因），对应候选均记为触底适应度：%s",
+        sum(errors.values()), len(errors), listed,
+    )
 
 
 def _score_population(
