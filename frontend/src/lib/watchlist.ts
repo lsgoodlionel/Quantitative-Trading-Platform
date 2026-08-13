@@ -44,6 +44,39 @@ function persist(items: WatchlistItem[]): WatchlistItem[] {
 }
 
 /**
+ * 首次使用时用 `defaults` 播种，之后一律读用户自己的列表。
+ *
+ * 必须区分「从未初始化」与「用户主动清空」：两者 `loadWatchlist()` 都返回 []，
+ * 若一律按空处理就会把默认列表塞回去 —— 用户删掉的标的每次刷新又冒出来。
+ * 这里以 **storage key 是否存在** 为判据，清空时会写入一个空数组把 key 留住。
+ */
+export function loadWatchlistOrSeed(
+  defaults: readonly WatchlistItem[],
+): WatchlistItem[] {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(STORAGE_KEY)
+  } catch {
+    // 隐私模式读不到：直接给默认列表，本次会话内可用但不持久
+    return [...defaults]
+  }
+  if (raw === null) return persist([...defaults])
+  return loadWatchlist()
+}
+
+/**
+ * 覆盖式写入。供调用方在本地状态变更后同步落盘。
+ *
+ * 泛型是为了**保留调用方更窄的元素类型**（如 Market.tsx 的 WatchItem，
+ * 其 market 是 "US"|"HK"|"A" 而非 string），否则调用处得写 `as` 强转，
+ * 而强转正是会掩盖真实类型错误的东西。
+ */
+export function saveWatchlist<T extends WatchlistItem>(items: readonly T[]): T[] {
+  persist(items.slice(0, MAX_ITEMS))
+  return items.slice(0, MAX_ITEMS)
+}
+
+/**
  * 批量加入自选池（去重，保序）。返回 { list, added } —— added 为实际新增条数，
  * 便于调用方给出「已加入 N 只（M 只已存在）」这类精确反馈。
  */
@@ -64,9 +97,15 @@ export function removeFromWatchlist(
   return persist(loadWatchlist().filter((item) => itemKey(item) !== key))
 }
 
+/**
+ * 清空自选池。
+ *
+ * 刻意写入空数组而不是 `removeItem` —— 删掉 key 会让
+ * `loadWatchlistOrSeed` 判定为「从未初始化」，下次进页面又把默认列表播种回来。
+ */
 export function clearWatchlist(): void {
   try {
-    localStorage.removeItem(STORAGE_KEY)
+    localStorage.setItem(STORAGE_KEY, "[]")
   } catch {
     /* 同上：清理失败无副作用，忽略 */
   }

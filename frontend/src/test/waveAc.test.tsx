@@ -7,7 +7,9 @@ import {
   addToWatchlist,
   clearWatchlist,
   loadWatchlist,
+  loadWatchlistOrSeed,
   removeFromWatchlist,
+  saveWatchlist,
 } from "@/lib/watchlist"
 import {
   formatPayloadValue,
@@ -363,5 +365,51 @@ describe("SelectionActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "清空选择" }))
 
     expect(onClear).toHaveBeenCalled()
+  })
+})
+
+// ── 自选池播种：必须区分「从未初始化」与「用户主动清空」──────────
+//
+// 回归用例：选股器的「加自选池」原本写入 localStorage，但行情页读的是硬编码的
+// DEFAULT_WATCHLIST —— 写得进、读不出，功能只做了一半。接通时又埋着第二个坑：
+// 若把「空列表」一律当成「没初始化过」，用户删掉的标的每次刷新都会被播种回来。
+
+describe("watchlist seeding", () => {
+  const DEFAULTS = [
+    { symbol: "AAPL", market: "US", name: "苹果" },
+    { symbol: "00700", market: "HK", name: "腾讯" },
+  ]
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it("seeds defaults on first use", () => {
+    expect(loadWatchlistOrSeed(DEFAULTS)).toEqual(DEFAULTS)
+    // 播种要落盘，否则每次进页面都在「首次使用」
+    expect(loadWatchlist()).toEqual(DEFAULTS)
+  })
+
+  it("returns the user list instead of defaults once initialized", () => {
+    saveWatchlist([{ symbol: "NVDA", market: "US", name: "英伟达" }])
+
+    expect(loadWatchlistOrSeed(DEFAULTS)).toEqual([
+      { symbol: "NVDA", market: "US", name: "英伟达" },
+    ])
+  })
+
+  it("does not re-seed after the user empties the list", () => {
+    loadWatchlistOrSeed(DEFAULTS)
+    clearWatchlist()
+
+    // 清空是用户的明确意图，不该被默认列表覆盖
+    expect(loadWatchlistOrSeed(DEFAULTS)).toEqual([])
+  })
+
+  it("does not re-seed after the user removes every item one by one", () => {
+    loadWatchlistOrSeed(DEFAULTS)
+    for (const item of DEFAULTS) removeFromWatchlist(item)
+
+    expect(loadWatchlistOrSeed(DEFAULTS)).toEqual([])
   })
 })

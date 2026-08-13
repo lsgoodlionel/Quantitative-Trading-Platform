@@ -1,4 +1,9 @@
 import { useState, useCallback, useMemo } from "react"
+import {
+  loadWatchlistOrSeed,
+  saveWatchlist,
+  type WatchlistItem,
+} from "@/lib/watchlist"
 import { useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
@@ -471,6 +476,23 @@ interface WatchItem {
   name: string
 }
 
+const VALID_MARKETS: readonly Market[] = ["US", "HK", "A"]
+
+/**
+ * 持久化条目 -> 页面条目。
+ *
+ * `WatchlistItem.market` 是 string（localStorage 里的东西不可信：可能是旧版本
+ * 写的、也可能被手工改过），这里**丢弃**无法识别的市场而不是硬转类型 ——
+ * 一个 market 非法的条目会让行情请求整条链路报错。
+ */
+function toWatchItems(items: readonly WatchlistItem[]): WatchItem[] {
+  return items
+    .filter((item): item is WatchItem =>
+      VALID_MARKETS.includes(item.market as Market),
+    )
+    .map(({ symbol, market, name }) => ({ symbol, market, name }))
+}
+
 interface WatchRowProps {
   item: WatchItem
   price: number | null | undefined
@@ -523,11 +545,19 @@ interface WatchlistTabProps {
 }
 
 function WatchlistTab({ initialSymbol, initialMarket }: WatchlistTabProps) {
-  const initialItem = DEFAULT_WATCHLIST.find(
-    w => w.symbol === initialSymbol && w.market === initialMarket,
-  ) ?? DEFAULT_WATCHLIST[0]
+  // 从**实际加载的**自选池里挑初始选中项。用户可能已经删掉了默认标的，
+  // 仍从 DEFAULT_WATCHLIST 里挑会选中一个列表里根本不存在的条目。
+  const [initialList] = useState<WatchItem[]>(() =>
+    toWatchItems(loadWatchlistOrSeed(DEFAULT_WATCHLIST)),
+  )
+  const initialItem =
+    initialList.find(w => w.symbol === initialSymbol && w.market === initialMarket)
+    ?? initialList[0]
+    ?? DEFAULT_WATCHLIST[0]
 
-  const [watchlist, setWatchlist] = useState<WatchItem[]>(DEFAULT_WATCHLIST)
+  // 自选池持久化：选股器「加自选池」写入的标的在这里读回来。
+  // 首次进入用 DEFAULT_WATCHLIST 播种；用户清空后不再被播种回去（见 lib/watchlist.ts）。
+  const [watchlist, setWatchlist] = useState<WatchItem[]>(initialList)
   const [selected, setSelected] = useState<WatchItem>(initialItem)
   const [addSymbol, setAddSymbol] = useState("")
   const [addMarket, setAddMarket] = useState<Market>("US")
@@ -560,7 +590,9 @@ function WatchlistTab({ initialSymbol, initialMarket }: WatchlistTabProps) {
   }, [])
 
   const handleRemove = useCallback((item: WatchItem) => {
-    setWatchlist((prev) => prev.filter((w) => w.symbol !== item.symbol || w.market !== item.market))
+    setWatchlist((prev) =>
+      saveWatchlist(prev.filter((w) => w.symbol !== item.symbol || w.market !== item.market)),
+    )
     if (selected.symbol === item.symbol && selected.market === item.market) {
       const remaining = watchlist.filter((w) => w.symbol !== item.symbol || w.market !== item.market)
       if (remaining.length > 0) handleSelect(remaining[0])
@@ -573,7 +605,7 @@ function WatchlistTab({ initialSymbol, initialMarket }: WatchlistTabProps) {
     const exists = watchlist.some((w) => w.symbol === sym && w.market === addMarket)
     if (exists) return
     const newItem: WatchItem = { symbol: sym, market: addMarket, name: addName || sym }
-    setWatchlist((prev) => [...prev, newItem])
+    setWatchlist((prev) => saveWatchlist([...prev, newItem]))
     handleSelect(newItem)
     setAddSymbol("")
     setAddName("")
