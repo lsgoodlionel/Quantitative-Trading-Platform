@@ -552,3 +552,79 @@ class TestDownloadArchiveTask:
 
         assert len(seen) == task_mod.MAX_SYMBOLS_PER_TASK
         assert result["written"] == task_mod.MAX_SYMBOLS_PER_TASK
+
+
+# ── Wave O-a / O4：归档缺口 → data_gap 通知 ────────────────────
+class TestDownloadArchiveGapNotification:
+    """下载完仍有缺口时要发 data_gap；通知或检测本身出错都不该影响下载结果。"""
+
+    @staticmethod
+    def _patch_archive_one(monkeypatch) -> None:
+        from app.tasks import archive as task_mod
+
+        async def _ok(*_args, **_kwargs) -> int:
+            return 10
+
+        monkeypatch.setattr(task_mod, "_archive_one", _ok)
+
+    def test_gaps_are_reported_and_emitted(self, monkeypatch, tmp_path) -> None:
+        from app.tasks import archive as task_mod
+
+        self._patch_archive_one(monkeypatch)
+        emitted: list[dict] = []
+        monkeypatch.setattr(task_mod, "emit_data_gap", lambda **kw: emitted.append(kw) or {})
+        # 空归档目录 → 整段窗口都是缺口
+        monkeypatch.setattr("app.core.config.settings.archive_root", str(tmp_path))
+
+        result = task_mod.download_archive.run(
+            symbols=["AAPL"], market="US", start="2024-01-01", end="2024-06-01"
+        )
+
+        assert len(result["gaps"]) == 1
+        assert "AAPL" in result["gaps"][0]
+        assert len(emitted) == 1
+        assert emitted[0]["gaps"] == result["gaps"]
+
+    def test_short_tail_is_not_reported_as_gap(self, monkeypatch, tmp_path) -> None:
+        """周末/连假造成的几天尾巴不算缺口，否则每次下载都要响一下。"""
+        from app.tasks import archive as task_mod
+
+        monkeypatch.setattr("app.core.config.settings.archive_root", str(tmp_path))
+        key = ArchiveKey(symbol="AAPL", market=Market.US, frequency=Frequency.DAY_1)
+        create_archive().write(key, [_bar(day) for day in range(1, 6)])
+
+        gaps = task_mod._collect_gaps(["AAPL"], "US", "1d", date(2024, 3, 1), date(2024, 3, 7))
+
+        assert gaps == []
+
+    def test_notification_failure_does_not_break_download(self, monkeypatch, tmp_path) -> None:
+        from app.tasks import archive as task_mod
+
+        self._patch_archive_one(monkeypatch)
+        monkeypatch.setattr("app.core.config.settings.archive_root", str(tmp_path))
+
+        def _boom(**_kwargs):
+            raise RuntimeError("Redis 挂了")
+
+        monkeypatch.setattr(task_mod, "emit_data_gap", _boom)
+
+        result = task_mod.download_archive.run(symbols=["AAPL"], market="US")
+
+        assert result["archived"] == 1
+        assert result["written"] == 10
+
+    def test_gap_detection_failure_does_not_break_download(self, monkeypatch) -> None:
+        """缺口检测本身炸了，也只该让缺口信息缺席，不该让下载失败。"""
+        from app.tasks import archive as task_mod
+
+        self._patch_archive_one(monkeypatch)
+
+        def _no_backend(*_a, **_kw):
+            raise RuntimeError("后端不可用")
+
+        monkeypatch.setattr("app.data.archive.create_archive", _no_backend)
+
+        result = task_mod.download_archive.run(symbols=["AAPL"], market="US")
+
+        assert result["archived"] == 1
+        assert result["gaps"] == []

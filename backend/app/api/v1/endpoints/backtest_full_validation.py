@@ -52,7 +52,7 @@ from app.engine.backtest.validation_steps import (
     normalize_walkforward,
 )
 from app.engine.backtest.walkforward import run_walk_forward
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -103,8 +103,8 @@ def get_service(session: AsyncSession = Depends(get_db)) -> DataService:
 async def _validate_and_fetch(
     body: FullValidationRequest, svc: DataService,
 ) -> tuple[Market, list[Bar]]:
-    if body.strategy_name not in STRATEGY_REGISTRY:
-        raise HTTPException(400, f"未知策略 '{body.strategy_name}'，可用: {list(STRATEGY_REGISTRY.keys())}")
+    if body.strategy_name not in available_strategies():
+        raise HTTPException(400, f"未知策略 '{body.strategy_name}'，可用: {list(available_strategies().keys())}")
     try:
         market = Market(body.market.upper())
     except ValueError:
@@ -133,7 +133,7 @@ def _make_runners(
     body: FullValidationRequest, market: Market, bars: list[Bar],
 ) -> dict[str, Any]:
     """把请求参数与行情闭包成五个无参 runner，交由编排器逐个执行。"""
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
     cash = body.initial_cash
 
     def _metrics_on(params: dict, window: list[Bar]) -> dict:

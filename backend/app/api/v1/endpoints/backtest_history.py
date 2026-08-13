@@ -38,7 +38,7 @@ from app.data.storage.backtest_history import (
 )
 from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.engine.backtest.history_compare import build_comparison
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -97,7 +97,7 @@ async def save_history(
     store: Annotated[BacktestHistoryStore, Depends(get_store)],
 ) -> dict:
     """保存一次回测结果（配置 + 指标 + 降采样净值曲线）。"""
-    if body.strategy_name not in STRATEGY_REGISTRY:
+    if body.strategy_name not in available_strategies():
         raise HTTPException(400, f"未知策略 '{body.strategy_name}'")
     record = build_record(
         strategy_name=body.strategy_name,
@@ -212,7 +212,7 @@ async def rerun_history(
         raise HTTPException(404, f"回测历史不存在: {record_id}")
 
     market, bars = await _fetch_bars_for(record, svc)
-    strategy_cls = STRATEGY_REGISTRY.get(record.strategy_name)
+    strategy_cls = available_strategies().get(record.strategy_name)
     if strategy_cls is None:
         raise HTTPException(400, f"策略已下线，无法重跑: {record.strategy_name}")
 

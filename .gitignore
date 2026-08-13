@@ -24,9 +24,8 @@ frontend/.vite/
 # 数据库数据
 infra/data/
 
-# 投研产物库内容（V4 M4）：模型/数据集/信号的 pickle 落盘目录，
-# 默认 backend/data/lab，可用 QUANTBOT_LAB_ROOT 覆盖
-backend/data/lab/
+# 用户策略（O2）：用户自己的代码，不进仓库
+user_data/
 
 # IDE
 .vscode/

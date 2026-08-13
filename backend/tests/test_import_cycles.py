@@ -55,6 +55,14 @@ _ENTRY_MODULES = [
     "app.quant.models.template",
     "app.quant.models.legacy_adapters",
     "app.api.v1.endpoints.lab",
+    # Wave O-a 用户策略加载器与 CLI：resolver → presets 必须是单向的，
+    # 且 tasks.archive 新增的 notify 依赖不得把环补回来
+    "app.strategy.resolver",
+    "app.strategy.scaffold",
+    "app.cli.main",
+    "app.cli.commands.strategies",
+    "app.cli.commands.backtest",
+    "app.cli.commands.download",
 ]
 
 

@@ -120,8 +120,12 @@ class PortfolioBroker(SimulatedBroker):
 
     # ── 持仓上限 ─────────────────────────────────────────────
 
-    def submit_order(self, order: Order) -> Order:
-        """在既有校验之上追加同时持仓上限（未配置时零开销）。"""
+    def _submit_order_impl(self, order: Order) -> Order:
+        """在既有校验之上追加同时持仓上限（未配置时零开销）。
+
+        覆写的是 `_submit_order_impl` 而非公开的 `submit_order`：后者是基类的
+        拒绝信号记账点，绕过它会让持仓上限拒单在 N4 汇总里凭空消失。
+        """
         capped = self._max_open_positions is not None and order.qty > 0
         if capped and self._exceeds_open_limit(order):
             order.status = OrderStatus.REJECTED
@@ -130,7 +134,7 @@ class PortfolioBroker(SimulatedBroker):
             )
             logger.debug("持仓上限拒单 %s", order.reject_reason)
             return order
-        return super().submit_order(order)
+        return super()._submit_order_impl(order)
 
     def _exceeds_open_limit(self, order: Order) -> bool:
         """该委托是否会让占用名额的标的数超过上限。"""

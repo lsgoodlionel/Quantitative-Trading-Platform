@@ -34,6 +34,9 @@ _EVENT_LABELS: dict[NotifyEventType, tuple[str, str]] = {
     NotifyEventType.MINING_DONE: ("⛏️", "因子挖掘完成"),
     NotifyEventType.DATA_SOURCE_DEGRADED: ("📡", "数据源降级"),
     NotifyEventType.RECONCILE_DIFF: ("🧾", "对账差异"),
+    NotifyEventType.RETRAIN_DONE: ("🧠", "模型再训练完成"),
+    NotifyEventType.DATA_GAP: ("🕳️", "数据缺口"),
+    NotifyEventType.REBALANCE_EXECUTED: ("⚖️", "再平衡已执行"),
 }
 
 

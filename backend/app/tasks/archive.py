@@ -20,9 +20,21 @@ from datetime import date
 
 from celery import shared_task
 
+from app.notify.emit import emit_data_gap
+
 logger = logging.getLogger(__name__)
 
 MAX_SYMBOLS_PER_TASK = 200
+
+# 缺口容忍天数（Wave O-a / O4）。
+#
+# 归档里本来就没有非交易日的数据，所以「请求到周日、归档只到周五」这种两天尾巴
+# 是正常现象。不设容忍度的话每次下载都会报缺口，用户学会忽略它之后，真出缺口
+# 那次也不会有人看。5 天足以盖住周末与常见连假。
+MIN_GAP_DAYS = 5
+
+# 结果里回显的缺口/失败明细条数上限，避免几百个标的撑爆返回体
+MAX_LISTED_ISSUES = 20
 
 
 @shared_task(
@@ -49,7 +61,8 @@ def download_archive(
         start/end: ISO 日期字符串（闭区间）
 
     Returns:
-        {"market", "frequency", "requested", "archived", "written", "errors", "failed"}
+        {"market", "frequency", "requested", "archived", "written", "errors",
+         "failed", "gaps"}
     """
     targets = list(symbols or [])[:MAX_SYMBOLS_PER_TASK]
     if not targets:
@@ -62,7 +75,7 @@ def download_archive(
         return {**_empty_result(market, frequency), "errors": 1, "failed": [str(exc)]}
 
     written = 0
-    archived = 0
+    succeeded: list[str] = []
     failed: list[str] = []
 
     for symbol in targets:
@@ -71,27 +84,81 @@ def download_archive(
                 _archive_one(symbol, market, frequency, start_date, end_date)
             )
             written += count
-            archived += 1
+            succeeded.append(symbol)
         except Exception as exc:  # noqa: BLE001, PERF203
             logger.warning("归档下载失败 %s/%s: %s", market, symbol, exc)
             failed.append(f"{symbol}: {exc}")
+
+    gaps = _notify_gaps(succeeded, market, frequency, start_date, end_date, failed)
 
     return {
         "market": market,
         "frequency": frequency,
         "requested": len(targets),
-        "archived": archived,
+        "archived": len(succeeded),
         "written": written,
         "errors": len(failed),
-        "failed": failed[:20],
+        "failed": failed[:MAX_LISTED_ISSUES],
+        "gaps": gaps[:MAX_LISTED_ISSUES],
     }
 
 
 def _empty_result(market: str, frequency: str) -> dict:
     return {
         "market": market, "frequency": frequency, "requested": 0,
-        "archived": 0, "written": 0, "errors": 0, "failed": [],
+        "archived": 0, "written": 0, "errors": 0, "failed": [], "gaps": [],
     }
+
+
+def _notify_gaps(
+    succeeded: list[str],
+    market: str,
+    frequency: str,
+    start: date,
+    end: date,
+    failed: list[str],
+) -> list[str]:
+    """
+    检测缺口并发 `data_gap` 通知（Wave O-a / O4）。
+
+    整段包在 try 里：缺口检测与通知都是旁路，坏掉最多让这次下载少一条信息，
+    绝不能把已经下好的数据变成一次「失败的下载」。
+    """
+    try:
+        gaps = _collect_gaps(succeeded, market, frequency, start, end)
+        emit_data_gap(market=market, frequency=frequency, gaps=gaps, failures=failed)
+        return gaps
+    except Exception:
+        logger.exception("缺口检测/通知失败，不影响下载结果 · market=%s", market)
+        return []
+
+
+def _collect_gaps(
+    symbols: list[str], market: str, frequency: str, start: date, end: date
+) -> list[str]:
+    """扫描已归档标的两端仍未覆盖的区间，短于 `MIN_GAP_DAYS` 的尾巴不算缺口。"""
+    from app.data.archive import ArchiveKey, boundary_gaps, create_archive
+    from app.data.models import Frequency, Market
+
+    if not symbols:
+        return []
+
+    archive = create_archive()
+    market_enum = Market(market.upper())
+    freq_enum = Frequency(frequency)
+
+    described: list[str] = []
+    for symbol in symbols:
+        key = ArchiveKey(symbol=symbol, market=market_enum, frequency=freq_enum)
+        gaps = [
+            gap for gap in boundary_gaps(archive.coverage(key), start, end)
+            if gap.days >= MIN_GAP_DAYS
+        ]
+        if gaps:
+            described.append(
+                f"{symbol}: " + ", ".join(f"{g.start}~{g.end}" for g in gaps)
+            )
+    return described
 
 
 def _parse_window(start: str | None, end: str | None) -> tuple[date, date]:

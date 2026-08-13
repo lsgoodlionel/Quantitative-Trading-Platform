@@ -416,6 +416,10 @@ export type NotifyEventType =
   | "mining_done"
   | "data_source_degraded"
   | "reconcile_diff"
+  // ── v4 Wave O-a：再训练 / 数据缺口 / 再平衡 ──
+  | "retrain_done"
+  | "data_gap"
+  | "rebalance_executed"
 
 export interface TelegramChannelConfig {
   bot_token: string

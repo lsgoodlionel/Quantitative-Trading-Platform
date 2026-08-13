@@ -28,7 +28,7 @@ from app.data.service import DataService
 from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.engine.backtest.metrics import is_close_fill
 from app.notify.emit import emit_backtest_done
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -175,10 +175,10 @@ async def _validate_and_fetch(
     svc: DataService,
     symbol: str,
 ):
-    if strategy_name not in STRATEGY_REGISTRY:
+    if strategy_name not in available_strategies():
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown strategy '{strategy_name}'. Available: {list(STRATEGY_REGISTRY.keys())}",
+            detail=f"Unknown strategy '{strategy_name}'. Available: {list(available_strategies().keys())}",
         )
     try:
         market = Market(market_str.upper())
@@ -227,7 +227,7 @@ async def run_backtest(
         body.start_date, body.end_date, svc, body.symbol,
     )
 
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
     strategy = strategy_cls(params=body.params)
     config = BacktestConfig(initial_cash=body.initial_cash, market=market)
     engine = BacktestEngine(config)
@@ -281,7 +281,7 @@ async def optimize_strategy(
         body.start_date, body.end_date, svc, body.symbol,
     )
 
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
 
     # 展开参数网格
     keys = list(body.param_grid.keys())
@@ -351,7 +351,7 @@ async def montecarlo_backtest(
         body.start_date, body.end_date, svc, body.symbol,
     )
 
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
     strategy = strategy_cls(params=body.params)
     config = BacktestConfig(initial_cash=body.initial_cash, market=market)
     engine = BacktestEngine(config)
@@ -478,5 +478,5 @@ async def list_strategies() -> list[dict]:
             "name": name,
             "description": cls.description if hasattr(cls, "description") else "",
         }
-        for name, cls in STRATEGY_REGISTRY.items()
+        for name, cls in available_strategies().items()
     ]

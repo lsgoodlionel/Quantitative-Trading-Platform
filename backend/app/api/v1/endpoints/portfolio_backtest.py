@@ -32,10 +32,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.data.models import Frequency, Market
 from app.data.service import DataService
+from app.engine.backtest.capacity import build_capacity_section
+from app.engine.backtest.crisis import build_crisis_section
 from app.engine.backtest.portfolio_engine import (
     PortfolioBacktestConfig,
     PortfolioBacktestEngine,
 )
+from app.engine.backtest.reject_reasons import build_rejected_signal_section
 from app.engine.backtest.report import metrics_to_dict
 from app.engine.framework import (
     EqualWeightingPCM,
@@ -44,7 +47,7 @@ from app.engine.framework import (
     InsightWeightingPCM,
     LegacyStrategyAlphaAdapter,
 )
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +104,10 @@ class PortfolioBacktestRequest(BaseModel):
 
 
 def _resolve_market_and_frequency(body: PortfolioBacktestRequest) -> tuple[Market, Frequency]:
-    if body.strategy_name not in STRATEGY_REGISTRY:
+    if body.strategy_name not in available_strategies():
         raise HTTPException(
             status_code=400,
-            detail=f"未知策略 '{body.strategy_name}'，可选：{list(STRATEGY_REGISTRY)}",
+            detail=f"未知策略 '{body.strategy_name}'，可选：{list(available_strategies())}",
         )
     if body.portfolio_method not in _PCM_BUILDERS:
         raise HTTPException(
@@ -170,7 +173,7 @@ def _build_strategy(body: PortfolioBacktestRequest) -> FrameworkStrategy:
     """
     return FrameworkStrategy(
         alpha=LegacyStrategyAlphaAdapter(
-            STRATEGY_REGISTRY[body.strategy_name], body.params or None
+            available_strategies()[body.strategy_name], body.params or None
         ),
         portfolio_construction=_PCM_BUILDERS[body.portfolio_method](),
         execution=ImmediateExecutionModel(),
@@ -217,7 +220,30 @@ def _daily_to_dict(d) -> dict:
     }
 
 
-def _serialize(result, run_id: str, warnings: list[str]) -> dict:
+def _wave_na_sections(result, bars_by_symbol: dict, market: Market) -> dict:
+    """N-a 三个可空 section。
+
+    刻意直接调三个 builder 而不是 `build_extended_sections` —— 后者会连带算完
+    整套 C6/C7 tearsheet，而这个端点有意不做那件事（组合回测的 tearsheet 走
+    `/backtests/report`）。这里只付 N-a 的钱。
+    """
+    return {
+        "capacity_analysis": build_capacity_section(
+            result.daily_results,
+            result.equity_curve,
+            bars_by_symbol,
+            reference_equity=result.initial_cash,
+        ),
+        "crisis_windows": build_crisis_section(result.equity_curve, market.value),
+        "rejected_signals": build_rejected_signal_section(
+            result.rejections, overflow=result.rejection_overflow
+        ),
+    }
+
+
+def _serialize(
+    result, run_id: str, warnings: list[str], bars_by_symbol: dict, market: Market
+) -> dict:
     curve = result.equity_curve.tail(MAX_CURVE_POINTS)
     return {
         "backtest_id": run_id,
@@ -239,6 +265,8 @@ def _serialize(result, run_id: str, warnings: list[str]) -> dict:
         "n_fills": len(result.fills),
         "fills": result.fills[-MAX_FILLS:],
         "warnings": warnings,
+        # ── Wave N-a：容量·换手·杠杆 / 危机区间 / 拒绝信号（均可为 None）──
+        **_wave_na_sections(result, bars_by_symbol, market),
     }
 
 
@@ -261,4 +289,4 @@ async def run_portfolio_backtest(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"组合回测引擎错误: {e}") from e
 
-    return _serialize(result, run_id, warnings)
+    return _serialize(result, run_id, warnings, bars_by_symbol, market)

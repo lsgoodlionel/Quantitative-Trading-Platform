@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
@@ -96,7 +96,24 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "ok", "version": "0.1.0", "environment": settings.environment}
 
+    _register_exception_handlers(app)
     return app
+
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    """把「用户配置错误」类异常翻译成 4xx，而不是让它们变成 500。
+
+    500 的含义是「服务端出了意料之外的问题」。用户策略目录里放了一个与
+    preset 重名的文件是**用户能自己修好的配置问题**，报 500 会让人以为
+    是平台坏了，而真正的原因（哪两个名字撞了）还埋在服务端日志里。
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.strategy.resolver import StrategyNameConflictError
+
+    @app.exception_handler(StrategyNameConflictError)
+    async def _on_strategy_name_conflict(_request: Request, exc: StrategyNameConflictError):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 app = create_app()

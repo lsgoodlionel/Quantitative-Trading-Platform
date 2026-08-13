@@ -255,3 +255,32 @@ async def test_max_open_positions_is_forwarded_to_the_engine() -> None:
     for row in payload["daily_results"]:
         held = [c for c in row["contracts"].values() if c["end_pos"] != 0]
         assert len(held) <= 1
+
+
+# ── 返回体：Wave N-a 三个可空 section ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_response_carries_wave_na_sections() -> None:
+    # Arrange
+    bars = {s: _bars(s, drift=0.4 + i * 0.2) for i, s in enumerate(("AAPL", "MSFT"))}
+    app.dependency_overrides[get_service] = lambda: _service(bars)
+
+    # Act
+    status, payload = await _post(_BASE_BODY)
+
+    # Assert
+    assert status == 200
+    assert {"capacity_analysis", "crisis_windows", "rejected_signals"} <= set(payload)
+
+    capacity = payload["capacity_analysis"]
+    assert capacity is not None, "有日结数据就该出容量 section"
+    assert capacity["capacity"]["is_rough_estimate"] is True
+    assert capacity["capacity"]["assumptions"], "容量粗估必须写明前提"
+    assert capacity["leverage"]["max"] >= 0
+
+    crisis = payload["crisis_windows"]
+    assert crisis is not None
+    # 合成行情不落在任何危机区间内 → 全部跳过，且**不出现 0 行**
+    assert crisis["windows"] == []
+    assert crisis["skipped"], "被跳过的窗口要带理由列出来"

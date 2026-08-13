@@ -28,7 +28,7 @@ from app.core.database import get_db
 from app.data.service import DataService
 from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.notify.emit import emit_batch_backtest_done
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,11 @@ class BatchBacktestResponse(BaseModel):
 
 def _validate_batch_request(body: BatchBacktestRequest) -> None:
     """整批级别的前置校验：策略存在 + 标的数量在上限内。"""
-    if body.strategy_name not in STRATEGY_REGISTRY:
+    if body.strategy_name not in available_strategies():
         raise HTTPException(
             status_code=400,
             detail=f"Unknown strategy '{body.strategy_name}'. "
-                   f"Available: {list(STRATEGY_REGISTRY.keys())}",
+                   f"Available: {list(available_strategies().keys())}",
         )
     if not body.symbols:
         raise HTTPException(status_code=400, detail="symbols 不能为空")
@@ -128,7 +128,7 @@ async def _run_one(
         return BatchBacktestItem(symbol=symbol, error=f"数据加载失败: {e}")
 
     try:
-        strategy = STRATEGY_REGISTRY[body.strategy_name](params=body.params)
+        strategy = available_strategies()[body.strategy_name](params=body.params)
         engine = BacktestEngine(BacktestConfig(initial_cash=body.initial_cash, market=market))
         result = engine.run(strategy, bars)
     except Exception as e:  # noqa: BLE001 — 同上

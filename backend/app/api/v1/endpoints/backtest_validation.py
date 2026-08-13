@@ -31,7 +31,7 @@ from app.engine.backtest.hyperopt import (
 )
 from app.engine.backtest.walkforward import run_walk_forward
 from app.notify.emit import emit_hyperopt_done
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -50,8 +50,8 @@ async def _validate_and_fetch(
     strategy_name: str, market_str: str, frequency_str: str,
     start_date: date, end_date: date, symbol: str, svc: DataService,
 ) -> tuple[Market, list[Bar]]:
-    if strategy_name not in STRATEGY_REGISTRY:
-        raise HTTPException(400, f"未知策略 '{strategy_name}'，可用: {list(STRATEGY_REGISTRY.keys())}")
+    if strategy_name not in available_strategies():
+        raise HTTPException(400, f"未知策略 '{strategy_name}'，可用: {list(available_strategies().keys())}")
     try:
         market = Market(market_str.upper())
     except ValueError:
@@ -150,7 +150,7 @@ async def hyperopt_optimize(
         body.strategy_name, body.market, body.frequency,
         body.start_date, body.end_date, body.symbol, svc,
     )
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
 
     try:
         space = ParamSpace.from_spec(body.param_space)
@@ -274,7 +274,7 @@ async def walk_forward_analysis(
             422,
             f"数据不足：共 {len(bars)} 根 bar，至少需 训练{body.train_size}+测试{body.test_size} 根",
         )
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
 
     try:
         space = ParamSpace.from_spec(body.param_space)
@@ -387,7 +387,7 @@ async def bias_check(
         body.strategy_name, body.market, body.frequency,
         body.start_date, body.end_date, body.symbol, svc,
     )
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
 
     def run_fills(window_bars: list[Bar]) -> list[dict]:
         if len(window_bars) < 2:

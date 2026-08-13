@@ -28,12 +28,53 @@ def compute_tag_metrics(
     starting_balance: float,
     periods_per_year: int = 252,
 ) -> dict:
-    """计算 C6 标签分组与扩展风险比率，返回可序列化 dict。"""
+    """计算 C6 标签分组与扩展风险比率，返回可序列化 dict。
+
+    `by_entry_exit` 是 N4 追加的 entry_tag × exit_reason 交叉表，
+    既有三个键的口径与结构保持不变。
+    """
     return {
         "by_entry_tag": _group_rows(trips, key=lambda t: t.entry_tag, starting_balance=starting_balance),
         "by_exit_reason": _group_rows(trips, key=lambda t: t.exit_reason, starting_balance=starting_balance),
+        "by_entry_exit": cross_tag_metrics(trips, starting_balance),
         "risk_ratios": _risk_ratios(trips, returns, equity_curve, starting_balance, periods_per_year),
     }
+
+
+# ── N4 交叉归因 ────────────────────────────────────────────────
+
+def cross_tag_metrics(trips: list[RoundTrip], starting_balance: float) -> list[dict]:
+    """entry_tag × exit_reason 交叉归因。
+
+    回答的是「哪个入场理由配哪个出场理由最赚/最亏」—— 单看 by_entry_tag 或
+    by_exit_reason 都看不出这层关系：一个胜率漂亮的入场标签，可能全部收益
+    都来自 take_profit，而它在 stop 上的亏损被另一个标签的盈利掩盖了。
+
+    **空组合不出现在结果里**（某 entry_tag 从未以某 exit_reason 收场时），
+    否则 5 个标签 × 6 种出场理由会撑出 30 行、其中二十几行全是 0。
+    """
+    if not trips:
+        return []
+
+    groups: dict[tuple[str, str], list[RoundTrip]] = {}
+    for trip in trips:
+        key = (str(trip.entry_tag), str(trip.exit_reason))
+        groups.setdefault(key, []).append(trip)
+
+    rows = [
+        _cross_row(entry_tag, exit_reason, items, starting_balance)
+        for (entry_tag, exit_reason), items in groups.items()
+    ]
+    rows.sort(key=lambda r: r["profit_abs"], reverse=True)
+    return rows
+
+
+def _cross_row(
+    entry_tag: str, exit_reason: str, items: list[RoundTrip], starting_balance: float
+) -> dict:
+    """复用 `_tag_row` 的统计口径，额外带上交叉表的两个维度。"""
+    row = _tag_row(f"{entry_tag} → {exit_reason}", items, starting_balance)
+    return {**row, "entry_tag": entry_tag, "exit_reason": exit_reason}
 
 
 # ── 标签分组 ────────────────────────────────────────────────────

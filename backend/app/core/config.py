@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     archive_enabled: bool = False
     archive_root: str = "./data/archive"
 
+    # 用户策略热加载（O2）
+    #
+    # ⚠️ 打开这个开关意味着：`user_strategies_dir` 下的 .py 文件会被**以本服务进程
+    # 的权限执行**。没有沙箱（做不到，见 app/strategy/resolver.py 的模块 docstring），
+    # 所以默认关闭，且该目录的写权限必须由部署方自己收紧。
+    # 路径只从这里读，不接受任何请求参数。
+    user_strategies_enabled: bool = False
+    user_strategies_dir: str = "./user_data/strategies"
+
     # 监控
     prometheus_enabled: bool = True
 

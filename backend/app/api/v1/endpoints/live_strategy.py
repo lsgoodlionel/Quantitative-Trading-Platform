@@ -29,7 +29,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.data.service import DataService
 from app.strategy.engine import StrategyState, get_strategy_engine
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -90,12 +90,12 @@ async def start_live_strategy(
     策略将订阅实时 K 线，每根 K 线触发一次 on_bar 回调，
     信号经过风控检查后通过 OMS 提交订单。
     """
-    if body.strategy_name not in STRATEGY_REGISTRY:
+    if body.strategy_name not in available_strategies():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Unknown strategy '{body.strategy_name}'. "
-                f"Available: {sorted(STRATEGY_REGISTRY.keys())}"
+                f"Available: {sorted(available_strategies().keys())}"
             ),
         )
 

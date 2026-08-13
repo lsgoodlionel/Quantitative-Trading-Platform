@@ -84,6 +84,10 @@ class PortfolioBacktestResult:
     daily_results: list[PortfolioDailyResult]
     per_symbol_metrics: dict[str, BacktestMetrics]
     report: dict
+    #: N4 拒绝信号台账（被拒/被撤的订单）
+    rejections: list = field(default_factory=list)
+    #: 因台账上限而未留存的拒单数（0 表示台账即全量）
+    rejection_overflow: int = 0
 
 
 class _LazyHistories(Mapping):
@@ -424,6 +428,8 @@ class PortfolioBacktestEngine:
             daily_results=state.daily_results,
             per_symbol_metrics=per_symbol,
             report=report,
+            rejections=state.broker.rejections,
+            rejection_overflow=state.broker.rejection_overflow,
         )
 
     def _build_single_result(
@@ -472,6 +478,9 @@ class PortfolioBacktestEngine:
             equity_curve=equity_curve,
             fills=state.fills,
             report=report,
+            daily_results=state.daily_results,
+            rejections=state.broker.rejections,
+            rejection_overflow=state.broker.rejection_overflow,
         )
 
     def _report(

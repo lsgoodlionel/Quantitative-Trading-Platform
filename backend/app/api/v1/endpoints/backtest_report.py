@@ -1,14 +1,15 @@
 """
 回测扩展报告 API 端点 — C6 / C7
 
-在既有同步回测之外，提供 pyfolio 式 tearsheet + 逐笔回合分析的五个扩展
-section (trade_analytics / periodic_stats / rolling_stats / drawdown_periods /
-tag_metrics)。
+在既有同步回测之外，提供 pyfolio 式 tearsheet + 逐笔回合分析的扩展 section
+(trade_analytics / periodic_stats / rolling_stats / drawdown_periods /
+tag_metrics)，以及 Wave N-a 追加的 capacity_analysis / crisis_windows /
+rejected_signals。
 
 设计要点:
 - 独立端点 POST /backtests/report，完全向后兼容，不改动既有 /backtests/run。
 - 复用既有 BacktestRequest 校验、DataService 与 BacktestEngine。
-- 五个 section 均为可空/带安全默认；数据不足时前端渲染空态。
+- 所有 section 均为可空/带安全默认；数据不足时前端渲染空态。
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ from app.engine.backtest.metrics import (
     TRADING_DAYS_US,
 )
 from app.engine.backtest.report_sections import build_extended_sections
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -207,10 +208,114 @@ class RiskRatios(BaseModel):
     worst_trade_pct: float
 
 
+class CrossTagRow(TagRow):
+    """N4 交叉归因行：在标签行基础上带上交叉表的两个维度。"""
+
+    entry_tag: str
+    exit_reason: str
+
+
 class TagMetrics(BaseModel):
     by_entry_tag: list[TagRow] = Field(default_factory=list)
     by_exit_reason: list[TagRow] = Field(default_factory=list)
+    by_entry_exit: list[CrossTagRow] = Field(default_factory=list)
     risk_ratios: RiskRatios
+
+
+# ── N2 容量 · 换手 · 杠杆 (CapacityAnalysis) ─────────────────────
+
+class TurnoverBlock(BaseModel):
+    avg_daily_pct: float
+    median_daily_pct: float
+    max_daily_pct: float
+    annualized_pct: float
+    series: list[SeriesPoint] = Field(default_factory=list)
+
+
+class LeverageBlock(BaseModel):
+    avg: float
+    median: float
+    max: float
+    p95: float
+    series: list[SeriesPoint] = Field(default_factory=list)
+
+
+class CapacityBlock(BaseModel):
+    """容量是**粗估**：`assumptions` 写明前提，不要把 `capacity` 当精确上限。"""
+
+    capacity: float | None = None
+    scale_factor: float | None = None
+    reference_equity: float
+    adv_window: int
+    max_adv_share: float
+    binding_symbol: str | None = None
+    binding_date: str | None = None
+    sample_days: int
+    is_rough_estimate: bool
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class CapacityAnalysis(BaseModel):
+    turnover: TurnoverBlock
+    leverage: LeverageBlock
+    capacity: CapacityBlock
+
+
+# ── N3 危机区间 (CrisisWindows) ──────────────────────────────────
+
+class CrisisRow(BaseModel):
+    name: str
+    start: str
+    end: str
+    covered_start: str
+    covered_end: str
+    is_partial: bool
+    trading_days: int
+    return_pct: float
+    max_drawdown_pct: float
+    volatility_pct: float
+    best_day_pct: float
+    worst_day_pct: float
+    positive_days_pct: float
+
+
+class SkippedCrisis(BaseModel):
+    """被跳过的窗口。有理由的「不出现」，与「一行全 0」是两回事。"""
+
+    name: str
+    start: str
+    end: str
+    markets: list[str] = Field(default_factory=list)
+    reason: str
+
+
+class CrisisWindows(BaseModel):
+    market: str
+    windows: list[CrisisRow] = Field(default_factory=list)
+    skipped: list[SkippedCrisis] = Field(default_factory=list)
+
+
+# ── N4 拒绝信号 (RejectedSignals) ────────────────────────────────
+
+class RejectedReasonRow(BaseModel):
+    code: str
+    label: str
+    count: int
+    share_pct: float
+    symbol_count: int
+    symbols: list[str] = Field(default_factory=list)
+    symbols_truncated: bool = False
+    first_time: str | None = None
+    last_time: str | None = None
+    sample_reason: str = ""
+
+
+class RejectedSignals(BaseModel):
+    total_rejected: int
+    recorded: int
+    truncated: bool
+    dropped: int
+    by_reason: list[RejectedReasonRow] = Field(default_factory=list)
 
 
 # ── 响应信封 ─────────────────────────────────────────────────────
@@ -225,6 +330,10 @@ class BacktestReportResponse(BaseModel):
     rolling_stats: RollingStats | None = None
     drawdown_periods: list[DrawdownPeriod] = Field(default_factory=list)
     tag_metrics: TagMetrics | None = None
+    # ── Wave N-a：三个新增可空 section，不改变既有字段 ──
+    capacity_analysis: CapacityAnalysis | None = None
+    crisis_windows: CrisisWindows | None = None
+    rejected_signals: RejectedSignals | None = None
 
 
 # ── 端点 ─────────────────────────────────────────────────────────
@@ -266,7 +375,7 @@ async def backtest_report(
         body.start_date, body.end_date, svc, body.symbol,
     )
 
-    strategy_cls = STRATEGY_REGISTRY[body.strategy_name]
+    strategy_cls = available_strategies()[body.strategy_name]
     strategy = strategy_cls(params=body.params)
     config = BacktestConfig(initial_cash=body.initial_cash, market=market)
     engine = BacktestEngine(config)
@@ -289,6 +398,12 @@ async def backtest_report(
         bars_index=bars_index,
         rolling_window=_ROLLING_WINDOW,
         periods_per_year=_periods_per_year(market),
+        # Wave N-a：日结 / 行情 / 拒单台账驱动的三个新 section
+        daily_results=result.daily_results,
+        bars_by_symbol={body.symbol: bars},
+        rejections=result.rejections,
+        rejection_overflow=result.rejection_overflow,
+        market=market.value,
     )
 
     return BacktestReportResponse(

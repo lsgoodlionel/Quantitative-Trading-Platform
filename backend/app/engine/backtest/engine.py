@@ -36,6 +36,7 @@ from app.data.adjustments import (
 from app.data.models import Bar, Market
 from app.engine.backtest.broker import SimulatedBroker
 from app.engine.backtest.commission import CommissionModel
+from app.engine.backtest.daily_result import PortfolioDailyResult
 from app.engine.backtest.metrics import (
     TRADING_DAYS_HK,
     TRADING_DAYS_US,
@@ -85,6 +86,12 @@ class BacktestResult:
     equity_curve: pd.Series
     fills: list[dict]
     report: dict
+    #: N2 容量/换手/杠杆的规范数据源（K-c 日结）。默认空 = 未接线的调用方不受影响。
+    daily_results: list[PortfolioDailyResult] = field(default_factory=list)
+    #: N4 拒绝信号台账（被拒/被撤的订单）。默认空 = 未接线的调用方不受影响。
+    rejections: list = field(default_factory=list)
+    #: 因台账上限而未留存的拒单数（0 表示台账即全量）
+    rejection_overflow: int = 0
 
 
 class BacktestEngine:

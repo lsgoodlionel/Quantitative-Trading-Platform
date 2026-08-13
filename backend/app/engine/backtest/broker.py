@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 #: 融券费按自然日计提
 DAYS_PER_YEAR = 365.0
 
+#: N4 拒绝信号台账的留存上限（超出部分只计数不留对象，见 `_record_rejection`）
+MAX_RECORDED_REJECTIONS = 50_000
+
 
 class OrderStatus(str, Enum):
     PENDING = "pending"     # 等待下一根 bar 撮合
@@ -79,6 +82,9 @@ class Order:
     filled_at: datetime | None = None
     commission: float = 0.0
     reject_reason: str | None = None
+    #: N4 拒绝信号台账用的**模拟时钟**（拒单时刻最近一根已处理 bar 的时间）。
+    #: `created_at` 是墙钟，在回测里没有意义，不能拿来做时间分布。
+    rejected_at: datetime | None = None
     # K6 部分成交：累计已成交数量 + 本次撮合被成交量约束截断的残量
     filled_qty: int = 0
     remaining_qty: int = 0
@@ -194,6 +200,11 @@ class SimulatedBroker(RiskExitMixin, PositionAdjustMixin, OrderHookMixin):
         self._orders_today = 0
         self._orders_today_date: date | None = None
         self._account_violations: list[ControlViolation] = []
+        # N4 拒绝信号台账：策略想下单却被拦下的订单。带上限是因为一个高频策略
+        # 在长回测里可能被拒几十万次，无上限就成了内存炸弹；溢出数单独计数，
+        # 保证汇总里能如实说明「样本被截断了」而不是假装这就是全量。
+        self._rejections: list[Order] = []
+        self._rejection_overflow = 0
         self._init_adjust_state()        # L4 仓位调整计数
         self._init_order_hook_state()    # L5 下单钩子绑定
 
@@ -205,6 +216,37 @@ class SimulatedBroker(RiskExitMixin, PositionAdjustMixin, OrderHookMixin):
     def external_cash_flow(self) -> float:
         """累计非成交现金流（分红为正、融券费为负）。"""
         return self._external_cash_flow
+
+    # ── N4 拒绝信号台账 ──────────────────────────────────────
+
+    @property
+    def rejections(self) -> list[Order]:
+        """被拒/被撤的订单台账（上限内）。供 `reject_reasons` 汇总。
+
+        返回**副本**：这份台账会被塞进回测结果对象长期持有，交出内部列表的引用
+        等于让调用方能反过来改券商的账。
+        """
+        return list(self._rejections)
+
+    @property
+    def rejection_overflow(self) -> int:
+        """因台账上限而未留存的拒单数（0 表示台账即全量）。"""
+        return self._rejection_overflow
+
+    def _record_rejection(self, order: Order) -> None:
+        """记一笔拒单，并打上模拟时钟。
+
+        只记「整单没成」的情况。部分成交后残量作废（`现金不足，N 股未成交`）
+        不入账 —— 那一单是成交了的，混进来会让「被拦下的下单请求」这个口径失真。
+        """
+        if order.reject_reason is None:
+            return
+        if order.rejected_at is None:
+            order.rejected_at = self._last_bar_time
+        if len(self._rejections) >= MAX_RECORDED_REJECTIONS:
+            self._rejection_overflow += 1
+            return
+        self._rejections.append(order)
 
     # ── 账户状态 ──────────────────────────────────────────────
 
@@ -233,7 +275,19 @@ class SimulatedBroker(RiskExitMixin, PositionAdjustMixin, OrderHookMixin):
     # ── 下单 ─────────────────────────────────────────────────
 
     def submit_order(self, order: Order) -> Order:
-        """将订单加入挂单队列，返回带 order_id 的 Order 对象。"""
+        """将订单加入挂单队列，返回带 order_id 的 Order 对象。
+
+        这是**唯一**的公开入口，同时充当拒绝信号台账的记账点：真正的校验逻辑在
+        `_submit_order_impl`，子类（如 `PortfolioBroker`）覆写的也是它，
+        这样任何一条下单路径被拒都不会漏记。
+        """
+        result = self._submit_order_impl(order)
+        if result.reject_reason is not None:
+            self._record_rejection(result)
+        return result
+
+    def _submit_order_impl(self, order: Order) -> Order:
+        """券商侧的下单校验与入队（见 `submit_order`）。"""
         if order.qty <= 0:
             order.status = OrderStatus.REJECTED
             order.reject_reason = "qty must be positive"
@@ -489,6 +543,7 @@ class SimulatedBroker(RiskExitMixin, PositionAdjustMixin, OrderHookMixin):
                 if order.status is OrderStatus.REJECTED:
                     # 已拒单的不再挂回队列。否则它会在下一根 bar 被再次撮合、
                     # 甚至成交 —— 对外已报「拒绝」，账上却成交了。
+                    self._record_rejection(order)
                     continue
                 remaining.append(order)
                 continue
@@ -544,6 +599,7 @@ class SimulatedBroker(RiskExitMixin, PositionAdjustMixin, OrderHookMixin):
             if reason is not None:
                 order.status = OrderStatus.CANCELLED
                 order.reject_reason = reason
+                self._record_rejection(order)
             else:
                 remaining.append(order)
         self._pending = remaining

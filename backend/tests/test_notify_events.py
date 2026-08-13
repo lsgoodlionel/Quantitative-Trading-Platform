@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -31,14 +32,23 @@ from app.notify.config import (
 from app.notify.dispatcher import dispatch_event
 from app.notify.emit import (
     emit_backtest_done,
+    emit_data_gap,
     emit_data_source_degraded,
     emit_hyperopt_done,
     emit_mining_done,
     emit_price_alert,
+    emit_rebalance_executed,
     emit_reconcile_diff,
     notify_safe,
 )
 from app.notify.events import NotifyEvent, render_event
+
+# Wave O-a / O4 补齐的 3 类，与 A-c 的 5 类适用完全相同的规矩
+WAVE_OA_EVENT_TYPES = [
+    NotifyEventType.RETRAIN_DONE,
+    NotifyEventType.DATA_GAP,
+    NotifyEventType.REBALANCE_EXECUTED,
+]
 
 NEW_EVENT_TYPES = [
     NotifyEventType.BACKTEST_DONE,
@@ -46,6 +56,7 @@ NEW_EVENT_TYPES = [
     NotifyEventType.MINING_DONE,
     NotifyEventType.DATA_SOURCE_DEGRADED,
     NotifyEventType.RECONCILE_DIFF,
+    *WAVE_OA_EVENT_TYPES,
 ]
 
 
@@ -366,6 +377,62 @@ def test_new_channel_defaults_to_empty_subscription() -> None:
     """未显式给 events 的渠道一条都不订阅（最保守默认）。"""
     channel = _telegram_channel([])
     assert channel.events == []
+
+
+# ── Wave O-a / O4：补齐的 3 个事件类型 ────────────────────────
+
+def test_wave_oa_event_types_exist() -> None:
+    """3 个类型齐了，共 15 类。"""
+    assert {e.value for e in WAVE_OA_EVENT_TYPES} == {
+        "retrain_done", "data_gap", "rebalance_executed"
+    }
+    assert len(list(NotifyEventType)) == 15
+
+
+@pytest.mark.parametrize("event_type", WAVE_OA_EVENT_TYPES)
+def test_wave_oa_event_types_default_to_in_app_only(event_type: NotifyEventType) -> None:
+    """沿用 A-c 的规矩：新类型一律只走站内，外发要用户显式勾选。"""
+    assert event_type in IN_APP_ONLY_DEFAULT_EVENTS
+    assert event_type not in default_channel_events()
+
+
+def test_wave_oa_emit_helpers_produce_events(fake_redis: FakeRedis) -> None:
+    """两个有发射点的类型都能走通（retrain_done 本期无发射点，只留类型）。"""
+    emit_data_gap(
+        market="US", frequency="1d",
+        gaps=["AAPL: 2024-01-02~2024-01-20"], failures=["MSFT: 数据源全挂"],
+    )
+    emit_rebalance_executed(market="US", submitted=3, rejected=1, strategy_id="s-1")
+
+    recorded = [inbox.parse_notification(v) for v in fake_redis.strings.values()]
+    types = {n.type for n in recorded if n is not None}
+    assert types == {
+        NotifyEventType.DATA_GAP.value,
+        NotifyEventType.REBALANCE_EXECUTED.value,
+    }
+
+
+def test_retrain_done_has_no_emitter_yet() -> None:
+    """M6 未做，本期只留类型 —— 提醒后来者别以为忘了写发射器。"""
+    from app.notify import emit
+
+    assert not hasattr(emit, "emit_retrain_done")
+
+
+def test_data_gap_payload_lists_gaps_and_failures(fake_redis: FakeRedis) -> None:
+    """缺口明细要能直接看，不用再去翻日志。"""
+    emit_data_gap(market="US", frequency="1d", gaps=["AAPL: 2024-01-02~2024-01-20"], failures=[])
+
+    note = next(n for n in (inbox.parse_notification(v) for v in fake_redis.strings.values()) if n)
+    assert "AAPL" in json.dumps(note.payload, ensure_ascii=False)
+
+
+def test_data_gap_with_nothing_missing_is_a_noop(fake_redis: FakeRedis) -> None:
+    """没缺口就别发通知 —— 每次下载都响一下等于训练用户忽略它。"""
+    result = emit_data_gap(market="US", frequency="1d", gaps=[], failures=[])
+
+    assert result == {"dispatched": 0, "skipped": True}
+    assert fake_redis.strings == {}
 
 
 # ── 站内收件箱 ────────────────────────────────────────────────

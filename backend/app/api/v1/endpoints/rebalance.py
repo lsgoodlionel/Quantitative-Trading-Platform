@@ -26,6 +26,7 @@ from app.engine.portfolio.rebalance import (
     plan_rebalance,
     validate_target_weights,
 )
+from app.notify.emit import emit_rebalance_executed
 from app.oms.manager import OrderManager
 from app.oms.rebalance_service import (
     ExecutionOutcome,
@@ -182,6 +183,13 @@ async def execute_rebalance(
     logger.info(
         "再平衡执行完成 market=%s 成功=%d 失败=%d",
         body.market, len(outcome.submitted), len(outcome.rejected),
+    )
+    # 旁路通知（Wave O-a / O4）：失败不影响执行结果，见 app/notify/emit.py
+    emit_rebalance_executed(
+        market=body.market,
+        submitted=len(outcome.submitted),
+        rejected=len(outcome.rejected),
+        strategy_id=body.strategy_id,
     )
     return RebalanceExecuteResponse(
         submitted=list(outcome.submitted),

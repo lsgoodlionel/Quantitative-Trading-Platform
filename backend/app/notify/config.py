@@ -33,6 +33,10 @@ class NotifyEventType(str, Enum):
     MINING_DONE = "mining_done"
     DATA_SOURCE_DEGRADED = "data_source_degraded"
     RECONCILE_DIFF = "reconcile_diff"    # G6 对账差异（G6 本身不在本期）
+    # ── Wave O-a / O4：补齐的 3 类 ────────────────────────────
+    RETRAIN_DONE = "retrain_done"        # M6 自适应再训练（M6 未做，本期只留类型）
+    DATA_GAP = "data_gap"                # M-a 归档下载后的缺口/失败明细
+    REBALANCE_EXECUTED = "rebalance_executed"   # V3 A-b 的再平衡执行完成
 
 
 # 默认「仅站内」的事件类型。
@@ -47,6 +51,9 @@ IN_APP_ONLY_DEFAULT_EVENTS: frozenset[NotifyEventType] = frozenset({
     NotifyEventType.MINING_DONE,
     NotifyEventType.DATA_SOURCE_DEGRADED,
     NotifyEventType.RECONCILE_DIFF,
+    NotifyEventType.RETRAIN_DONE,
+    NotifyEventType.DATA_GAP,
+    NotifyEventType.REBALANCE_EXECUTED,
 })
 
 

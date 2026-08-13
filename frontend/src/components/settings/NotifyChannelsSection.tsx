@@ -31,6 +31,10 @@ const EVENT_LABELS: Record<NotifyEventType, string> = {
   mining_done: "因子挖掘完成",
   data_source_degraded: "数据源降级",
   reconcile_diff: "对账差异",
+  // ── v4 Wave O-a：同样默认只走站内，需用户显式勾选才外发 ──
+  retrain_done: "模型再训练完成",
+  data_gap: "数据缺口",
+  rebalance_executed: "再平衡已执行",
 }
 
 const ALL_EVENTS = Object.keys(EVENT_LABELS) as NotifyEventType[]

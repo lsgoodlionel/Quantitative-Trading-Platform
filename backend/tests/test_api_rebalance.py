@@ -407,3 +407,50 @@ class TestPartialFailure:
             "confirm_token": preview["confirm_token"],
         })
         assert resp.status_code == 400
+
+
+# ── Wave O-a / O4：rebalance_executed 通知 ────────────────────
+
+
+@pytest.mark.asyncio
+class TestRebalanceExecutedNotification:
+    async def test_execute_emits_rebalance_executed(
+        self, client: AsyncClient, mock_oms: MagicMock, monkeypatch
+    ) -> None:
+        emitted: list[dict] = []
+        monkeypatch.setattr(
+            "app.api.v1.endpoints.rebalance.emit_rebalance_executed",
+            lambda **kwargs: emitted.append(kwargs) or {},
+        )
+        preview = await _preview(client)
+
+        resp = await client.post(EXECUTE_URL, json={
+            "market": "US",
+            "legs": preview["legs"],
+            "confirm_token": preview["confirm_token"],
+            "strategy_id": "s-1",
+        })
+
+        assert resp.status_code == 200, resp.text
+        assert emitted == [
+            {"market": "US", "submitted": 1, "rejected": 0, "strategy_id": "s-1"}
+        ]
+
+    async def test_notification_failure_does_not_break_execute(
+        self, client: AsyncClient, mock_oms: MagicMock, monkeypatch
+    ) -> None:
+        """通知是旁路：dispatch 炸了不该把已经下出去的单变成 500。"""
+        def _boom(*_a, **_kw):
+            raise RuntimeError("Redis 挂了")
+
+        monkeypatch.setattr("app.notify.dispatcher.dispatch_event", _boom)
+        preview = await _preview(client)
+
+        resp = await client.post(EXECUTE_URL, json={
+            "market": "US",
+            "legs": preview["legs"],
+            "confirm_token": preview["confirm_token"],
+        })
+
+        assert resp.status_code == 200, resp.text
+        assert len(resp.json()["submitted"]) == 1

@@ -25,7 +25,7 @@ from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.engine.backtest.mc_robustness import McRobustnessResult, run_mc_robustness
 from app.engine.backtest.roundtrips import build_round_trips
 from app.engine.backtest.significance import SignificanceResult, analyze_significance
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 
@@ -45,8 +45,8 @@ async def _validate_and_fetch(
     strategy_name: str, market_str: str, frequency_str: str,
     start_date: date, end_date: date, symbol: str, svc: DataService,
 ) -> tuple[Market, list[Bar]]:
-    if strategy_name not in STRATEGY_REGISTRY:
-        raise HTTPException(400, f"未知策略 '{strategy_name}'，可用: {list(STRATEGY_REGISTRY.keys())}")
+    if strategy_name not in available_strategies():
+        raise HTTPException(400, f"未知策略 '{strategy_name}'，可用: {list(available_strategies().keys())}")
     try:
         market = Market(market_str.upper())
     except ValueError:
@@ -73,7 +73,7 @@ def _run_backtest_trips(
     strategy_name: str, params: dict, bars: list[Bar], market: Market, initial_cash: float,
 ) -> tuple[list[float], list[str], dict]:
     """跑一次回测，返回 (逐笔净盈亏, 逐笔开仓标签, 回测 metrics)。"""
-    strategy_cls = STRATEGY_REGISTRY[strategy_name]
+    strategy_cls = available_strategies()[strategy_name]
     strategy = strategy_cls(params=params)
     engine = BacktestEngine(BacktestConfig(initial_cash=initial_cash, market=market))
     result = engine.run(strategy, bars)

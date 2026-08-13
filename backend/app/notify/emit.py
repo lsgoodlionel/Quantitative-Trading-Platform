@@ -182,6 +182,58 @@ def emit_price_alert(
     ))
 
 
+def emit_data_gap(
+    *,
+    market: str,
+    frequency: str,
+    gaps: list[str],
+    failures: list[str],
+) -> dict:
+    """
+    归档下载后的缺口 / 失败明细（Wave O-a / O4，接 M-a 的归档缺口检测）。
+
+    `gaps` 与 `failures` 都空时**不发通知** —— 每次下载都响一下，等于训练用户
+    把这个通知当噪音忽略掉，真出缺口时也就没人看了。
+    """
+    if not gaps and not failures:
+        return {"dispatched": 0, "skipped": True}
+
+    payload: dict[str, Any] = {}
+    if gaps:
+        payload["缺口"] = _summarize_symbols(gaps)
+    if failures:
+        payload["下载失败"] = _summarize_symbols(failures)
+    return notify_safe(NotifyEvent(
+        type=NotifyEventType.DATA_GAP,
+        title=f"归档存在数据缺口 · {market} {frequency}",
+        market=market,
+        payload=payload,
+    ))
+
+
+def emit_rebalance_executed(
+    *,
+    market: str,
+    submitted: int,
+    rejected: int,
+    strategy_id: str | None = None,
+) -> dict:
+    """
+    组合再平衡执行完成（Wave O-a / O4，接 V3 A-b 的 execute 端点）。
+
+    部分成功是常态（`execute_legs` 不做整批回滚），所以两个计数都要给出来。
+    """
+    payload: dict[str, Any] = {"下单成功": submitted, "被拒": rejected}
+    if strategy_id:
+        payload["策略"] = strategy_id
+    return notify_safe(NotifyEvent(
+        type=NotifyEventType.REBALANCE_EXECUTED,
+        title=f"再平衡已执行 · {market}",
+        market=market,
+        payload=payload,
+    ))
+
+
 def emit_reconcile_diff(
     *,
     market: str,
