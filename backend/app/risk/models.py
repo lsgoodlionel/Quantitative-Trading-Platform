@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class RuleType(str, Enum):
@@ -85,7 +85,7 @@ class RiskConfig:
     rules: list[RiskRule] = field(default_factory=list)
     is_active: bool = True
 
-    def get_rule(self, rule_type: RuleType) -> Optional[RiskRule]:
+    def get_rule(self, rule_type: RuleType) -> RiskRule | None:
         for rule in self.rules:
             if rule.rule_type == rule_type and rule.enabled:
                 return rule

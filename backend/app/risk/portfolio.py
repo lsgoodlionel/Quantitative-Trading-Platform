@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -29,9 +29,9 @@ class PortfolioWeights:
     """优化结果：各标的目标权重。"""
     weights: dict[str, float]          # symbol → 权重（0~1，合计≤1）
     mode: str
-    expected_return: Optional[float]   # 年化预期收益率
-    expected_volatility: Optional[float]
-    sharpe_ratio: Optional[float]
+    expected_return: float | None   # 年化预期收益率
+    expected_volatility: float | None
+    sharpe_ratio: float | None
 
     def to_dict(self) -> dict:
         return {
@@ -89,7 +89,7 @@ def _mean_variance(
 ) -> PortfolioWeights:
     """均值-方差优化（最大夏普 / 最小波动）。"""
     try:
-        from pypfopt import expected_returns, risk_models, EfficientFrontier
+        from pypfopt import EfficientFrontier, expected_returns, risk_models
     except ImportError as e:
         raise RuntimeError(
             "PyPortfolioOpt not installed. Run: pip install pyportfolioopt"

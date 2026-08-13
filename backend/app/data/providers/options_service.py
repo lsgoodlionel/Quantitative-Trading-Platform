@@ -15,8 +15,8 @@ Greeks 计算说明:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from datetime import date as DateType
-from datetime import datetime, timezone
 
 from app.core.logging import get_logger
 from app.data.providers.options_models import (
@@ -124,7 +124,7 @@ class OptionsService:
             "risk_free_rate": risk_free_rate,
         }
         data = await YFinanceOptionsChainFetcher.fetch_data(params)
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
 
         underlying = data.get("underlying_price")
         calls = [

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from app.strategy.base import StrategyBase
 from app.strategy.context import StrategyContext
-from app.strategy.indicators import sma, adx, crossover, crossunder
+from app.strategy.indicators import adx, crossover, crossunder, sma
 
 
 class AdxTrendStrategy(StrategyBase):

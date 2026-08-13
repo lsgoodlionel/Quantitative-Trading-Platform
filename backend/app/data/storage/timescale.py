@@ -7,7 +7,7 @@ TimescaleDB 行情存储仓储
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -68,7 +68,7 @@ _UPSERT_TICK_SQL = text("""
 def _row_to_bar(row: Any, symbol: str, market: Market, frequency: Frequency) -> Bar:
     ts: datetime = row.time
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return Bar(
         time=ts,
         symbol=symbol,
@@ -139,8 +139,8 @@ class TimeseriesRepository:
                 "symbol": symbol,
                 "market": market.value,
                 "frequency": frequency.value,
-                "start": datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc),
-                "end": datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc),
+                "start": datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC),
+                "end": datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC),
                 "limit": limit,
             },
         )

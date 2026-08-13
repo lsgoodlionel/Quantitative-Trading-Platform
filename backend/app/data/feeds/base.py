@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from datetime import date, datetime
+from datetime import date
 
 from app.data.models import Bar, Frequency, Market, SymbolInfo, Tick
 

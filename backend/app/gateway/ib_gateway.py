@@ -18,14 +18,11 @@ Interactive Brokers 实盘网关（美股 + 期权 + 期货）
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
 
 from app.core.config import settings
 from app.gateway.base import AccountInfo, BrokerPosition, TradingGateway
-from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
+from app.oms.order import LiveOrder, LiveOrderStatus, LiveOrderType
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +67,7 @@ class IBGateway(TradingGateway):
     def __init__(self) -> None:
         self._ib = None
         self._connected = False
-        self._account_id: Optional[str] = None
+        self._account_id: str | None = None
         # 内部订单 id 映射: order_id → ib_trade 对象
         self._trades: dict[str, object] = {}
 
@@ -300,7 +297,7 @@ class IBGateway(TradingGateway):
         # 其他：默认 SMART 路由
         return ib.Stock(symbol, "SMART", "USD")
 
-    def _find_trade_by_broker_id(self, broker_order_id: str) -> Optional[object]:
+    def _find_trade_by_broker_id(self, broker_order_id: str) -> object | None:
         """从内存中找到对应 broker_id 的 trade 对象。"""
         for trade in self._trades.values():
             if str(trade.order.orderId) == broker_order_id:

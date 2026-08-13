@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ async def audit_log(
 
     try:
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "action": action,
             "actor": actor or "system",
             "detail": json.dumps(detail or {}, ensure_ascii=False, default=str),

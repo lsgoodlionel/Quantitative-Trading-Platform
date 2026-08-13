@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
 
 from app.core.config import settings
-from app.gateway.base import TradingGateway, AccountInfo, BrokerPosition
+from app.gateway.base import AccountInfo, BrokerPosition, TradingGateway
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 
 logger = logging.getLogger(__name__)
@@ -99,8 +97,8 @@ class AlpacaGateway(TradingGateway):
     async def submit_order(self, order: LiveOrder) -> str:
         client = self._require_client()
 
-        from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
         from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
         loop = asyncio.get_event_loop()
 
         side = OrderSide.BUY if order.side == LiveOrderSide.BUY else OrderSide.SELL
@@ -166,8 +164,8 @@ class AlpacaGateway(TradingGateway):
         client = self._require_client()
         loop = asyncio.get_event_loop()
 
-        from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
 
         def _get():
             req = GetOrdersRequest(status=QueryOrderStatus.OPEN)

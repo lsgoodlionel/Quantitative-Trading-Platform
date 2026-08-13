@@ -147,7 +147,7 @@ def _equal_weights(holdings: list[str], risk_degree: float) -> dict[str, float]:
     if not holdings:
         return {}
     w = risk_degree / len(holdings)
-    return {s: w for s in holdings}
+    return dict.fromkeys(holdings, w)
 
 
 def _turnover(prev_w: dict[str, float], new_w: dict[str, float]) -> float:

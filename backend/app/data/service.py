@@ -17,10 +17,8 @@ DataService — 统一数据服务
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from datetime import date, timedelta
-from functools import lru_cache
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

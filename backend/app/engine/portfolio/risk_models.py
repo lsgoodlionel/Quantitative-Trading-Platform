@@ -202,7 +202,7 @@ def risk_matrix(
     try:
         model = RiskModel(method) if not isinstance(method, RiskModel) else method
     except ValueError:
-        raise ValueError(f"未知的风险模型: {method}")
+        raise ValueError(f"未知的风险模型: {method}") from None
 
     estimator = _ESTIMATORS[model]
     cov = estimator(prices, frequency=frequency, **kwargs)

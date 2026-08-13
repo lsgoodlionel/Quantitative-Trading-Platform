@@ -26,7 +26,12 @@ import pandas as pd
 
 from app.quant.formula_factor import FormulaError, evaluate_formula
 from app.quant.mining.expression_tree import (
-    Node, clamp_size, crossover, mutate, random_tree, to_rpn,
+    Node,
+    clamp_size,
+    crossover,
+    mutate,
+    random_tree,
+    to_rpn,
 )
 
 # 单日横截面 IC 所需最少标的数（与 factor_lib/ranking 口径一致）

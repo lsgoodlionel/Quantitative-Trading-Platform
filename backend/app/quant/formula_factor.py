@@ -18,17 +18,16 @@ RPN 示例：
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pandas as pd
 
-from app.quant.indicators import (
-    rsi, sma, bollinger_bands, atr, obv, macd, adx, mfi,
-)
 from app.quant.factor_lib.operators import (
     ema as _op_ema,
+)
+from app.quant.factor_lib.operators import (
     rolling_corr,
     rolling_cov,
     rolling_idxmax,
@@ -38,9 +37,20 @@ from app.quant.factor_lib.operators import (
     rolling_resi,
     rolling_rsquare,
     rolling_slope,
+)
+from app.quant.factor_lib.operators import (
     wma as _op_wma,
 )
-
+from app.quant.indicators import (
+    adx,
+    atr,
+    bollinger_bands,
+    macd,
+    mfi,
+    obv,
+    rsi,
+    sma,
+)
 
 # ── 基础特征（叶子节点）─────────────────────────────────────────
 # 每个特征是 df -> pd.Series 的纯函数

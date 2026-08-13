@@ -1,5 +1,5 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,9 +25,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 初始化 OMS：自动检测 Redis 中的 Alpaca 配置
     # - 已配置 Alpaca → AlpacaGateway (Paper/Live) 处理美股
     # - 未配置 Alpaca → PaperGateway（本地纸面交易）
-    from app.oms.manager import init_hybrid_order_manager
-    from app.core.redis import get_redis_pool
     import redis.asyncio as aioredis
+
+    from app.core.redis import get_redis_pool
+    from app.oms.manager import init_hybrid_order_manager
     try:
         redis_client = aioredis.Redis(connection_pool=get_redis_pool())
         await redis_client.ping()

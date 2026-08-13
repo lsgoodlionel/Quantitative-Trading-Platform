@@ -1,3 +1,3 @@
-from app.engine.events.types import Event, EventType, BarEvent, TickEvent
+from app.engine.events.types import BarEvent, Event, EventType, TickEvent
 
 __all__ = ["Event", "EventType", "BarEvent", "TickEvent"]

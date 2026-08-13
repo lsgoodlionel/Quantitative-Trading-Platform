@@ -13,7 +13,7 @@ AkShare 美股/港股数据源 — 免费日线历史（无需 API key）
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
@@ -43,7 +43,7 @@ def _df_to_bars(
                 continue
         if d < start or d > end:
             continue
-        dt = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        dt = datetime(d.year, d.month, d.day, tzinfo=UTC)
         bars.append(
             Bar(
                 time=dt,

@@ -12,13 +12,13 @@ yfinance 备用数据源 — 美股/港股历史数据（免费，无需 API key
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
 from app.core.logging import get_logger
 from app.data.feeds.base import DataFeed
-from app.data.models import Bar, Frequency, Market, SymbolInfo, Tick
+from app.data.models import Bar, Frequency, Market, SymbolInfo
 
 logger = get_logger(__name__)
 
@@ -65,7 +65,7 @@ def _df_to_bars(df: pd.DataFrame, symbol: str, market: Market, frequency: Freque
         else:
             dt = datetime.fromisoformat(str(ts))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         bars.append(
             Bar(
                 time=dt,

@@ -28,7 +28,7 @@ class Node:
 
     kind: str                       # "leaf" | "op"
     value: str                      # 特征名或算子名
-    children: tuple["Node", ...] = field(default=())
+    children: tuple[Node, ...] = field(default=())
 
 
 # ── 词表（惰性构建，来自 formula_factor 单一真源，避免漂移）─────────────

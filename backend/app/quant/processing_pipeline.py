@@ -102,13 +102,13 @@ class ProcessingPipeline:
         cls,
         infer: list[ProcessorConfig],
         learn: list[ProcessorConfig],
-    ) -> "ProcessingPipeline":
+    ) -> ProcessingPipeline:
         return cls(
             infer_processors=[build_processor(c) for c in infer],
             learn_processors=[build_processor(c) for c in learn],
         )
 
-    def fit(self, panel: pd.DataFrame, fit_start: str, fit_end: str) -> "ProcessingPipeline":
+    def fit(self, panel: pd.DataFrame, fit_start: str, fit_end: str) -> ProcessingPipeline:
         """在 [fit_start, fit_end] 训练切片上拟合 learn 处理器，返回新流水线。"""
         train = _slice_datetime(panel, fit_start, fit_end)
         # 先施加 infer 处理器（无状态、安全），使 learn 处理器看到与 apply 期一致的表示

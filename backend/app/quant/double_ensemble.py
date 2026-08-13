@@ -83,7 +83,7 @@ class DoubleEnsembleClassifier:
 
     # -- 训练 --------------------------------------------------------
 
-    def fit(self, X: np.ndarray, y: np.ndarray, feature_names=None) -> "DoubleEnsembleClassifier":
+    def fit(self, X: np.ndarray, y: np.ndarray, feature_names=None) -> DoubleEnsembleClassifier:
         from sklearn.preprocessing import StandardScaler
 
         cfg = self.config
@@ -236,7 +236,7 @@ class DoubleEnsembleClassifier:
             total[feats] += model.feature_importances_ * self.sub_weights[i_s]
         w_sum = float(np.sum(self.sub_weights)) or 1.0
         total = total / w_sum
-        pairs = sorted(zip(self.feature_names, total), key=lambda kv: kv[1], reverse=True)
+        pairs = sorted(zip(self.feature_names, total, strict=True), key=lambda kv: kv[1], reverse=True)
         return [{"name": n, "importance": round(float(v), 6)} for n, v in pairs]
 
     def feature_usage(self) -> list[dict]:
@@ -247,7 +247,7 @@ class DoubleEnsembleClassifier:
         return [
             {"name": n, "used_by": int(c)}
             for n, c in sorted(
-                zip(self.feature_names, counts), key=lambda kv: kv[1], reverse=True
+                zip(self.feature_names, counts, strict=True), key=lambda kv: kv[1], reverse=True
             )
         ]
 
@@ -290,8 +290,8 @@ class DoubleEnsembleResult:
 # ── 交叉验证 ──────────────────────────────────────────────────────
 
 def _cross_validate(X: np.ndarray, y: np.ndarray, config: DoubleEnsembleConfig, n_splits: int = 3):
-    from sklearn.model_selection import TimeSeriesSplit
     from sklearn.metrics import accuracy_score
+    from sklearn.model_selection import TimeSeriesSplit
 
     scores: list[float] = []
     for train_idx, test_idx in TimeSeriesSplit(n_splits=n_splits).split(X):
@@ -380,5 +380,5 @@ def _recent_predictions(clf, X_test, y_test, times, n_train, n_recent: int = 30)
     recent_y = y_test[-n:]
     return [
         {"time": str(t), "actual": int(a), "predicted": int(p), "probability": round(float(pr), 4)}
-        for t, a, p, pr in zip(recent_times, recent_y, pred, prob)
+        for t, a, p, pr in zip(recent_times, recent_y, pred, prob, strict=True)
     ]

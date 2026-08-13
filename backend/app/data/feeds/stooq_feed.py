@@ -13,7 +13,7 @@ Stooq 数据源 — 全球免费日/周线历史（无需 API key）
 from __future__ import annotations
 
 import io
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import httpx
 import pandas as pd
@@ -62,7 +62,7 @@ def _csv_to_bars(text: str, symbol: str, market: Market, frequency: Frequency) -
         if close is None or pd.isna(close):
             continue
         try:
-            dt = datetime.fromisoformat(str(row["Date"])).replace(tzinfo=timezone.utc)
+            dt = datetime.fromisoformat(str(row["Date"])).replace(tzinfo=UTC)
         except Exception:
             continue
         bars.append(

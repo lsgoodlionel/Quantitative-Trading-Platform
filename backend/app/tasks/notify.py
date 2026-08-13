@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from celery import shared_task
 
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 def send_telegram(
     message: str,
     *,
-    token: Optional[str] = None,
-    chat_id: Optional[str] = None,
+    token: str | None = None,
+    chat_id: str | None = None,
     parse_mode: str = "HTML",
     timeout: int = 10,
 ) -> dict:
@@ -54,13 +54,13 @@ def send_telegram(
 def send_webhook(
     payload: dict,
     *,
-    url: Optional[str] = None,
+    url: str | None = None,
     format: str = "json",
     timeout: int = 10,
     retries: int = 2,
     retry_delay: float = 1.0,
-    secret_header: Optional[str] = None,
-    secret_value: Optional[str] = None,
+    secret_header: str | None = None,
+    secret_value: str | None = None,
 ) -> dict:
     """向 Webhook URL 发送 POST（helper 内含退避重试）。未传 url 回退 settings。"""
     if not url:
@@ -112,9 +112,9 @@ def emit_event(
     event_type: str,
     title: str,
     *,
-    symbol: Optional[str] = None,
-    market: Optional[str] = None,
-    payload: Optional[dict[str, Any]] = None,
+    symbol: str | None = None,
+    market: str | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> dict:
     """
     生产者便捷入口：同步构建并分发一个事件（内部 .delay 入队实际发送）。

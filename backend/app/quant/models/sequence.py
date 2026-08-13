@@ -18,13 +18,13 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from app.quant.ml_strategy import FEATURE_NAMES, _build_features
 from app.quant.models.networks import (
     SEQUENCE_MODEL_META,
     VALID_MODEL_TYPES,
     SequenceModelType,
     build_network,
 )
-from app.quant.ml_strategy import FEATURE_NAMES, _build_features
 
 # ── 常量 ──────────────────────────────────────────────────────────
 
@@ -136,8 +136,12 @@ def _standardize(
 def _compute_metrics(y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray) -> dict:
     """计算准确率/精确率/召回/F1/AUC/混淆矩阵。"""
     from sklearn.metrics import (
-        accuracy_score, precision_score, recall_score,
-        f1_score, roc_auc_score, confusion_matrix,
+        accuracy_score,
+        confusion_matrix,
+        f1_score,
+        precision_score,
+        recall_score,
+        roc_auc_score,
     )
 
     auc = 0.5
@@ -276,7 +280,7 @@ def _permutation_importance(
     return [
         {"name": name, "importance": round(float(imp), 6)}
         for name, imp in sorted(
-            zip(FEATURE_NAMES, normed), key=lambda kv: kv[1], reverse=True,
+            zip(FEATURE_NAMES, normed, strict=True), key=lambda kv: kv[1], reverse=True,
         )
     ]
 
@@ -295,7 +299,7 @@ def _assemble_result(
         }
         for t, a, p, pr in zip(
             recent_times, y_test[-n_recent:],
-            pred_test[-n_recent:], prob_test[-n_recent:],
+            pred_test[-n_recent:], prob_test[-n_recent:], strict=True,
         )
     ]
 

@@ -72,7 +72,7 @@ def build_network(
             )
             self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(hidden_size, 1))
 
-        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             out, _ = self.rnn(x)
             return self.head(out[:, -1, :]).squeeze(-1)
 
@@ -85,7 +85,7 @@ def build_network(
             )
             self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(hidden_size, 1))
 
-        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             out, _ = self.rnn(x)
             return self.head(out[:, -1, :]).squeeze(-1)
 
@@ -107,7 +107,7 @@ def build_network(
             )
             self.head = nn.Linear(hidden_size * 2, 1)
 
-        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             mapped = self.input_fc(x)                 # (B, T, H)
             out, _ = self.rnn(mapped)                 # (B, T, H)
             scores = self.att_score(out)              # (B, T, 1)

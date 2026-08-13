@@ -16,25 +16,24 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize, OptimizeResult
+from scipy.optimize import OptimizeResult, minimize
 
-from app.engine.portfolio.expected_returns import ReturnsModel, expected_returns
-from app.engine.portfolio.risk_models import RiskModel, risk_matrix
 from app.engine.portfolio.black_litterman import (
     BLResult,
     InvestorView,
     black_litterman,
 )
-from app.engine.portfolio.hrp import hrp_weights
 from app.engine.portfolio.cvar_opt import (
     DEFAULT_BETA,
     min_cdar_weights,
     min_cvar_weights,
 )
+from app.engine.portfolio.expected_returns import ReturnsModel, expected_returns
+from app.engine.portfolio.hrp import hrp_weights
+from app.engine.portfolio.risk_models import RiskModel, risk_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +73,11 @@ class PortfolioOptResult:
     # ── Black-Litterman 专属回显（其它方法为空/None）──
     bl_prior_returns: dict[str, float] = field(default_factory=dict)      # 市场隐含先验（%）
     bl_posterior_returns: dict[str, float] = field(default_factory=dict)  # 融合后验（%）
-    bl_risk_aversion: Optional[float] = None                              # δ
+    bl_risk_aversion: float | None = None                              # δ
     bl_views: list[str] = field(default_factory=list)                    # 观点文本
     # ── HRP / CVaR 元信息 ──
-    linkage_method: Optional[str] = None       # HRP 聚类连接方式
-    cvar_beta: Optional[float] = None          # CVaR/CDaR 置信水平
+    linkage_method: str | None = None       # HRP 聚类连接方式
+    cvar_beta: float | None = None          # CVaR/CDaR 置信水平
 
 
 # ── 核心数学函数 ───────────────────────────────────────────────

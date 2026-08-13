@@ -166,7 +166,7 @@ def expected_returns(
     try:
         model = ReturnsModel(method) if not isinstance(method, ReturnsModel) else method
     except ValueError:
-        raise ValueError(f"未知的预期收益方法: {method}")
+        raise ValueError(f"未知的预期收益方法: {method}") from None
 
     estimator = _ESTIMATORS[model]
     return estimator(prices, frequency=frequency, **kwargs)

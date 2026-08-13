@@ -15,15 +15,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from typing import Optional
+from datetime import date
 
 from app.risk.models import (
     RiskConfig,
-    RiskRule,
     RiskViolation,
     RuleType,
-    ViolationSeverity,
     default_risk_config,
 )
 
@@ -41,7 +38,7 @@ class RiskEngine:
             reject order
     """
 
-    def __init__(self, config: Optional[RiskConfig] = None) -> None:
+    def __init__(self, config: RiskConfig | None = None) -> None:
         self._config = config or default_risk_config()
         # 每日计数器（按日期重置）
         self._daily_order_counts: dict[str, int] = {}   # date_str → count

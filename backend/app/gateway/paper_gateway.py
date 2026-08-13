@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from app.gateway.base import AccountInfo, BrokerPosition, TradingGateway
-from app.oms.order import LiveFill, LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
+from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +155,7 @@ class PaperGateway(TradingGateway):
         order.avg_fill_price = price
         order.commission = commission
         order.status = LiveOrderStatus.FILLED
-        order.filled_at = datetime.now(timezone.utc)
+        order.filled_at = datetime.now(UTC)
         self._prices[order.symbol] = price
 
         logger.info(

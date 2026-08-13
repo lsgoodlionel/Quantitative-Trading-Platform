@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from app.strategy.base import StrategyBase
 from app.strategy.context import StrategyContext
-from app.strategy.indicators import rsi, macd
+from app.strategy.indicators import macd, rsi
 
 
 class MultiFactorStrategy(StrategyBase):

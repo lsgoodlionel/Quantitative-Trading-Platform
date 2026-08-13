@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
 from app.core.config import settings
@@ -43,7 +43,7 @@ def _to_bar(raw: object, symbol: str, frequency: Frequency) -> Bar:
     """将 alpaca-py Bar 对象转为内部 Bar。"""
     ts: datetime = raw.timestamp  # type: ignore[attr-defined]
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+        ts = ts.replace(tzinfo=UTC)
     return Bar(
         time=ts,
         symbol=symbol,
@@ -79,7 +79,6 @@ class AlpacaDataFeed(DataFeed):
     def _load_redis_credentials(self) -> dict[str, str] | None:
         """从 Redis 同步读取券商配置（供非 async 场景使用）。"""
         try:
-            import asyncio
             import redis as sync_redis
             r = sync_redis.from_url(settings.redis_url, decode_responses=True)
             data = r.hgetall("broker_config:alpaca")
@@ -138,8 +137,8 @@ class AlpacaDataFeed(DataFeed):
         request = StockBarsRequest(
             symbol_or_symbols=symbol,
             timeframe=tf,
-            start=datetime.combine(start, datetime.min.time()).replace(tzinfo=timezone.utc),
-            end=datetime.combine(end, datetime.max.time()).replace(tzinfo=timezone.utc),
+            start=datetime.combine(start, datetime.min.time()).replace(tzinfo=UTC),
+            end=datetime.combine(end, datetime.max.time()).replace(tzinfo=UTC),
             limit=10_000,
         )
 
@@ -233,9 +232,9 @@ class AlpacaDataFeed(DataFeed):
 
         async def on_trade(raw_trade: object) -> None:
             sym = getattr(raw_trade, "symbol", "")
-            ts: datetime = getattr(raw_trade, "timestamp", datetime.now(timezone.utc))
+            ts: datetime = getattr(raw_trade, "timestamp", datetime.now(UTC))
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
             tick = Tick(
                 time=ts,
                 symbol=sym,
@@ -269,8 +268,8 @@ class AlpacaDataFeed(DataFeed):
         """通过 Alpaca assets API 搜索股票。"""
         try:
             from alpaca.trading.client import TradingClient
-            from alpaca.trading.requests import GetAssetsRequest
             from alpaca.trading.enums import AssetClass, AssetStatus
+            from alpaca.trading.requests import GetAssetsRequest
         except ImportError:
             return []
 
