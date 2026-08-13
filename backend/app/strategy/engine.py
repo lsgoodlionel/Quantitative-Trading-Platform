@@ -11,17 +11,25 @@
   - 风控前置：下单前调用 RiskEngine.pre_trade_check
   - 状态管理：RUNNING / STOPPED / ERROR
   - 错误隔离：单策略崩溃不影响其他策略
+
+两条入口：
+  - `start_strategy`           单标的、注册表里的传统策略，走 `on_bar`
+  - `start_portfolio_strategy` 多标的组合策略（`FrameworkStrategy`），走 `on_bars`
+    循环本身在 `app.strategy.live_runner`，上下文在 `app.strategy.live_context`
+    —— 引擎只负责建档、装控制器、起 task（Wave L-d）
+
+纸面模拟已搬到 `app.strategy.paper_sim`（含它的已知技术债说明）。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -32,12 +40,37 @@ from app.oms.manager import get_order_manager
 from app.oms.order import LiveOrderSide, LiveOrderType
 from app.risk.engine import get_risk_engine
 from app.strategy.context import StrategyContext
+from app.strategy.live_runner import LivePortfolioRunner, LiveStepReport
+from app.strategy.paper_sim import (
+    PAPER_INITIAL_CASH,
+    PAPER_SIM_DAYS,
+    PaperBroker,
+    PaperPortfolio,
+    PaperTrade,
+    run_paper_simulation,
+)
 from app.strategy.presets import STRATEGY_REGISTRY
+
+if TYPE_CHECKING:
+    from app.engine.controls.base import TradingControl
+    from app.strategy.base import PortfolioStrategyBase
 
 logger = logging.getLogger(__name__)
 
-PAPER_SIM_DAYS = 60          # 模拟最近 N 天历史数据
-PAPER_INITIAL_CASH = 100_000.0
+#: 纸面模拟已搬到 `app.strategy.paper_sim`，这里保留再导出以维持既有导入路径。
+__all__ = [
+    "PAPER_INITIAL_CASH",
+    "PAPER_SIM_DAYS",
+    "LiveOrderContext",
+    "PaperBroker",
+    "PaperPortfolio",
+    "PaperTrade",
+    "StrategyEngine",
+    "StrategyInstance",
+    "StrategyState",
+    "get_strategy_engine",
+    "run_paper_simulation",
+]
 
 
 class StrategyState(str, Enum):
@@ -46,305 +79,6 @@ class StrategyState(str, Enum):
     STOPPED = "stopped"
     ERROR   = "error"
 
-
-# ── 纸面交易数据结构 ───────────────────────────────────────────
-
-@dataclass
-class PaperTrade:
-    timestamp: str
-    side: str          # BUY / SELL
-    price: float
-    qty: int
-    value: float       # price * qty
-    realized_pnl: float = 0.0
-    signal_reason: str = ""
-
-    def to_dict(self) -> dict:
-        return {
-            "timestamp": self.timestamp,
-            "side": self.side,
-            "price": self.price,
-            "qty": self.qty,
-            "value": self.value,
-            "realized_pnl": self.realized_pnl,
-            "signal_reason": self.signal_reason,
-        }
-
-
-@dataclass
-class PaperPortfolio:
-    """纸面交易组合状态。"""
-    initial_cash: float = PAPER_INITIAL_CASH
-    cash: float = PAPER_INITIAL_CASH
-    position: int = 0
-    avg_cost: float = 0.0
-    equity_curve: list[dict] = field(default_factory=list)   # [{time, value, pnl_pct}]
-    trades: list[PaperTrade] = field(default_factory=list)
-
-    # 汇总指标（模拟完成后计算）
-    total_return_pct: float = 0.0
-    sharpe_ratio: float = 0.0
-    max_drawdown_pct: float = 0.0
-    win_rate_pct: float = 0.0
-    profit_factor: float = 0.0
-    total_trades: int = 0
-    buy_hold_return_pct: float = 0.0
-    sim_start: str = ""
-    sim_end: str = ""
-    sim_days: int = PAPER_SIM_DAYS   # 本次模拟使用的天数
-
-    def current_equity(self, price: float) -> float:
-        return self.cash + self.position * price
-
-    def buy(self, price: float, qty: int, timestamp: str) -> None:
-        cost = price * qty
-        if cost > self.cash:
-            qty = int(self.cash / price)
-            cost = price * qty
-        if qty <= 0:
-            return
-        # 更新平均成本
-        total_qty = self.position + qty
-        self.avg_cost = (self.avg_cost * self.position + price * qty) / total_qty if total_qty else price
-        self.cash -= cost
-        self.position += qty
-        self.trades.append(PaperTrade(
-            timestamp=timestamp, side="BUY", price=price, qty=qty,
-            value=round(cost, 2), signal_reason="策略买入信号",
-        ))
-
-    def sell(self, price: float, qty: int, timestamp: str) -> None:
-        qty = min(qty, self.position)
-        if qty <= 0:
-            return
-        realized_pnl = (price - self.avg_cost) * qty
-        self.cash += price * qty
-        self.position -= qty
-        if self.position == 0:
-            self.avg_cost = 0.0
-        self.trades.append(PaperTrade(
-            timestamp=timestamp, side="SELL", price=price, qty=qty,
-            value=round(price * qty, 2), realized_pnl=round(realized_pnl, 2),
-            signal_reason="策略卖出信号",
-        ))
-
-    def sell_all(self, price: float, timestamp: str) -> None:
-        self.sell(price, self.position, timestamp)
-
-    def snapshot(self, timestamp: str, price: float) -> None:
-        equity = self.current_equity(price)
-        pnl_pct = (equity - self.initial_cash) / self.initial_cash * 100
-        self.equity_curve.append({
-            "time": timestamp,
-            "value": round(equity, 2),
-            "pnl_pct": round(pnl_pct, 2),
-        })
-
-    def compute_metrics(self, initial_price: float, final_price: float) -> None:
-        """计算汇总绩效指标。"""
-        curve = self.equity_curve
-        if not curve:
-            return
-
-        values = [p["value"] for p in curve]
-        final_equity = values[-1]
-        self.total_return_pct = round((final_equity - self.initial_cash) / self.initial_cash * 100, 2)
-        self.buy_hold_return_pct = round((final_price - initial_price) / initial_price * 100, 2)
-        self.total_trades = len(self.trades)
-
-        # Sharpe（简化日收益率）
-        if len(values) > 1:
-            rets = [(values[i] - values[i - 1]) / values[i - 1] for i in range(1, len(values))]
-            mean_r = sum(rets) / len(rets)
-            std_r = (sum((r - mean_r) ** 2 for r in rets) / len(rets)) ** 0.5
-            self.sharpe_ratio = round((mean_r / std_r * (252 ** 0.5)) if std_r > 1e-10 else 0.0, 3)
-
-        # 最大回撤
-        peak = self.initial_cash
-        max_dd = 0.0
-        for v in values:
-            peak = max(peak, v)
-            dd = (peak - v) / peak
-            max_dd = max(max_dd, dd)
-        self.max_drawdown_pct = round(-max_dd * 100, 2)
-
-        # 胜率 & 盈亏比
-        sell_trades = [t for t in self.trades if t.side == "SELL"]
-        if sell_trades:
-            wins = [t for t in sell_trades if t.realized_pnl > 0]
-            losses = [t for t in sell_trades if t.realized_pnl <= 0]
-            self.win_rate_pct = round(len(wins) / len(sell_trades) * 100, 1)
-            total_win = sum(t.realized_pnl for t in wins)
-            total_loss = abs(sum(t.realized_pnl for t in losses))
-            self.profit_factor = round(total_win / total_loss, 2) if total_loss > 1e-6 else (
-                99.0 if total_win > 0 else 0.0
-            )
-
-    def to_dict(self) -> dict:
-        return {
-            "initial_cash": self.initial_cash,
-            "cash": round(self.cash, 2),
-            "position": self.position,
-            "avg_cost": round(self.avg_cost, 2),
-            "equity_curve": self.equity_curve,
-            "trades": [t.to_dict() for t in self.trades],
-            "total_return_pct": self.total_return_pct,
-            "sharpe_ratio": self.sharpe_ratio,
-            "max_drawdown_pct": self.max_drawdown_pct,
-            "win_rate_pct": self.win_rate_pct,
-            "profit_factor": self.profit_factor,
-            "total_trades": self.total_trades,
-            "buy_hold_return_pct": self.buy_hold_return_pct,
-            "sim_start": self.sim_start,
-            "sim_end": self.sim_end,
-            "sim_days": self.sim_days,
-        }
-
-
-# ── 纸面交易代理 Broker（供 StrategyContext 使用） ─────────────────
-
-class _PaperPosition:
-    """SimulatedBroker.positions.get() 返回的 Position 兼容对象。"""
-
-    def __init__(self, qty: int, avg_cost: float) -> None:
-        self.qty = qty
-        self.avg_cost = avg_cost
-        self.market_value = 0.0  # 兼容字段
-
-
-class _PaperPositions:
-    """StrategyContext 要求 broker.positions.get(sym) → Position-like."""
-
-    def __init__(self, portfolio: "PaperPortfolio") -> None:
-        self._p = portfolio
-
-    def get(self, symbol: str) -> Optional[_PaperPosition]:
-        if self._p.position <= 0:
-            return None
-        return _PaperPosition(qty=self._p.position, avg_cost=self._p.avg_cost)
-
-
-class PaperBroker:
-    """
-    SimulatedBroker 接口兼容的纸面 Broker。
-
-    StrategyContext 期望：
-      - broker.cash          → float
-      - broker.positions.get(sym) → Position-like with .qty
-      - broker.portfolio_value(prices) → float
-      - broker.buy(symbol, qty, market=None)
-      - broker.sell(symbol, qty, market=None)
-    """
-
-    def __init__(self, portfolio: PaperPortfolio) -> None:
-        self._p = portfolio
-        self._current_bar: Optional[Bar] = None
-        self.positions = _PaperPositions(portfolio)
-
-    def set_bar(self, bar: Bar) -> None:
-        self._current_bar = bar
-
-    @property
-    def cash(self) -> float:
-        return self._p.cash
-
-    def portfolio_value(self, prices: dict) -> float:
-        if self._current_bar:
-            price = prices.get(self._current_bar.symbol, self._current_bar.close)
-        else:
-            price = 0.0
-        return self._p.cash + self._p.position * price
-
-    def _ts(self) -> str:
-        if self._current_bar:
-            t = self._current_bar.time
-            return t.isoformat() if hasattr(t, "isoformat") else str(t)
-        return ""
-
-    def buy(self, symbol: str, qty: int, market=None) -> None:  # noqa: ARG002
-        if self._current_bar and qty > 0:
-            self._p.buy(self._current_bar.close, qty, self._ts())
-
-    def sell(self, symbol: str, qty: int, market=None) -> None:  # noqa: ARG002
-        if self._current_bar and qty > 0:
-            self._p.sell(self._current_bar.close, qty, self._ts())
-
-
-# ── 纸面交易模拟函数 ───────────────────────────────────────────
-
-def run_paper_simulation(
-    strategy_cls,
-    params: dict,
-    all_bars: list[Bar],
-    sim_days: int = PAPER_SIM_DAYS,
-) -> PaperPortfolio:
-    """
-    在最近 sim_days 天的历史数据上运行策略模拟。
-
-    前面的数据用作指标预热，最后 sim_days 天计入 PnL 和净值曲线。
-    返回填充好的 PaperPortfolio。
-    """
-    if not all_bars:
-        return PaperPortfolio()
-
-    portfolio = PaperPortfolio()
-    broker = PaperBroker(portfolio)
-
-    strategy_obj = strategy_cls(params=params)
-
-    # 确定回测窗口：最后 sim_days 天
-    last_bar_time = all_bars[-1].time
-    sim_cutoff = last_bar_time.date() - timedelta(days=sim_days) if hasattr(last_bar_time, "date") else date.today() - timedelta(days=sim_days)
-    sim_bars = [b for b in all_bars if (b.time.date() if hasattr(b.time, "date") else b.time) >= sim_cutoff]
-
-    if not sim_bars:
-        sim_bars = all_bars[-min(30, len(all_bars)):]
-
-    portfolio.sim_start = str(sim_bars[0].time)[:10]
-    portfolio.sim_end   = str(sim_bars[-1].time)[:10]
-    portfolio.sim_days  = sim_days
-
-    # 初始化策略（用全部历史做 on_start）
-    full_df = _bars_to_df(all_bars)
-    init_ctx = StrategyContext(bar=all_bars[-1], history=full_df, broker=None)
-    try:
-        strategy_obj.on_start(init_ctx)
-    except Exception:
-        pass
-
-    initial_price = sim_bars[0].close
-
-    # 逐 bar 运行策略
-    history = list(all_bars)
-    sim_start_idx = len(all_bars) - len(sim_bars)
-
-    for i, bar in enumerate(sim_bars):
-        global_idx = sim_start_idx + i
-        history_slice = all_bars[:global_idx + 1]
-        history_df = _bars_to_df(history_slice)
-
-        broker.set_bar(bar)
-        ctx = StrategyContext(
-            bar=bar,
-            history=history_df,
-            broker=broker,    # 使用纸面 broker
-        )
-        try:
-            strategy_obj.on_bar(ctx)
-        except Exception as e:
-            logger.debug("Paper sim on_bar error: %s", e)
-
-        ts = str(bar.time)[:10]
-        portfolio.snapshot(ts, bar.close)
-
-    # 期末平仓（记录未实现盈亏）
-    if portfolio.position > 0 and sim_bars:
-        final_price = sim_bars[-1].close
-        ts = str(sim_bars[-1].time)[:10]
-        portfolio.sell_all(final_price, ts)
-
-    portfolio.compute_metrics(initial_price, sim_bars[-1].close if sim_bars else initial_price)
-    return portfolio
 
 
 # ── StrategyInstance ──────────────────────────────────────────
@@ -359,14 +93,14 @@ class StrategyInstance:
     frequency: str
     params: dict
     state: StrategyState = StrategyState.IDLE
-    task: Optional[asyncio.Task] = field(default=None, repr=False)
-    error: Optional[str] = None
+    task: asyncio.Task | None = field(default=None, repr=False)
+    error: str | None = None
     bars_processed: int = 0
     orders_placed: int = 0
-    started_at: Optional[str] = None
-    stopped_at: Optional[str] = None
+    started_at: str | None = None
+    stopped_at: str | None = None
     # 纸面交易模拟结果
-    paper: Optional[PaperPortfolio] = field(default=None, repr=False)
+    paper: PaperPortfolio | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -395,10 +129,10 @@ class LiveOrderContext:
         self._bar = current_bar
         self._pending_orders: list[dict] = []
 
-    def buy(self, qty: int, order_type: str = "MARKET", limit_price: Optional[float] = None) -> None:
+    def buy(self, qty: int, order_type: str = "MARKET", limit_price: float | None = None) -> None:
         self._pending_orders.append({"side": "BUY", "qty": qty, "order_type": order_type, "limit_price": limit_price})
 
-    def sell(self, qty: int, order_type: str = "MARKET", limit_price: Optional[float] = None) -> None:
+    def sell(self, qty: int, order_type: str = "MARKET", limit_price: float | None = None) -> None:
         self._pending_orders.append({"side": "SELL", "qty": qty, "order_type": order_type, "limit_price": limit_price})
 
     def pending_orders(self) -> list[dict]:
@@ -410,13 +144,13 @@ class LiveOrderContext:
 class StrategyEngine:
     """实盘策略引擎（单例）。"""
 
-    _instance: Optional["StrategyEngine"] = None
+    _instance: StrategyEngine | None = None
 
     def __init__(self) -> None:
         self._instances: dict[str, StrategyInstance] = {}
 
     @classmethod
-    def instance(cls) -> "StrategyEngine":
+    def instance(cls) -> StrategyEngine:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -475,7 +209,7 @@ class StrategyEngine:
             frequency=frequency,
             params=params,
             state=StrategyState.RUNNING,
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=datetime.now(UTC).isoformat(),
         )
         self._instances[instance_id] = inst
 
@@ -519,6 +253,147 @@ class StrategyEngine:
         )
         return inst
 
+    # ── 组合策略实盘入口（Wave L-d）────────────────────────────
+
+    async def start_portfolio_strategy(
+        self,
+        instance_id: str,
+        strategy: PortfolioStrategyBase,
+        symbols: Sequence[str],
+        market: str,
+        frequency: str,
+        data_service: DataService,
+        warmup_days: int = 120,
+        controls: Sequence[TradingControl] | None = None,
+        cash_per_position: float | None = None,
+    ) -> StrategyInstance:
+        """
+        启动一个**多标的组合策略**实例（`FrameworkStrategy` 走这条路）。
+
+        与 `start_strategy` 的差别：接收的是已装配好的策略对象而不是注册表里的
+        名字（框架策略由四个模型组装而成，没法用一个名字表达），回调是
+        `on_bars` 而不是 `on_bar`，且**不跑纸面模拟** —— 那套简化实现与真实
+        回测不可比（见 `PaperBroker` 的技术债说明），组合策略应直接跑回测引擎。
+
+        `controls` 会**同时**装到 OMS 上（契约 §5.1）：同一份配置，
+        回测拒掉的单实盘也拒。
+        """
+        self._ensure_not_running(instance_id)
+        wanted, market_enum, freq_enum = self._resolve_target(symbols, market, frequency)
+        warmup = await self._load_warmup(
+            wanted, market_enum, freq_enum, data_service, warmup_days
+        )
+        self._install_controls(controls)
+
+        inst = self._register_portfolio_instance(
+            instance_id, strategy, wanted, market, frequency
+        )
+        runner = LivePortfolioRunner(
+            instance_id=instance_id,
+            strategy=strategy,
+            symbols=wanted,
+            market=market_enum,
+            frequency=freq_enum,
+            data_service=data_service,
+            warmup_bars=warmup,
+            oms_provider=get_order_manager,
+            cash_per_position=cash_per_position,
+            on_step=lambda report: self._record_step(inst, report),
+            on_fatal=lambda message: self._record_fatal(inst, message),
+        )
+        inst.task = asyncio.create_task(
+            runner.run(), name=f"portfolio-strategy:{instance_id}"
+        )
+        logger.info(
+            "Portfolio strategy started: %s (%s) — %d symbols",
+            instance_id, inst.strategy_name, len(wanted),
+        )
+        return inst
+
+    @staticmethod
+    def _resolve_target(
+        symbols: Sequence[str], market: str, frequency: str
+    ) -> tuple[list[str], Market, Frequency]:
+        """标的去空白 + 市场/频率枚举化。非法输入直接抛错，不静默降级。"""
+        wanted = [s.strip().upper() for s in symbols if s and s.strip()]
+        if not wanted:
+            raise ValueError("组合策略至少需要一个标的")
+        try:
+            return wanted, Market(market.upper()), Frequency(frequency)
+        except ValueError as e:
+            raise ValueError(str(e)) from e
+
+    def _register_portfolio_instance(
+        self,
+        instance_id: str,
+        strategy: PortfolioStrategyBase,
+        symbols: Sequence[str],
+        market: str,
+        frequency: str,
+    ) -> StrategyInstance:
+        """建档并登记。多标的挤进单标的的 `symbol` 字段，以逗号分隔（不改 API 契约）。"""
+        inst = StrategyInstance(
+            instance_id=instance_id,
+            strategy_name=getattr(strategy, "name", type(strategy).__name__),
+            symbol=",".join(symbols),
+            market=market,
+            frequency=frequency,
+            params=dict(getattr(strategy, "_params", {}) or {}),
+            state=StrategyState.RUNNING,
+            started_at=datetime.now(UTC).isoformat(),
+        )
+        self._instances[instance_id] = inst
+        return inst
+
+    def _ensure_not_running(self, instance_id: str) -> None:
+        inst = self._instances.get(instance_id)
+        if inst is not None and inst.state == StrategyState.RUNNING:
+            raise ValueError(f"Strategy instance '{instance_id}' is already running")
+
+    @staticmethod
+    async def _load_warmup(
+        symbols: Sequence[str],
+        market: Market,
+        frequency: Frequency,
+        data_service: DataService,
+        warmup_days: int,
+    ) -> dict[str, list[Bar]]:
+        """逐标的取预热历史。单个标的取不到不阻断整体，但必须留痕。"""
+        end = date.today()
+        start = end - timedelta(days=warmup_days)
+        warmup: dict[str, list[Bar]] = {}
+        for symbol in symbols:
+            try:
+                warmup[symbol] = await data_service.get_bars(
+                    symbol=symbol, market=market, frequency=frequency,
+                    start=start, end=end,
+                )
+            except Exception:
+                logger.exception("预热数据加载失败，%s 以空历史启动", symbol)
+                warmup[symbol] = []
+        return warmup
+
+    @staticmethod
+    def _install_controls(controls: Sequence[TradingControl] | None) -> None:
+        """把同一批控制器装到 OMS 上（回测侧由 BacktestConfig.controls 装）。"""
+        if not controls:
+            return
+        try:
+            get_order_manager().set_controls(controls)
+        except RuntimeError:
+            logger.warning("OMS 尚未初始化，交易控制器未能装载")
+
+    @staticmethod
+    def _record_step(inst: StrategyInstance, report: LiveStepReport) -> None:
+        inst.bars_processed += len(report.symbols)
+        inst.orders_placed += report.orders_submitted
+
+    @staticmethod
+    def _record_fatal(inst: StrategyInstance, message: str) -> None:
+        inst.state = StrategyState.ERROR
+        inst.error = message
+        logger.error("Strategy instance %s marked ERROR: %s", inst.instance_id, message)
+
     async def stop_strategy(self, instance_id: str) -> StrategyInstance:
         inst = self._instances.get(instance_id)
         if inst is None:
@@ -530,14 +405,14 @@ class StrategyEngine:
             except asyncio.CancelledError:
                 pass
         inst.state = StrategyState.STOPPED
-        inst.stopped_at = datetime.now(timezone.utc).isoformat()
+        inst.stopped_at = datetime.now(UTC).isoformat()
         inst.task = None
         return inst
 
     def list_instances(self) -> list[dict]:
         return [inst.to_dict() for inst in self._instances.values()]
 
-    def get_instance(self, instance_id: str) -> Optional[StrategyInstance]:
+    def get_instance(self, instance_id: str) -> StrategyInstance | None:
         return self._instances.get(instance_id)
 
     # ── 实时 K 线循环 ─────────────────────────────────────────

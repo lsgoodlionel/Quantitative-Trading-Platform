@@ -20,10 +20,9 @@ freqtrade 的 loss 越小越好，这里等价取负后统一为 score。
 from __future__ import annotations
 
 import logging
-import random as _random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import product
-from typing import Callable
 
 import numpy as np
 
@@ -219,7 +218,7 @@ class ParamSpace:
 
     def grid(self) -> list[dict]:
         value_lists = [d.grid_values() for d in self.dims]
-        return [dict(zip(self.names, combo)) for combo in product(*value_lists)]
+        return [dict(zip(self.names, combo, strict=True)) for combo in product(*value_lists)]
 
     def sample(self, rng: np.random.Generator) -> dict:
         return {d.name: d.sample(rng) for d in self.dims}
@@ -228,10 +227,10 @@ class ParamSpace:
         return [d.encode(params[d.name]) for d in self.dims]
 
     def decode(self, vec) -> dict:
-        return {d.name: d.decode_unit(float(u)) for d, u in zip(self.dims, vec)}
+        return {d.name: d.decode_unit(float(u)) for d, u in zip(self.dims, vec, strict=True)}
 
     @staticmethod
-    def from_spec(spec: dict) -> "ParamSpace":
+    def from_spec(spec: dict) -> ParamSpace:
         """从请求 param_space 构造。
 
         每个参数可为:
@@ -360,7 +359,7 @@ def _bayesian_search(
     """高斯过程 + UCB 采集。sklearn 不可用时退化为随机。"""
     try:
         from sklearn.gaussian_process import GaussianProcessRegressor
-        from sklearn.gaussian_process.kernels import Matern, ConstantKernel
+        from sklearn.gaussian_process.kernels import ConstantKernel, Matern
     except Exception:
         logger.warning("sklearn 不可用，贝叶斯优化退化为随机搜索")
         return _random_search(space, evaluate, loss_name, n_trials, min_trades, rng), True

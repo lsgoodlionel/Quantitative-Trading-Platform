@@ -18,8 +18,8 @@ import pandas as pd
 
 from app.engine.backtest.drawdown_periods import compute_drawdown_periods
 from app.engine.backtest.periodic_stats import compute_periodic_stats
-from app.engine.backtest.roundtrips import build_round_trips
 from app.engine.backtest.rolling_stats import compute_rolling_stats
+from app.engine.backtest.roundtrips import build_round_trips
 from app.engine.backtest.tag_metrics import compute_tag_metrics
 from app.engine.backtest.trade_analytics import compute_trade_analytics
 

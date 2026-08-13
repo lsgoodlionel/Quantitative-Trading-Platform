@@ -1,8 +1,19 @@
+from app.engine.backtest.broker import Fill, Order, OrderStatus, SimulatedBroker
 from app.engine.backtest.commission import CommissionModel, get_commission_model
+from app.engine.backtest.daily_result import (
+    ContractDailyResult,
+    PortfolioDailyResult,
+)
+from app.engine.backtest.engine import BacktestConfig, BacktestEngine
+from app.engine.backtest.order_types import OrderType, TimeInForce
+from app.engine.backtest.portfolio_broker import PortfolioBroker
+from app.engine.backtest.portfolio_engine import (
+    PortfolioBacktestConfig,
+    PortfolioBacktestEngine,
+    PortfolioBacktestResult,
+)
+from app.engine.backtest.position import PortfolioPositions, Position
 from app.engine.backtest.slippage import SlippageModel, get_slippage_model
-from app.engine.backtest.position import Position, PortfolioPositions
-from app.engine.backtest.broker import SimulatedBroker, Order, Fill, OrderStatus
-from app.engine.backtest.engine import BacktestEngine, BacktestConfig
 
 __all__ = [
     "CommissionModel",
@@ -15,6 +26,15 @@ __all__ = [
     "Order",
     "Fill",
     "OrderStatus",
+    "OrderType",
+    "TimeInForce",
     "BacktestEngine",
     "BacktestConfig",
+    # ── K1 组合回测 ──────────────────────────────────────────
+    "PortfolioBroker",
+    "PortfolioBacktestEngine",
+    "PortfolioBacktestConfig",
+    "PortfolioBacktestResult",
+    "ContractDailyResult",
+    "PortfolioDailyResult",
 ]

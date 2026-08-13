@@ -141,7 +141,7 @@ def _rule_contribution(
 
 def _group_by_tag(pnls: np.ndarray, tags: list[str]) -> dict[str, np.ndarray]:
     groups: dict[str, list[float]] = {}
-    for pnl, tag in zip(pnls.tolist(), tags):
+    for pnl, tag in zip(pnls.tolist(), tags, strict=True):
         groups.setdefault(tag, []).append(pnl)
     return {tag: np.asarray(vals, dtype=float) for tag, vals in groups.items()}
 
@@ -221,5 +221,5 @@ def _build_null_hist(null_means: np.ndarray) -> list[dict]:
     centers = (edges[:-1] + edges[1:]) / 2.0
     return [
         {"center": round(float(c), 6), "count": int(cnt)}
-        for c, cnt in zip(centers, counts)
+        for c, cnt in zip(centers, counts, strict=True)
     ]

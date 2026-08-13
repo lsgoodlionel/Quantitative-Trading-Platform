@@ -16,10 +16,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 
 from app.core.audit import AuditAction, audit_log
+from app.data.models import Market
+from app.engine.backtest.order_types import OrderType
+from app.engine.controls.base import (
+    ControlContext,
+    ControlViolation,
+    TradingControl,
+    run_controls,
+)
 from app.gateway.base import TradingGateway
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 
@@ -31,8 +39,17 @@ _POLL_INTERVAL = 5.0
 MAX_ORDER_QTY = 100_000
 
 
-class RiskViolation(Exception):
+class RiskViolationError(Exception):
     """风控前置检查不通过时抛出。"""
+
+
+def _to_market(value: str) -> Market | None:
+    """市场字符串 → Market 枚举。未知市场返回 None（仅作为 context 的元信息）。"""
+    try:
+        return Market(value.upper())
+    except ValueError:
+        logger.debug("未知市场标识 %r，控制器 context 的 market 置空", value)
+        return None
 
 
 class OrderManager:
@@ -48,17 +65,41 @@ class OrderManager:
         await manager.stop()
     """
 
-    def __init__(self, redis_client=None, protection_manager=None) -> None:
+    def __init__(
+        self,
+        redis_client=None,
+        protection_manager=None,
+        controls: Sequence[TradingControl] | None = None,
+    ) -> None:
         self._gateways: dict[str, TradingGateway] = {}
         self._orders: dict[str, LiveOrder] = {}   # order_id → LiveOrder
         self._redis = redis_client
         self._protections = protection_manager   # 可选：ProtectionManager，None 时跳过防护
-        self._poll_task: Optional[asyncio.Task] = None
+        self._poll_task: asyncio.Task | None = None
         self._running = False
+        # ── L1 交易控制器：与回测共用同一批实例（默认空 = 现状）──
+        self._controls: tuple[TradingControl, ...] = tuple(controls or ())
+        self._price_lookup: Callable[[str, str], float | None] | None = None
 
     def set_protection_manager(self, protection_manager) -> None:
         """注入动态防护管理器（None 时跳过防护）。"""
         self._protections = protection_manager
+
+    def set_controls(self, controls: Sequence[TradingControl] | None) -> None:
+        """替换交易控制器列表（空/None 表示不装控制器）。"""
+        self._controls = tuple(controls or ())
+
+    def set_price_lookup(
+        self, lookup: Callable[[str, str], float | None] | None
+    ) -> None:
+        """
+        注入 (symbol, market) → 最新参考价 的查询函数。
+
+        金额类控制器（`MaxOrderSize` / `MaxPositionSize` 的 max_notional）需要它。
+        未注入时市价单拿不到参考价，这些控制器会**拒单**而不是静默放行 ——
+        配了金额上限却校验不了，放行等于风控失效。
+        """
+        self._price_lookup = lookup
 
     # ── Dry-Run / Live 一致性（E4）──────────────────────────────
     # 模拟盘（dry_run）与实盘共享同一条执行路径：相同订单生命周期、
@@ -73,7 +114,7 @@ class OrderManager:
     def is_dry_run(self) -> bool:
         return getattr(self, "_dry_run", False)
 
-    def _stamp_paper_mode(self, order: "LiveOrder") -> None:
+    def _stamp_paper_mode(self, order: LiveOrder) -> None:
         """
         标记订单是否为模拟盘：显式 dry_run 或路由网关为 PaperGateway 时为 True。
 
@@ -124,8 +165,8 @@ class OrderManager:
         side: LiveOrderSide,
         qty: int,
         order_type: LiveOrderType = LiveOrderType.MARKET,
-        limit_price: Optional[float] = None,
-        strategy_id: Optional[str] = None,
+        limit_price: float | None = None,
+        strategy_id: str | None = None,
     ) -> LiveOrder:
         """
         创建并提交实盘订单。
@@ -148,6 +189,11 @@ class OrderManager:
 
         self._pre_trade_risk_check(order)
 
+        # L1 交易控制器：与回测 SimulatedBroker 共用同一批实例与同一个执行器
+        violation = self._run_trading_controls(order)
+        if violation is not None:
+            return await self._reject_by_control(order, violation)
+
         # 动态防护：仅对入场（BUY）订单 gate；平仓/卖出永不阻断（不困住持仓）
         if self._protections is not None and side == LiveOrderSide.BUY:
             lock = self._protections.check_entry(symbol, market)
@@ -156,7 +202,7 @@ class OrderManager:
                 order.reject_reason = (
                     f"[PROTECTION:{lock.protection_type.value}] {lock.reason}"
                 )
-                order.updated_at = datetime.now(timezone.utc)
+                order.updated_at = datetime.now(UTC)
                 self._orders[order.order_id] = order
                 await self._publish_order_event(order)
                 self._notify_protection(lock, order)
@@ -172,14 +218,14 @@ class OrderManager:
             # Gateway may have already filled the order (e.g. PaperGateway market orders)
             if order.status not in (LiveOrderStatus.FILLED, LiveOrderStatus.PARTIAL):
                 order.status = LiveOrderStatus.SUBMITTED
-            order.submitted_at = datetime.now(timezone.utc)
+            order.submitted_at = datetime.now(UTC)
         except Exception as e:
             order.status = LiveOrderStatus.REJECTED
             order.reject_reason = str(e)
             logger.error("Order rejected by gateway: %s", e)
             self._notify_order_reject(order)
 
-        order.updated_at = datetime.now(timezone.utc)
+        order.updated_at = datetime.now(UTC)
         self._orders[order.order_id] = order
 
         await self._publish_order_event(order)
@@ -199,20 +245,20 @@ class OrderManager:
 
         await gw.cancel_order(order.broker_order_id)
         order.status = LiveOrderStatus.CANCELLED
-        order.updated_at = datetime.now(timezone.utc)
+        order.updated_at = datetime.now(UTC)
         await self._publish_order_event(order)
         await self._audit_order(AuditAction.ORDER_CANCEL, order)
         return order
 
     # ── 查询接口 ──────────────────────────────────────────────
 
-    def get_order(self, order_id: str) -> Optional[LiveOrder]:
+    def get_order(self, order_id: str) -> LiveOrder | None:
         return self._orders.get(order_id)
 
     def list_orders(
         self,
-        strategy_id: Optional[str] = None,
-        status: Optional[str] = None,
+        strategy_id: str | None = None,
+        status: str | None = None,
         limit: int = 100,
     ) -> list[LiveOrder]:
         orders = list(self._orders.values())
@@ -259,15 +305,93 @@ class OrderManager:
 
     def _pre_trade_risk_check(self, order: LiveOrder) -> None:
         if order.qty <= 0:
-            raise RiskViolation("Order qty must be positive")
+            raise RiskViolationError("Order qty must be positive")
         if order.qty > MAX_ORDER_QTY:
-            raise RiskViolation(
+            raise RiskViolationError(
                 f"Order qty {order.qty} exceeds max allowed {MAX_ORDER_QTY}"
             )
         if order.order_type == LiveOrderType.LIMIT and not order.limit_price:
-            raise RiskViolation("Limit order requires limit_price")
+            raise RiskViolationError("Limit order requires limit_price")
         if order.limit_price is not None and order.limit_price <= 0:
-            raise RiskViolation("limit_price must be positive")
+            raise RiskViolationError("limit_price must be positive")
+
+    # ── L1 交易控制器（与回测共用）────────────────────────────
+
+    def _run_trading_controls(self, order: LiveOrder) -> ControlViolation | None:
+        """未装控制器时是一次布尔判断，下单路径与控制器上线前一致。"""
+        if not self._controls:
+            return None
+        return run_controls(self._controls, self._control_context(order))
+
+    async def _reject_by_control(
+        self, order: LiveOrder, violation: ControlViolation
+    ) -> LiveOrder:
+        """控制器拦截：拒单原因格式与回测侧完全一致，并照常发事件 + 通知。"""
+        order.status = LiveOrderStatus.REJECTED
+        order.reject_reason = violation.as_reject_reason()
+        order.updated_at = datetime.now(UTC)
+        self._orders[order.order_id] = order
+        await self._publish_order_event(order)
+        self._notify_order_reject(order)
+        return order
+
+    def _control_context(self, order: LiveOrder) -> ControlContext:
+        """
+        把 OMS 状态摊平成与回测等价的 `ControlContext`。
+
+        已知边界：`current_qty` 取自 OMS 自己的内存订单簿（本进程下过的单），
+        不含券商侧的历史持仓；`portfolio_value` / `cash` / `leverage` 目前恒为 0，
+        因为实盘账户快照是异步拉取的，而下单校验是同步路径。
+        本期 8 个控制器都不读这三个字段（账户级控制器仅回测侧触发）。
+        """
+        return ControlContext(
+            symbol=order.symbol,
+            market=_to_market(order.market),
+            side=order.side.value,
+            qty=order.qty,
+            order_type=OrderType(order.order_type.value),
+            limit_price=order.limit_price,
+            price=self._reference_price(order),
+            now=datetime.now(UTC),
+            current_qty=self._net_position(order.symbol, order.market),
+            orders_today=self._orders_today(),
+        )
+
+    def _reference_price(self, order: LiveOrder) -> float | None:
+        """最新报价；未注入行情查询时返回 None（由控制器决定如何处理）。"""
+        if self._price_lookup is None:
+            return None
+        try:
+            return self._price_lookup(order.symbol, order.market)
+        except Exception:
+            logger.warning(
+                "参考价查询失败：%s/%s，金额类控制器将按缺价处理",
+                order.market, order.symbol,
+            )
+            return None
+
+    def _net_position(self, symbol: str, market: str) -> int:
+        """按 OMS 订单簿里的已成交量推算净持仓（BUY 为正，SELL 为负）。"""
+        net = 0
+        for existing in self._orders.values():
+            if existing.symbol != symbol or existing.market != market:
+                continue
+            if existing.filled_qty <= 0:
+                continue
+            net += (
+                existing.filled_qty
+                if existing.side is LiveOrderSide.BUY
+                else -existing.filled_qty
+            )
+        return net
+
+    def _orders_today(self) -> int:
+        """当日（UTC）已创建的订单数，供 `MaxOrderCount` 使用。"""
+        today = datetime.now(UTC).date()
+        return sum(
+            1 for existing in self._orders.values()
+            if existing.created_at.date() == today
+        )
 
     # ── 状态轮询 ──────────────────────────────────────────────
 
@@ -318,10 +442,10 @@ class OrderManager:
         order.filled_qty = filled_qty
         order.avg_fill_price = float(avg_price) if avg_price else None
         order.status = new_status
-        order.updated_at = datetime.now(timezone.utc)
+        order.updated_at = datetime.now(UTC)
 
         if new_status == LiveOrderStatus.FILLED and order.filled_at is None:
-            order.filled_at = datetime.now(timezone.utc)
+            order.filled_at = datetime.now(UTC)
 
         if new_status != old_status:
             asyncio.create_task(self._publish_order_event(order))
@@ -439,7 +563,7 @@ class OrderManagerTradeSource:
     后续接入 DB orders/fills 表后替换为真实盈亏与显式 exit_reason。
     """
 
-    def __init__(self, manager: "OrderManager") -> None:
+    def __init__(self, manager: OrderManager) -> None:
         self._manager = manager
 
     def get_closed_trades(self, symbol, since):
@@ -458,7 +582,7 @@ class OrderManagerTradeSource:
             if close_date is None:
                 continue
             # since 为带时区 UTC；close_date 为 naive UTC，比较时补 tzinfo
-            cd = close_date if close_date.tzinfo else close_date.replace(tzinfo=timezone.utc)
+            cd = close_date if close_date.tzinfo else close_date.replace(tzinfo=UTC)
             if cd < since:
                 continue
             out.append(
@@ -491,7 +615,7 @@ def _infer_exit_reason(order: LiveOrder) -> str:
 
 
 # 全局单例（在 FastAPI lifespan 中初始化）
-_manager: Optional[OrderManager] = None
+_manager: OrderManager | None = None
 
 
 def get_order_manager() -> OrderManager:
@@ -514,6 +638,8 @@ async def _attach_protections(manager: OrderManager, redis_client=None) -> None:
     from app.oms.protections.manager import init_protection_manager
     from app.oms.protections.store import (
         load_config as load_protections_config,
+    )
+    from app.oms.protections.store import (
         load_locks as load_protection_locks,
     )
 

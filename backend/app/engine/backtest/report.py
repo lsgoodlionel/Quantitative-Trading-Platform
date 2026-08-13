@@ -15,6 +15,7 @@ from app.engine.backtest.metrics import (
     BacktestMetrics,
     compute_drawdown_series,
     compute_monthly_returns,
+    is_close_fill,
 )
 
 
@@ -41,9 +42,9 @@ def build_report(
     # 月度收益矩阵
     monthly_returns = compute_monthly_returns(equity_curve)
 
-    # 交易盈亏分布（直方图数据）
-    sell_pnls = [f.get("realized_pnl", 0.0) for f in fills if f.get("side") in ("SELL", "sell")]
-    pnl_distribution = _build_pnl_histogram(sell_pnls)
+    # 交易盈亏分布（直方图数据）—— 按平仓事件取盈亏，做空后 BUY 平空也要计入
+    close_pnls = [f.get("realized_pnl", 0.0) for f in fills if is_close_fill(f)]
+    pnl_distribution = _build_pnl_histogram(close_pnls)
 
     return {
         "strategy_id": strategy_id,
@@ -54,7 +55,7 @@ def build_report(
         "initial_cash": initial_cash,
         "final_value": round(final_value, 2),
         "params": params,
-        "metrics": _metrics_to_dict(metrics),
+        "metrics": metrics_to_dict(metrics),
         "equity_curve": equity_points,
         "drawdown_series": drawdown_points,
         "monthly_returns": monthly_returns,
@@ -64,7 +65,8 @@ def build_report(
     }
 
 
-def _metrics_to_dict(m: BacktestMetrics) -> dict:
+def metrics_to_dict(m: BacktestMetrics) -> dict:
+    """指标 → API 字典。组合引擎的逐标的归因也复用这一口径。"""
     return {
         # 收益
         "total_return_pct": round(m.total_return * 100, 4),

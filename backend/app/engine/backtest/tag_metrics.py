@@ -176,7 +176,7 @@ def _max_underwater_days(equity: pd.Series) -> int:
         return 0
     running_max = equity.cummax()
     underwater = equity < running_max - _EPS
-    max_span = cur_start = 0
+    max_span = 0
     start_ts = None
     for ts, uw in underwater.items():
         if uw:

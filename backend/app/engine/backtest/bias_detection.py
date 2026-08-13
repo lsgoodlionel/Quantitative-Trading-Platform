@@ -23,8 +23,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
 
 from app.data.models import Bar
 
@@ -136,7 +136,7 @@ def detect_recursive(
     max_cut = max(valid)
     # 重叠区间：从最大裁剪点之后开始（所有变体都可见的尾部）
     overlap_start_iso = _bar_time(bars[max_cut])
-    base_tail = [f for f in _fills_after(full_fills, overlap_start_iso)]
+    base_tail = list(_fills_after(full_fills, overlap_start_iso))
 
     diffs: list[RecursiveDiff] = []
     for cut in valid:
