@@ -45,6 +45,7 @@ import { Orders } from "@/pages/Orders"
 import { Portfolio } from "@/pages/Portfolio"
 import { Risk } from "@/pages/Risk"
 import { AlgoLab } from "@/pages/AlgoLab"
+import { Lab } from "@/pages/Lab"
 import { PortfolioOptimizer } from "@/pages/PortfolioOptimizer"
 import { FactorAnalysis } from "@/pages/FactorAnalysis"
 import { Screener } from "@/pages/Screener"
@@ -90,6 +91,7 @@ export default function App() {
               <Route path="/portfolio-optimizer" element={<Protected element={<PortfolioOptimizer />} />} />
               <Route path="/risk"        element={<Protected element={<Risk />} />} />
               <Route path="/algolab"       element={<Protected element={<AlgoLab />} />} />
+              <Route path="/lab"           element={<Protected element={<Lab />} />} />
               <Route path="/factor"        element={<Protected element={<FactorAnalysis />} />} />
               <Route path="/screener"      element={<Protected element={<Screener />} />} />
               <Route path="/market-events" element={<Protected element={<MarketEvents />} />} />

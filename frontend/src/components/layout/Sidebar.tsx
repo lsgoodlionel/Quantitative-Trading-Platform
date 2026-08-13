@@ -29,6 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/screener",            icon: "🔍", label: "选股器"     },
   { to: "/factor",              icon: "🔭", label: "因子分析"   },
   { to: "/algolab",             icon: "🧪", label: "算法实验室" },
+  { to: "/lab",                 icon: "📦", label: "投研产物库" },
   // ── 系统 ─────────────────────────────────
   { to: "/settings",      icon: "⚙️", label: "设置"      },
 ]
