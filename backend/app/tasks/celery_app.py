@@ -31,6 +31,7 @@ celery_app = Celery(
     include=[
         "app.tasks.data",
         "app.tasks.notify",
+        "app.tasks.validation",
     ],
 )
 
@@ -46,6 +47,8 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.data.*":     {"queue": "data"},
         "app.tasks.notify.*":   {"queue": "default"},
+        # 完整验证是长耗时纯计算，单独排队避免把数据回填的队列堵死
+        "app.tasks.validation.*": {"queue": "compute"},
     },
 
     # 结果保留时间

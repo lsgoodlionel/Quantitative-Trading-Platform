@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -428,3 +430,126 @@ async def test_endpoint_rejects_all_unknown_steps(api_client):
     async with api_client as c:
         resp = await c.post(ENDPOINT, json=_request_body(steps=["nope"]))
     assert resp.status_code == 400
+
+
+# ── 异步入口 ─────────────────────────────────────────────────────
+#
+# 同步端点在默认参数下够用，但 n_trials / n_scenarios / 回测区间都是用户可调的，
+# 调大后同步路径会撞网关超时 —— 那时用户拿到 504，跑掉的算力全部作废。
+
+ASYNC_ENDPOINT = f"{ENDPOINT}/async"
+
+
+async def test_async_submit_returns_task_id(api_client, monkeypatch):
+    from app.tasks import validation as validation_task
+
+    monkeypatch.setattr(
+        validation_task.run_full_validation_task,
+        "delay",
+        lambda payload: SimpleNamespace(id="task-123"),
+    )
+
+    async with api_client as c:
+        resp = await c.post(ASYNC_ENDPOINT, json=_request_body())
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"task_id": "task-123", "status": "queued"}
+
+
+async def test_async_submit_validates_input_before_queueing(api_client, monkeypatch):
+    """配置错了要在提交那一刻就知道，而不是轮询半天拿到「未知策略」。"""
+    called = False
+
+    def _delay(payload):
+        nonlocal called
+        called = True
+        return SimpleNamespace(id="never")
+
+    from app.tasks import validation as validation_task
+
+    monkeypatch.setattr(validation_task.run_full_validation_task, "delay", _delay)
+
+    async with api_client as c:
+        resp = await c.post(ASYNC_ENDPOINT, json=_request_body(strategy_name="nope"))
+
+    assert resp.status_code == 400
+    assert not called, "校验未通过就不该把任务扔进队列"
+
+
+async def test_async_submit_reports_broker_outage(api_client, monkeypatch):
+    from app.tasks import validation as validation_task
+
+    def _boom(payload):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(validation_task.run_full_validation_task, "delay", _boom)
+
+    async with api_client as c:
+        resp = await c.post(ASYNC_ENDPOINT, json=_request_body())
+
+    assert resp.status_code == 503
+    assert "任务队列不可用" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [("PENDING", "queued"), ("RECEIVED", "queued"), ("STARTED", "running")],
+)
+async def test_async_result_reports_in_flight_states(api_client, monkeypatch, state, expected):
+    monkeypatch.setattr(
+        "celery.result.AsyncResult",
+        lambda task_id, app=None: SimpleNamespace(state=state, result=None),
+    )
+
+    async with api_client as c:
+        resp = await c.get(f"{ASYNC_ENDPOINT}/task-123")
+
+    assert resp.json()["status"] == expected
+    assert resp.json()["result"] is None
+
+
+async def test_async_result_returns_payload_on_success(api_client, monkeypatch):
+    payload = {"status": "ok", "run_id": "r1", "steps": {}, "grade": {}}
+    monkeypatch.setattr(
+        "celery.result.AsyncResult",
+        lambda task_id, app=None: SimpleNamespace(state="SUCCESS", result=payload),
+    )
+
+    async with api_client as c:
+        resp = await c.get(f"{ASYNC_ENDPOINT}/task-123")
+
+    data = resp.json()
+    assert data["status"] == "done"
+    assert data["result"]["run_id"] == "r1"
+
+
+async def test_async_result_surfaces_task_level_error(api_client, monkeypatch):
+    """任务内部捕获的失败要带原因回到前端，而不是一句 traceback。"""
+    monkeypatch.setattr(
+        "celery.result.AsyncResult",
+        lambda task_id, app=None: SimpleNamespace(
+            state="SUCCESS", result={"status": "error", "error": "数据不足"}
+        ),
+    )
+
+    async with api_client as c:
+        resp = await c.get(f"{ASYNC_ENDPOINT}/task-123")
+
+    data = resp.json()
+    assert data["status"] == "error"
+    assert data["error"] == "数据不足"
+
+
+async def test_async_result_surfaces_celery_failure(api_client, monkeypatch):
+    monkeypatch.setattr(
+        "celery.result.AsyncResult",
+        lambda task_id, app=None: SimpleNamespace(
+            state="FAILURE", result=RuntimeError("worker 崩了")
+        ),
+    )
+
+    async with api_client as c:
+        resp = await c.get(f"{ASYNC_ENDPOINT}/task-123")
+
+    assert resp.json()["status"] == "error"
+    assert "worker 崩了" in resp.json()["error"]

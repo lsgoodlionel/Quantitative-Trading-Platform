@@ -224,3 +224,77 @@ async def full_validation(
         steps=data["steps"],
         grade=data["grade"],
     )
+
+
+# ── 异步入口（长任务）─────────────────────────────────────────────
+#
+# 同步端点在默认参数下几十秒返回，够用。但 n_trials / n_scenarios / 回测区间
+# 都是用户可调的，调大之后同步路径必然撞上网关超时 —— 那时用户拿到 504，
+# 已经跑掉的算力全部作废。异步入口把这种情况变成「提交 → 轮询」。
+#
+# 两条路径的返回体结构完全一致，前端共用同一套渲染代码。
+
+
+class AsyncSubmitResponse(BaseModel):
+    task_id: str
+    status: str = "queued"
+
+
+class AsyncResultResponse(BaseModel):
+    task_id: str
+    #: queued / running / done / error
+    status: str
+    result: dict | None = None
+    error: str | None = None
+
+
+@router.post("/full-validation/async", response_model=AsyncSubmitResponse)
+async def submit_full_validation(
+    body: FullValidationRequest,
+    svc: Annotated[DataService, Depends(get_service)],
+) -> AsyncSubmitResponse:
+    """提交异步完整验证，返回 task_id。
+
+    **入参校验在这里同步做完**（策略名、市场、频率、数据量）——
+    让用户在提交那一刻就知道配置错了，而不是轮询半天拿到一个「未知策略」。
+    """
+    await _validate_and_fetch(body, svc)
+
+    from app.tasks.validation import run_full_validation_task
+
+    try:
+        task = run_full_validation_task.delay(body.model_dump(mode="json"))
+    except Exception as e:  # broker 不可用
+        raise HTTPException(503, f"任务队列不可用: {e}") from e
+    return AsyncSubmitResponse(task_id=task.id)
+
+
+@router.get("/full-validation/async/{task_id}", response_model=AsyncResultResponse)
+async def get_full_validation_result(task_id: str) -> AsyncResultResponse:
+    """查询异步完整验证的状态与结果。"""
+    from celery.result import AsyncResult
+
+    from app.tasks.celery_app import celery_app
+
+    async_result = AsyncResult(task_id, app=celery_app)
+    state = async_result.state
+
+    if state in {"PENDING", "RECEIVED"}:
+        # PENDING 也可能是 task_id 根本不存在 —— Celery 不区分这两种情况。
+        # 不谎称「运行中」，如实说「排队中或未知」。
+        return AsyncResultResponse(task_id=task_id, status="queued")
+    if state == "STARTED":
+        return AsyncResultResponse(task_id=task_id, status="running")
+    if state == "FAILURE":
+        return AsyncResultResponse(
+            task_id=task_id, status="error", error=str(async_result.result)
+        )
+    if state != "SUCCESS":
+        return AsyncResultResponse(task_id=task_id, status=state.lower())
+
+    payload = async_result.result or {}
+    if payload.get("status") == "error":
+        return AsyncResultResponse(
+            task_id=task_id, status="error", error=payload.get("error")
+        )
+    return AsyncResultResponse(task_id=task_id, status="done", result=payload)
