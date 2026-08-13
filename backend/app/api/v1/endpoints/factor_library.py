@@ -52,7 +52,8 @@ async def _fetch_universe(
     from datetime import date, timedelta
 
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
 
     end_date = date.fromisoformat(end) if end else date.today()
@@ -105,7 +106,9 @@ async def get_factor_library(
 ) -> dict:
     """返回配置生成的因子库目录（元数据 + 分组汇总，供前端浏览与筛选）。"""
     from app.quant.factor_lib.loader import (
-        DEFAULT_WINDOWS, generate_factor_library, library_group_meta,
+        DEFAULT_WINDOWS,
+        generate_factor_library,
+        library_group_meta,
     )
 
     grp = (group,) if group else None

@@ -2,24 +2,21 @@ import { useState } from "react"
 import { useOptimize } from "@/hooks/useBacktest"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { toRequestBase, useSharedConfig } from "./SharedConfig"
 
-// ── Tab: 参数优化 ─────────────────────────────────────────────
-export function OptimizeTab({ strategies }: { strategies: { name: string; description: string }[] }) {
+// ── Tab: 参数优化（网格搜索）─────────────────────────────────
+// symbol / 策略 / 日期 / 市场 / 频率 / 初始资金一律来自共享配置头。
+export function OptimizeTab() {
+  const { config } = useSharedConfig()
   const { mutate: runOptimize, isPending, data: result, error } = useOptimize()
 
   const [form, setForm] = useState({
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(2),
-    end_date: today(),
-    initial_cash: 100000,
     optimize_target: "sharpe_ratio",
     max_combinations: 30,
     // 参数网格（文本输入）
     param_grid_text: '{"short_window": [5, 10, 20], "long_window": [50, 100, 200]}',
+    gridError: "",
   })
 
   function handleSubmit(e: React.FormEvent) {
@@ -28,10 +25,16 @@ export function OptimizeTab({ strategies }: { strategies: { name: string; descri
     try {
       param_grid = JSON.parse(form.param_grid_text)
     } catch {
-      alert("参数网格 JSON 格式错误")
+      setForm((f) => ({ ...f, gridError: "参数网格 JSON 格式错误" }))
       return
     }
-    runOptimize({ ...form, param_grid })
+    setForm((f) => ({ ...f, gridError: "" }))
+    runOptimize({
+      ...toRequestBase(config),
+      optimize_target: form.optimize_target,
+      max_combinations: form.max_combinations,
+      param_grid,
+    })
   }
 
   return (
@@ -39,42 +42,7 @@ export function OptimizeTab({ strategies }: { strategies: { name: string; descri
       {/* 配置 */}
       <form onSubmit={handleSubmit} className="xl:col-span-1 card space-y-4">
         <h2 className="text-sm font-semibold text-[#e6edf3]">参数优化配置</h2>
-
-        <div>
-          <label className="label">策略</label>
-          <select className="select w-full mt-1" value={form.strategy_name}
-            onChange={(e) => setForm((f) => ({ ...f, strategy_name: e.target.value }))}>
-            {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">市场</label>
-            <select className="select w-full mt-1" value={form.market}
-              onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}>
-              {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">标的</label>
-            <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-              onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">开始日期</label>
-            <input className="input w-full mt-1" type="date" value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">结束日期</label>
-            <input className="input w-full mt-1" type="date" value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-          </div>
-        </div>
+        <SharedConfigNotice />
 
         <div>
           <label className="label">
@@ -109,9 +77,9 @@ export function OptimizeTab({ strategies }: { strategies: { name: string; descri
           </div>
         </div>
 
-        {error && (
+        {(error || form.gridError) && (
           <p className="text-[#f85149] text-xs bg-[#2a1b1b] border border-[#f85149]/30 rounded px-3 py-2">
-            {error.message}
+            {form.gridError || error?.message}
           </p>
         )}
 

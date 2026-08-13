@@ -7,7 +7,7 @@ Phase 1 bars API 端点测试
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,7 +19,7 @@ from app.main import app
 
 def _make_bar(symbol: str = "AAPL", market: Market = Market.US) -> Bar:
     return Bar(
-        time=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        time=datetime(2024, 1, 15, tzinfo=UTC),
         symbol=symbol,
         market=market,
         frequency=Frequency.DAY_1,
@@ -61,7 +61,7 @@ def clear_overrides():
 
 @pytest.mark.asyncio
 async def test_get_bars_returns_data() -> None:
-    svc = _override_service(_mock_service([_make_bar("AAPL")]))
+    _override_service(_mock_service([_make_bar("AAPL")]))
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/v1/bars?symbol=AAPL&market=US&frequency=1d")
@@ -120,7 +120,7 @@ async def test_get_bars_respects_limit_param() -> None:
 @pytest.mark.asyncio
 async def test_get_bars_hk_market() -> None:
     hk_bar = Bar(
-        time=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        time=datetime(2024, 1, 15, tzinfo=UTC),
         symbol="00700",
         market=Market.HK,
         frequency=Frequency.DAY_1,

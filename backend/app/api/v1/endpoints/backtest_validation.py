@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import get_db
-from app.data.models import Bar, Market, Frequency
+from app.data.models import Bar, Frequency, Market
 from app.data.service import DataService
 from app.engine.backtest.bias_detection import run_bias_check
 from app.engine.backtest.engine import BacktestConfig, BacktestEngine
@@ -30,6 +30,7 @@ from app.engine.backtest.hyperopt import (
     run_hyperopt,
 )
 from app.engine.backtest.walkforward import run_walk_forward
+from app.notify.emit import emit_hyperopt_done
 from app.strategy.presets import STRATEGY_REGISTRY
 
 router = APIRouter()
@@ -54,11 +55,11 @@ async def _validate_and_fetch(
     try:
         market = Market(market_str.upper())
     except ValueError:
-        raise HTTPException(400, f"无效市场 '{market_str}'")
+        raise HTTPException(400, f"无效市场 '{market_str}'") from None
     try:
         frequency = Frequency(frequency_str)
     except ValueError:
-        raise HTTPException(400, f"无效频率 '{frequency_str}'")
+        raise HTTPException(400, f"无效频率 '{frequency_str}'") from None
     if market == Market.A and frequency not in _A_ALLOWED_FREQS:
         raise HTTPException(400, f"A股仅支持日线(1d)和周线(1w)，不支持: {frequency_str}")
     try:
@@ -67,7 +68,7 @@ async def _validate_and_fetch(
             start=start_date, end=end_date,
         )
     except Exception as e:
-        raise HTTPException(503, f"获取行情失败: {e}")
+        raise HTTPException(503, f"获取行情失败: {e}") from e
     if len(bars) < 10:
         raise HTTPException(422, f"数据不足：仅获取到 {len(bars)} 根 K 线，验证类分析建议 ≥ 60 根。")
     return market, bars
@@ -154,7 +155,7 @@ async def hyperopt_optimize(
     try:
         space = ParamSpace.from_spec(body.param_space)
     except ValueError as e:
-        raise HTTPException(400, f"参数空间无效: {e}")
+        raise HTTPException(400, f"参数空间无效: {e}") from e
 
     def evaluate(params: dict) -> dict:
         return _backtest_metrics(strategy_cls, params, bars, market, body.initial_cash)
@@ -166,9 +167,9 @@ async def hyperopt_optimize(
             body.n_trials, body.min_trades, body.seed,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     except Exception as e:
-        raise HTTPException(500, f"优化引擎错误: {e}")
+        raise HTTPException(500, f"优化引擎错误: {e}") from e
 
     trials = [
         HyperoptTrial(
@@ -182,6 +183,15 @@ async def hyperopt_optimize(
         )
         for t in outcome.trials[:50]
     ]
+    # 长任务完成通知（旁路：失败不影响寻优结果，见 app/notify/emit.py）
+    emit_hyperopt_done(
+        strategy_name=body.strategy_name,
+        symbol=body.symbol,
+        market=body.market,
+        best_params=outcome.best_params,
+        best_loss=outcome.best_score,
+        evaluated=outcome.evaluated,
+    )
     return HyperoptResponse(
         algorithm=outcome.algorithm,
         loss_function=outcome.loss_name,
@@ -269,7 +279,7 @@ async def walk_forward_analysis(
     try:
         space = ParamSpace.from_spec(body.param_space)
     except ValueError as e:
-        raise HTTPException(400, f"参数空间无效: {e}")
+        raise HTTPException(400, f"参数空间无效: {e}") from e
 
     def optimize_fn(train_bars: list[Bar]) -> dict:
         def evaluate(params: dict) -> dict:
@@ -290,9 +300,9 @@ async def walk_forward_analysis(
             body.train_size, body.test_size, body.mode,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     except Exception as e:
-        raise HTTPException(500, f"Walk-Forward 引擎错误: {e}")
+        raise HTTPException(500, f"Walk-Forward 引擎错误: {e}") from e
 
     windows = [
         WalkForwardWindowOut(
@@ -390,7 +400,7 @@ async def bias_check(
             run_fills, bars, body.startup_candles, body.lookahead_cut_ratio,
         )
     except Exception as e:
-        raise HTTPException(500, f"偏差检测引擎错误: {e}")
+        raise HTTPException(500, f"偏差检测引擎错误: {e}") from e
 
     return BiasCheckResponse(
         has_lookahead_bias=outcome.has_lookahead_bias,

@@ -22,8 +22,15 @@ const EVENT_LABELS: Record<NotifyEventType, string> = {
   pnl_update: "盈亏更新",
   position: "持仓变动",
   daily_summary: "每日汇总",
-  risk_alert: "风控告警",
+  risk_alert: "风控告警（含价格预警）",
   protection: "防护熔断",
+  // ── v3.0 Wave A-c：长任务与数据源事件 ──
+  // 这些类型默认只走站内收件箱；勾选后才会外发到 Telegram/Webhook。
+  backtest_done: "回测完成",
+  hyperopt_done: "参数寻优完成",
+  mining_done: "因子挖掘完成",
+  data_source_degraded: "数据源降级",
+  reconcile_diff: "对账差异",
 }
 
 const ALL_EVENTS = Object.keys(EVENT_LABELS) as NotifyEventType[]

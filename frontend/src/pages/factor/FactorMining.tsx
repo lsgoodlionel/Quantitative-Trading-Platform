@@ -12,7 +12,9 @@ import {
   useFactorMine, useRecordExperiment,
   type MineResult, type MinedCandidate,
 } from "@/hooks/useFactorMining"
+import { specFromTokens } from "@/hooks/useFactorStrategy"
 import { MARKETS, FREQS, parseUniverse, fmt } from "./universeConfig"
+import { FactorStrategyDialog } from "./FactorStrategyDialog"
 
 // ── 遗传算法预设档位（简化用户心智：无需逐个调超参）────────────────
 interface GaPreset {
@@ -53,8 +55,16 @@ export function FactorMining({ market: initMarket, freq: initFreq }: FactorMinin
   const [maxDepth, setMaxDepth] = useState(4)
   const [seed, setSeed] = useState(42)
   const [recordBest, setRecordBest] = useState(true)
+  //「回测 / 注册」弹窗当前编辑的候选（null = 未打开）
+  const [strategyDraft, setStrategyDraft] = useState<MinedCandidate | null>(null)
 
   const symbolCount = parseUniverse(universe).length
+
+  // 弹窗每次打开都拿一个新对象，重置内部编辑状态
+  const strategySpec = useMemo(
+    () => specFromTokens(strategyDraft?.tokens ?? [], parseUniverse(universe)),
+    [strategyDraft, universe],
+  )
 
   function handleRun() {
     const symbols = parseUniverse(universe)
@@ -177,15 +187,31 @@ export function FactorMining({ market: initMarket, freq: initFreq }: FactorMinin
             <p className="text-xs text-[#6e7681]">种群进化中，深挖档位可能需要数十秒…</p>
           </div>
         )}
-        {result && <MiningResultView result={result} />}
+        {result && <MiningResultView result={result} onStrategy={setStrategyDraft} />}
       </div>
+
+      {/* 挖掘结果 →「一键回测 / 注册为策略」（V3 G1） */}
+      <FactorStrategyDialog
+        open={strategyDraft !== null}
+        onClose={() => setStrategyDraft(null)}
+        initialSpec={strategySpec}
+        defaultName={strategyDraft?.expr.slice(0, 60) ?? ""}
+        market={market}
+        freq={freq}
+        title="挖掘结果 → 因子策略"
+      />
     </div>
   )
 }
 
 // ── 结果视图 ──────────────────────────────────────────────────────
 
-function MiningResultView({ result }: { result: MineResult }) {
+function MiningResultView({
+  result, onStrategy,
+}: {
+  result: MineResult
+  onStrategy: (candidate: MinedCandidate) => void
+}) {
   const historyData = useMemo(
     () => result.history.map((h) => ({
       gen: h.generation + 1,
@@ -244,7 +270,7 @@ function MiningResultView({ result }: { result: MineResult }) {
       {/* 候选榜 */}
       <div className="card">
         <h3 className="text-sm font-semibold text-[#e6edf3] mb-3">候选因子公式（按适应度）</h3>
-        <CandidateTable candidates={result.candidates} market={result.market} symbols={result.symbols} forwardPeriod={result.forward_period} />
+        <CandidateTable candidates={result.candidates} market={result.market} symbols={result.symbols} forwardPeriod={result.forward_period} onStrategy={onStrategy} />
       </div>
 
       <MiningInsight result={result} />
@@ -277,12 +303,13 @@ function BestCard({ best }: { best: MinedCandidate }) {
 }
 
 function CandidateTable({
-  candidates, market, symbols, forwardPeriod,
+  candidates, market, symbols, forwardPeriod, onStrategy,
 }: {
   candidates: MinedCandidate[]
   market: string
   symbols: string[]
   forwardPeriod: number
+  onStrategy: (candidate: MinedCandidate) => void
 }) {
   const { mutate: record, isPending } = useRecordExperiment()
   const { toast } = useToast()
@@ -338,15 +365,19 @@ function CandidateTable({
               <td className="py-1.5 pr-3 text-right font-mono text-[#8b949e]">{fmt(c.rank_ic_mean)}</td>
               <td className="py-1.5 pr-3 text-right font-mono text-[#8b949e]">{fmt(c.icir, 3)}</td>
               <td className="py-1.5 pr-3 text-right font-mono text-[#6e7681]">{fmt(c.turnover, 1)}</td>
-              <td className="py-1.5 text-right">
+              <td className="py-1.5 text-right whitespace-nowrap">
                 {recordedExprs.has(c.expr) ? (
-                  <span className="text-[10px] text-[#3fb950]">✓ 已记录</span>
+                  <span className="text-[10px] text-[#3fb950] mr-1">✓ 已记录</span>
                 ) : (
                   <button onClick={() => handleRecord(c)} disabled={isPending}
-                    className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#8b949e] hover:text-[#bc8cff] hover:border-[#bc8cff]/40 transition-colors">
+                    className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#8b949e] hover:text-[#bc8cff] hover:border-[#bc8cff]/40 transition-colors mr-1">
                     记录
                   </button>
                 )}
+                <button onClick={() => onStrategy(c)}
+                  className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#58a6ff] hover:border-[#58a6ff]/40 transition-colors">
+                  回测 / 注册
+                </button>
               </td>
             </tr>
           ))}

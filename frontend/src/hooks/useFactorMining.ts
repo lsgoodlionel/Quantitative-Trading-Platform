@@ -93,6 +93,8 @@ export interface ExperimentRecord {
   metrics: ExperimentMetrics
   note: string
   created_at: number
+  /** 已被提升成的命名因子策略（V3 G1）；null = 尚未提升 */
+  promoted_strategy: string | null
 }
 
 export interface ExperimentListResult {

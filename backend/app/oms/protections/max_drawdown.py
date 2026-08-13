@@ -8,7 +8,6 @@ MaxDrawdownProtection — 窗口内权益回撤超阈值即全局熔断。
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from app.oms.protections.base import (
     IProtection,
@@ -35,12 +34,12 @@ class MaxDrawdownProtection(IProtection):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         return None
 
     def global_stop(
         self, now: datetime, trades: list[TradeRecord], starting_balance: float
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         if len(trades) < self._cfg.trade_limit:
             return None
 

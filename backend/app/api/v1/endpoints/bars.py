@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import numpy as np
 import pandas as pd
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.data.models import Bar as BarModel
 from app.data.models import Frequency, Market
 from app.data.service import DataService
+
 # Note: indicators imported lazily inside the endpoint to avoid circular imports
 # (app.strategy.__init__ → StrategyContext → backtest.engine → strategy.__init__)
 
@@ -32,7 +32,7 @@ class BarResponse(BaseModel):
     vwap: float | None = None
 
     @classmethod
-    def from_model(cls, bar: BarModel) -> "BarResponse":
+    def from_model(cls, bar: BarModel) -> BarResponse:
         return cls(
             time=bar.time.isoformat(),
             open=bar.open,
@@ -104,9 +104,9 @@ async def get_bars(
     try:
         bars = await svc.get_bars(symbol, market, frequency, start_date, end_date)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Data feed error: {e}")
+        raise HTTPException(status_code=503, detail=f"Data feed error: {e}") from e
 
     bars = bars[:limit]
     return BarsListResponse(
@@ -223,9 +223,10 @@ class SpotQuotesResponse(BaseModel):
 
 async def _fetch_a_spot() -> list[SpotQuote]:
     """AkShare 沪深A股实时行情，一次拉取全市场。"""
-    import logging
-    from app.data.symbol_dict import A_PANEL
     import asyncio
+    import logging
+
+    from app.data.symbol_dict import A_PANEL
 
     _log = logging.getLogger(__name__)
     panel_codes = {s for s, _ in A_PANEL}
@@ -267,8 +268,8 @@ async def _fetch_a_spot() -> list[SpotQuote]:
         _log.warning("_fetch_a_spot timeout: %s", exc)
         spot_map = {}
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    now = datetime.now(UTC).isoformat()
     quotes = []
     for symbol, cn in A_PANEL:
         d = spot_map.get(symbol, {})
@@ -279,16 +280,17 @@ async def _fetch_a_spot() -> list[SpotQuote]:
             name_zh=cn,
             source="realtime" if d else "demo",
             updated_at=now if d else None,
-            **{k: v for k, v in d.items()},
+            **dict(d.items()),
         ))
     return quotes
 
 
 async def _fetch_hk_spot() -> list[SpotQuote]:
     """yfinance 港股行情批量下载（日线收盘价，约15分钟延迟）。"""
-    import logging
-    from app.data.symbol_dict import HK_PANEL
     import asyncio
+    import logging
+
+    from app.data.symbol_dict import HK_PANEL
 
     _log = logging.getLogger(__name__)
 
@@ -345,8 +347,8 @@ async def _fetch_hk_spot() -> list[SpotQuote]:
         _log.warning("_fetch_hk_spot timeout: %s", exc)
         spot_map = {}
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    now = datetime.now(UTC).isoformat()
     quotes = []
     for yf_sym, (symbol, cn) in panel_map.items():
         d = spot_map.get(yf_sym, {})
@@ -364,9 +366,10 @@ async def _fetch_hk_spot() -> list[SpotQuote]:
 
 async def _fetch_us_spot() -> list[SpotQuote]:
     """Alpaca 美股实时最新成交价（IEX feed 免费账户 15 分钟延迟）。"""
-    import logging
-    from app.data.symbol_dict import US_PANEL
     import asyncio
+    import logging
+
+    from app.data.symbol_dict import US_PANEL
 
     _log = logging.getLogger(__name__)
     symbols = [s for s, _ in US_PANEL]
@@ -374,6 +377,7 @@ async def _fetch_us_spot() -> list[SpotQuote]:
     def _fetch() -> dict:
         try:
             import redis as sync_redis
+
             from app.core.config import settings as cfg
             r = sync_redis.from_url(cfg.redis_url, decode_responses=True)
             raw = r.hgetall("broker_config:alpaca")
@@ -408,8 +412,8 @@ async def _fetch_us_spot() -> list[SpotQuote]:
         _log.warning("_fetch_us_spot timeout/error: %s", exc)
         spot_map = {}
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    now = datetime.now(UTC).isoformat()
     quotes = []
     for symbol, cn in US_PANEL:
         d = spot_map.get(symbol, {})
@@ -420,7 +424,7 @@ async def _fetch_us_spot() -> list[SpotQuote]:
             name_zh=cn,
             source="realtime" if d else "demo",
             updated_at=now if d else None,
-            **{k: v for k, v in d.items()},
+            **dict(d.items()),
         ))
     return quotes
 

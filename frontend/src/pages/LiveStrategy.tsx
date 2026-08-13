@@ -953,7 +953,7 @@ export function LiveStrategy() {
     const strategy = searchParams.get("strategy")
     if (!strategy) return
     let params: Record<string, unknown> = {}
-    try { params = JSON.parse(searchParams.get("params") ?? "{}") } catch {}
+    try { params = JSON.parse(searchParams.get("params") ?? "{}") } catch { /* URL 参数畸形（用户手改/截断）：退回空参数，用策略默认值 */ }
     setRerunValues({
       strategy_name: strategy,
       symbol:   searchParams.get("symbol")   ?? "AAPL",

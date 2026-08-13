@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from app.gateway.base import TradingGateway, AccountInfo, BrokerPosition
-from app.oms.manager import OrderManager, RiskViolation
+from app.gateway.base import AccountInfo, BrokerPosition, TradingGateway
+from app.oms.manager import OrderManager, RiskViolationError
 from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 
 
@@ -135,17 +134,17 @@ class TestSubmitOrder:
 class TestRiskCheck:
     @pytest.mark.asyncio
     async def test_zero_qty_raises(self, oms: OrderManager) -> None:
-        with pytest.raises(RiskViolation, match="qty must be positive"):
+        with pytest.raises(RiskViolationError, match="qty must be positive"):
             await oms.submit_order("AAPL", "US", LiveOrderSide.BUY, 0)
 
     @pytest.mark.asyncio
     async def test_excessive_qty_raises(self, oms: OrderManager) -> None:
-        with pytest.raises(RiskViolation, match="exceeds max"):
+        with pytest.raises(RiskViolationError, match="exceeds max"):
             await oms.submit_order("AAPL", "US", LiveOrderSide.BUY, 200_000)
 
     @pytest.mark.asyncio
     async def test_limit_order_without_price_raises(self, oms: OrderManager) -> None:
-        with pytest.raises(RiskViolation, match="requires limit_price"):
+        with pytest.raises(RiskViolationError, match="requires limit_price"):
             await oms.submit_order(
                 "AAPL", "US", LiveOrderSide.BUY, 10,
                 order_type=LiveOrderType.LIMIT,
@@ -154,7 +153,7 @@ class TestRiskCheck:
 
     @pytest.mark.asyncio
     async def test_negative_limit_price_raises(self, oms: OrderManager) -> None:
-        with pytest.raises(RiskViolation, match="must be positive"):
+        with pytest.raises(RiskViolationError, match="must be positive"):
             await oms.submit_order(
                 "AAPL", "US", LiveOrderSide.BUY, 10,
                 order_type=LiveOrderType.LIMIT,

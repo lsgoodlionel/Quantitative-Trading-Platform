@@ -7,7 +7,6 @@ StoplossGuard — 在回看窗口内止损次数达到阈值即熔断。
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from app.oms.protections.base import (
     IProtection,
@@ -36,7 +35,7 @@ class StoplossGuard(IProtection):
 
     def global_stop(
         self, now: datetime, trades: list[TradeRecord], starting_balance: float
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         if self._cfg.only_per_symbol:
             return None
         count = self._count_stoplosses(trades)
@@ -59,7 +58,7 @@ class StoplossGuard(IProtection):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         count = self._count_stoplosses(trades)
         if count < self._cfg.trade_limit:
             return None

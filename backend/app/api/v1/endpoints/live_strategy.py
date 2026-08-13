@@ -124,13 +124,13 @@ async def start_live_strategy(
             sim_days=body.sim_days,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to start strategy", instance_id=instance_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start strategy: {e}",
-        )
+        ) from e
 
     logger.info("Live strategy started", instance_id=instance_id, strategy=body.strategy_name)
     return StrategyInstanceResponse(**inst.to_dict())
@@ -159,7 +159,7 @@ async def stop_live_strategy(instance_id: str) -> StrategyInstanceResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to stop strategy: {e}",
-        )
+        ) from e
 
     logger.info("Live strategy stopped", instance_id=instance_id)
     return StrategyInstanceResponse(**inst.to_dict())

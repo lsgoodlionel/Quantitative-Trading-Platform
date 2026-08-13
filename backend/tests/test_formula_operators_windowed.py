@@ -108,7 +108,8 @@ class TestWindowedOpEvaluation:
         # 相关系数落在 [-1, 1]
         vals = result.dropna().to_numpy()
         assert vals.size > 0
-        assert np.all(vals >= -1.0 - 1e-9) and np.all(vals <= 1.0 + 1e-9)
+        assert np.all(vals >= -1.0 - 1e-9)
+        assert np.all(vals <= 1.0 + 1e-9)
 
     def test_cov_windowed_op_evaluates(self) -> None:
         # Arrange

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -27,6 +27,32 @@ class NotifyEventType(str, Enum):
     DAILY_SUMMARY = "daily_summary"
     RISK_ALERT = "risk_alert"
     PROTECTION = "protection"
+    # ── V3 G5：长任务 / 运行状态事件 ──────────────────────────
+    BACKTEST_DONE = "backtest_done"
+    HYPEROPT_DONE = "hyperopt_done"
+    MINING_DONE = "mining_done"
+    DATA_SOURCE_DEGRADED = "data_source_degraded"
+    RECONCILE_DIFF = "reconcile_diff"    # G6 对账差异（G6 本身不在本期）
+
+
+# 默认「仅站内」的事件类型。
+#
+# 这些事件一律写入站内收件箱（通知中心），但**不会**进入新建渠道的默认订阅列表，
+# 因此配了 Telegram/Webhook 的用户不会被动收到手机推送 —— 必须自己勾选才开启。
+# risk_alert 同样在列：价格预警自 V3 起改走统一通知，若默认外发就是「悄悄改了行为」。
+IN_APP_ONLY_DEFAULT_EVENTS: frozenset[NotifyEventType] = frozenset({
+    NotifyEventType.RISK_ALERT,
+    NotifyEventType.BACKTEST_DONE,
+    NotifyEventType.HYPEROPT_DONE,
+    NotifyEventType.MINING_DONE,
+    NotifyEventType.DATA_SOURCE_DEGRADED,
+    NotifyEventType.RECONCILE_DIFF,
+})
+
+
+def default_channel_events() -> list[NotifyEventType]:
+    """新建 Telegram/Webhook 渠道的默认订阅事件（不含默认仅站内的类型）。"""
+    return [e for e in NotifyEventType if e not in IN_APP_ONLY_DEFAULT_EVENTS]
 
 
 class WebhookFormat(str, Enum):
@@ -49,8 +75,8 @@ class WebhookChannelConfig(BaseModel):
     timeout_seconds: int = Field(default=10, ge=1, le=60)
     retries: int = Field(default=2, ge=0, le=10)
     retry_delay_seconds: float = Field(default=1.0, ge=0, le=30)
-    secret_header: Optional[str] = None
-    secret_value: Optional[str] = None
+    secret_header: str | None = None
+    secret_value: str | None = None
 
 
 class ChannelConfig(BaseModel):
@@ -59,11 +85,11 @@ class ChannelConfig(BaseModel):
     name: str = Field(default="", max_length=60)
     enabled: bool = True
     events: list[NotifyEventType] = Field(default_factory=list)
-    telegram: Optional[TelegramChannelConfig] = None
-    webhook: Optional[WebhookChannelConfig] = None
+    telegram: TelegramChannelConfig | None = None
+    webhook: WebhookChannelConfig | None = None
 
     @model_validator(mode="after")
-    def _check_channel_body(self) -> "ChannelConfig":
+    def _check_channel_body(self) -> ChannelConfig:
         if self.type == ChannelType.TELEGRAM:
             if self.telegram is None or self.webhook is not None:
                 raise ValueError("telegram channel requires 'telegram' body only")
@@ -85,7 +111,7 @@ class NotifyConfig(BaseModel):
     def to_dict(self) -> dict:
         return self.model_dump(mode="json")
 
-    def get_channel(self, channel_id: str) -> Optional[ChannelConfig]:
+    def get_channel(self, channel_id: str) -> ChannelConfig | None:
         for ch in self.channels:
             if ch.id == channel_id:
                 return ch
@@ -96,7 +122,7 @@ class NotifyConfig(BaseModel):
 
 class TelegramChannelStatus(BaseModel):
     configured: bool
-    token_hint: Optional[str] = None
+    token_hint: str | None = None
     chat_id: str
     parse_mode: Literal["HTML", "Markdown"]
 
@@ -116,8 +142,8 @@ class ChannelStatus(BaseModel):
     name: str
     enabled: bool
     events: list[NotifyEventType]
-    telegram: Optional[TelegramChannelStatus] = None
-    webhook: Optional[WebhookChannelStatus] = None
+    telegram: TelegramChannelStatus | None = None
+    webhook: WebhookChannelStatus | None = None
 
 
 class NotifyConfigStatus(BaseModel):
@@ -137,8 +163,8 @@ class NotifyTestRequest(BaseModel):
 class NotifyTestResponse(BaseModel):
     ok: bool
     channel_id: str
-    detail: Optional[str] = None
-    error: Optional[str] = None
+    detail: str | None = None
+    error: str | None = None
 
 
 # ── 脱敏 / 转换工具 ───────────────────────────────────────────
@@ -156,8 +182,8 @@ def to_status(config: NotifyConfig) -> NotifyConfigStatus:
     """将完整配置转为脱敏状态模型。"""
     channels: list[ChannelStatus] = []
     for ch in config.channels:
-        tg_status: Optional[TelegramChannelStatus] = None
-        wh_status: Optional[WebhookChannelStatus] = None
+        tg_status: TelegramChannelStatus | None = None
+        wh_status: WebhookChannelStatus | None = None
         if ch.telegram is not None:
             tg = ch.telegram
             tg_status = TelegramChannelStatus(

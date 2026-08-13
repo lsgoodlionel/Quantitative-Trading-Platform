@@ -20,10 +20,13 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
-from typing import Literal
+from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING, Literal
 
 import redis.asyncio as aioredis
+
+if TYPE_CHECKING:
+    from app.strategy.factor_strategy import FactorStrategySpec
 
 _KEY_PREFIX = "experiments"
 _RECORD_KEY = f"{_KEY_PREFIX}:record"
@@ -61,6 +64,8 @@ class ExperimentRecord:
     metrics: ExperimentMetrics = field(default_factory=ExperimentMetrics)
     note: str = ""
     created_at: float = 0.0
+    #: 已被提升成的命名策略（G1）；None = 尚未提升
+    promoted_strategy: str | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -195,6 +200,37 @@ def _parse_record(raw: str) -> ExperimentRecord | None:
             metrics=metrics,
             note=data.get("note", ""),
             created_at=float(data.get("created_at", 0.0)),
+            promoted_strategy=data.get("promoted_strategy"),
         )
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+async def promote_to_strategy(
+    redis: aioredis.Redis,
+    experiment_id: str,
+    name: str,
+    spec: FactorStrategySpec,
+) -> str:
+    """
+    把一条实验记录提升为命名策略，回写实验记录的 `promoted_strategy` 字段。
+
+    ⚠️ 策略以**完整 spec** 独立存储（见 `app/strategy/factor_store.py`）：
+    实验记录会被 `MAX_RECORDS` 滚动淘汰，只存实验 id 的引用会让策略成为孤儿。
+    因此实验记录不存在（已被淘汰）时**不报错**，照常落库策略，只是没得可回写。
+
+    返回落库后的策略名。
+    """
+    # 延迟导入：`app.strategy` 会连带拉起引擎与 16 个 preset，
+    # 而实验记录器在纯分析路径上也会被导入，不该为此付这份代价。
+    from app.strategy.factor_store import save_factor_strategy
+
+    saved = await save_factor_strategy(
+        redis, name=name, spec=spec, source_experiment_id=experiment_id
+    )
+
+    record = await get_experiment(redis, experiment_id)
+    if record is None:
+        return saved.name
+    await save_experiment(redis, replace(record, promoted_strategy=saved.name))
+    return saved.name

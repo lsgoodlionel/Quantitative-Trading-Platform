@@ -18,7 +18,6 @@ from app.quant.factor_fitness import (
     compute_factor_fitness,
 )
 
-
 # ── 公用构造器 ─────────────────────────────────────────────────
 
 def _panel(

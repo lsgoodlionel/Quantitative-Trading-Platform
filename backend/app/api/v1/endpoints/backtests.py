@@ -6,6 +6,7 @@
 2. 参数优化 POST /backtests/optimize — 网格搜索最优参数
 3. 蒙特卡洛 POST /backtests/montecarlo — 交易随机排列验证
 4. 策略列表 GET  /backtests/strategies — (兼容旧路由)
+5. 批量回测 POST /backtests/batch — 见 backtest_batch.py（在文件末尾挂载）
 """
 
 from __future__ import annotations
@@ -17,15 +18,16 @@ from itertools import product
 from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.data.models import Market, Frequency
+from app.data.models import Frequency, Market
 from app.data.service import DataService
-from app.engine.backtest.engine import BacktestEngine, BacktestConfig
-from app.engine.backtest.report import _metrics_to_dict
+from app.engine.backtest.engine import BacktestConfig, BacktestEngine
+from app.engine.backtest.metrics import is_close_fill
+from app.notify.emit import emit_backtest_done
 from app.strategy.presets import STRATEGY_REGISTRY
 
 router = APIRouter()
@@ -181,12 +183,12 @@ async def _validate_and_fetch(
     try:
         market = Market(market_str.upper())
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid market '{market_str}'.")
+        raise HTTPException(status_code=400, detail=f"Invalid market '{market_str}'.") from None
 
     try:
         frequency = Frequency(frequency_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid frequency '{frequency_str}'.")
+        raise HTTPException(status_code=400, detail=f"Invalid frequency '{frequency_str}'.") from None
 
     # A股仅支持日线/周线
     if market == Market.A and frequency not in _A_ALLOWED_FREQS:
@@ -201,7 +203,7 @@ async def _validate_and_fetch(
             start=start_date, end=end_date,
         )
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to fetch bars: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to fetch bars: {e}") from e
 
     if len(bars) < 5:
         raise HTTPException(
@@ -234,9 +236,16 @@ async def run_backtest(
     try:
         result = engine.run(strategy, bars, strategy_id=backtest_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backtest engine error: {e}")
+        raise HTTPException(status_code=500, detail=f"Backtest engine error: {e}") from e
 
     report = result.report
+    # 长任务完成通知（旁路：失败不影响回测结果，见 app/notify/emit.py）
+    emit_backtest_done(
+        strategy_name=body.strategy_name,
+        symbol=body.symbol,
+        market=body.market,
+        metrics=report["metrics"],
+    )
     return BacktestResponse(
         backtest_id=backtest_id,
         strategy_name=body.strategy_name,
@@ -293,7 +302,7 @@ async def optimize_strategy(
     best_params: dict = {}
 
     for combo in all_combinations:
-        params = dict(zip(keys, combo))
+        params = dict(zip(keys, combo, strict=True))
         try:
             strategy = strategy_cls(params=params)
             result = engine.run(strategy, bars)
@@ -351,7 +360,7 @@ async def montecarlo_backtest(
     try:
         original = engine.run(strategy, bars)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Original backtest failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Original backtest failed: {e}") from e
 
     orig_metrics = original.report["metrics"]
     orig_fills = original.fills
@@ -360,10 +369,10 @@ async def montecarlo_backtest(
     if len(orig_fills) < 2:
         raise HTTPException(status_code=422, detail="交易次数不足，无法进行蒙特卡洛模拟（最少需要 2 笔）")
 
-    # 提取成交盈亏序列
-    sell_pnls = [f.get("realized_pnl", 0.0) for f in orig_fills if f.get("side") in ("SELL", "sell")]
-    if not sell_pnls:
-        raise HTTPException(status_code=422, detail="没有卖出成交记录，无法进行蒙特卡洛模拟")
+    # 提取平仓盈亏序列（做空后 BUY 平空同样是平仓事件，只看 SELL 会漏算）
+    close_pnls = [f.get("realized_pnl", 0.0) for f in orig_fills if is_close_fill(f)]
+    if not close_pnls:
+        raise HTTPException(status_code=422, detail="没有平仓成交记录，无法进行蒙特卡洛模拟")
 
     rng = np.random.default_rng(body.seed)
     n_sim = body.n_simulations
@@ -375,11 +384,11 @@ async def montecarlo_backtest(
     # 保存各模拟的净值序列用于包络图
     equity_matrix: list[np.ndarray] = []
 
-    n_trades = len(sell_pnls)
+    n_trades = len(close_pnls)
     initial_cash = body.initial_cash
 
     for _ in range(n_sim):
-        shuffled = rng.permutation(sell_pnls)
+        shuffled = rng.permutation(close_pnls)
         # 用等间隔插值模拟净值变化
         equity = np.full(len(orig_equity), initial_cash, dtype=float)
         step = max(1, len(orig_equity) // max(n_trades, 1))
@@ -396,7 +405,7 @@ async def montecarlo_backtest(
         # 简易 Sharpe (年化)
         daily_ret = np.diff(equity) / equity[:-1]
         std = float(np.std(daily_ret))
-        mean = float(np.mean(daily_ret))
+        float(np.mean(daily_ret))
         ann_ret = (1 + total_ret) ** (252 / max(len(equity), 1)) - 1
         sharpe = ann_ret / (std * (252 ** 0.5)) if std > 1e-10 else 0.0
         sim_sharpes.append(sharpe)

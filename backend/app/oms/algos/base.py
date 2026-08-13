@@ -10,11 +10,10 @@ executor 依据切片的累计延迟逐一将子单提交到现有 OMS.submit_or
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Optional
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
 
 
 class AlgoType(str, Enum):
@@ -48,11 +47,11 @@ class ChildSlice:
     delay_seconds: float
 
     status: SliceStatus = SliceStatus.SCHEDULED
-    child_order_id: Optional[str] = None
+    child_order_id: str | None = None
     filled_qty: int = 0
-    avg_fill_price: Optional[float] = None
-    error: Optional[str] = None
-    submitted_at: Optional[datetime] = None
+    avg_fill_price: float | None = None
+    error: str | None = None
+    submitted_at: datetime | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -79,22 +78,22 @@ class AlgoOrder:
     algo_type: AlgoType
 
     order_type: str = "MARKET"     # 子单下单类型 MARKET / LIMIT
-    limit_price: Optional[float] = None
-    strategy_id: Optional[str] = None
+    limit_price: float | None = None
+    strategy_id: str | None = None
 
     # 算法参数（不同算法用到的子集不同）
     duration_seconds: float = 300.0
     slice_count: int = 6
-    display_qty: Optional[int] = None   # 仅 Iceberg
+    display_qty: int | None = None   # 仅 Iceberg
 
     algo_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: AlgoStatus = AlgoStatus.PENDING
     slices: list[ChildSlice] = field(default_factory=list)
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # ── 派生量 ────────────────────────────────────────────────
     @property
@@ -114,7 +113,7 @@ class AlgoOrder:
         return round(min(self.filled_qty / self.total_qty, 1.0) * 100, 2)
 
     @property
-    def avg_fill_price(self) -> Optional[float]:
+    def avg_fill_price(self) -> float | None:
         filled = [(s.filled_qty, s.avg_fill_price) for s in self.slices
                   if s.filled_qty > 0 and s.avg_fill_price is not None]
         total = sum(q for q, _ in filled)
@@ -123,7 +122,7 @@ class AlgoOrder:
         return round(sum(q * p for q, p in filled) / total, 6)
 
     def touch(self) -> None:
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def to_dict(self) -> dict:
         return {

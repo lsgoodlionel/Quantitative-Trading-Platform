@@ -250,4 +250,5 @@ class TestParseViews:
         # 绝对观点行只在 AAPL 位置为 1
         assert p_mat[0, 0] == 1.0
         # 相对观点行 long=+1 short=-1
-        assert p_mat[1, 1] == 1.0 and p_mat[1, 2] == -1.0
+        assert p_mat[1, 1] == 1.0
+        assert p_mat[1, 2] == -1.0

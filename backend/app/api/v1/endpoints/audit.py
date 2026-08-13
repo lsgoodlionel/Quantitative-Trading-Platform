@@ -9,7 +9,7 @@ stream 已由 audit_log 以 maxlen 裁剪，扫描量恒定有界。
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, Query
@@ -46,8 +46,8 @@ class AuditListResponse(BaseModel):
 @router.get("", response_model=AuditListResponse)
 async def list_audit_logs(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    action: Optional[str] = Query(None, description="按动作精确过滤，如 order.submit"),
-    actor: Optional[str] = Query(None, description="按操作者模糊过滤"),
+    action: str | None = Query(None, description="按动作精确过滤，如 order.submit"),
+    actor: str | None = Query(None, description="按操作者模糊过滤"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> AuditListResponse:
@@ -78,8 +78,8 @@ async def list_audit_logs(
 def _apply_filters(
     records: list[dict[str, Any]],
     *,
-    action: Optional[str],
-    actor: Optional[str],
+    action: str | None,
+    actor: str | None,
 ) -> list[dict[str, Any]]:
     """按 action（精确）与 actor（模糊、忽略大小写）过滤。"""
     if action:

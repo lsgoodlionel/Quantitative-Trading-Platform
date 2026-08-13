@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from app.oms.algos.base import (
     AlgoOrder,
@@ -64,11 +63,11 @@ class AlgoExecutor:
         total_qty: int,
         algo_type: AlgoType,
         order_type: str = "MARKET",
-        limit_price: Optional[float] = None,
-        strategy_id: Optional[str] = None,
+        limit_price: float | None = None,
+        strategy_id: str | None = None,
         duration_seconds: float = DEFAULT_DURATION_SECONDS,
         slice_count: int = DEFAULT_SLICES,
-        display_qty: Optional[int] = None,
+        display_qty: int | None = None,
     ) -> AlgoOrder:
         """校验参数 → 构建切片计划 → 起后台任务 → 返回父单。"""
         duration_seconds, slice_count = self._validate(
@@ -113,10 +112,10 @@ class AlgoExecutor:
         total_qty: int,
         algo_type: AlgoType,
         order_type: str,
-        limit_price: Optional[float],
+        limit_price: float | None,
         duration_seconds: float,
         slice_count: int,
-        display_qty: Optional[int],
+        display_qty: int | None,
     ) -> tuple[float, int]:
         if total_qty <= 0:
             raise AlgoValidationError("total_qty 必须为正")
@@ -153,7 +152,7 @@ class AlgoExecutor:
     async def _run(self, algo: AlgoOrder) -> None:
         """逐切片按累计延迟提交子单；异常/撤销时安全收尾。"""
         algo.status = AlgoStatus.RUNNING
-        algo.started_at = datetime.now(timezone.utc)
+        algo.started_at = datetime.now(UTC)
         algo.touch()
 
         manager = self._resolve_manager(algo)
@@ -224,7 +223,7 @@ class AlgoExecutor:
                 strategy_id=algo.strategy_id or f"algo:{algo.algo_type.value}:{algo.algo_id}",
             )
             sl.child_order_id = child.order_id
-            sl.submitted_at = datetime.now(timezone.utc)
+            sl.submitted_at = datetime.now(UTC)
             sl.filled_qty = child.filled_qty
             sl.avg_fill_price = child.avg_fill_price
             status_val = child.status.value if hasattr(child.status, "value") else str(child.status)
@@ -252,7 +251,7 @@ class AlgoExecutor:
             algo.status = AlgoStatus.FAILED
         else:
             algo.status = AlgoStatus.COMPLETED
-        algo.finished_at = datetime.now(timezone.utc)
+        algo.finished_at = datetime.now(UTC)
         algo.touch()
 
     def _resolve_manager(self, algo: AlgoOrder):
@@ -268,13 +267,13 @@ class AlgoExecutor:
 
     # ── 查询 / 撤销 ───────────────────────────────────────────
 
-    def get_algo(self, algo_id: str) -> Optional[AlgoOrder]:
+    def get_algo(self, algo_id: str) -> AlgoOrder | None:
         return self._algos.get(algo_id)
 
     def list_algos(
         self,
-        strategy_id: Optional[str] = None,
-        status: Optional[str] = None,
+        strategy_id: str | None = None,
+        status: str | None = None,
         limit: int = 100,
     ) -> list[AlgoOrder]:
         items = list(self._algos.values())
@@ -297,7 +296,7 @@ class AlgoExecutor:
             task.cancel()
         # 已提交的子单不再回撤（尊重成交），仅停止后续切片
         algo.status = AlgoStatus.CANCELLED
-        algo.finished_at = datetime.now(timezone.utc)
+        algo.finished_at = datetime.now(UTC)
         algo.touch()
         logger.info("Algo cancelled: %s", algo_id)
         return algo
@@ -317,7 +316,7 @@ class AlgoExecutor:
 
 # ── 全局单例 ──────────────────────────────────────────────────
 
-_executor: Optional[AlgoExecutor] = None
+_executor: AlgoExecutor | None = None
 
 
 def get_algo_executor() -> AlgoExecutor:

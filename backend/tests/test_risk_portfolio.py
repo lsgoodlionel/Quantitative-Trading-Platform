@@ -9,7 +9,6 @@ import pytest
 from app.risk.portfolio import (
     compute_rebalance,
     optimize_portfolio,
-    PortfolioWeights,
 )
 
 
@@ -87,7 +86,7 @@ class TestInputValidation:
 
     def test_raises_for_empty_prices(self) -> None:
         prices = pd.DataFrame()
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Need at least"):
             optimize_portfolio(prices, mode="equal_weight")
 
 

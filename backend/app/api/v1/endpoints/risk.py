@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -11,15 +11,14 @@ from pydantic import BaseModel, Field
 from app.core.audit import AuditAction, audit_log
 from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
-from app.risk.engine import get_risk_engine, init_risk_engine
+from app.risk.engine import get_risk_engine
 from app.risk.models import (
     RiskConfig,
     RiskRule,
     RuleType,
     ViolationSeverity,
-    default_risk_config,
 )
-from app.risk.portfolio import OptimizeMode, optimize_portfolio, compute_rebalance
+from app.risk.portfolio import OptimizeMode, compute_rebalance, optimize_portfolio
 
 router = APIRouter()
 
@@ -112,7 +111,7 @@ async def update_risk_config(
             for r in body.rules
         ]
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid rule config: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid rule config: {e}") from e
 
     new_config = RiskConfig(name=body.name, rules=rules, is_active=body.is_active)
     engine = get_risk_engine()
@@ -214,7 +213,7 @@ async def optimize_portfolio_endpoint(body: OptimizeRequest) -> dict:
             weight_bounds=(0.0, body.max_weight),
         )
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Optimization failed: {e}")
+        raise HTTPException(status_code=422, detail=f"Optimization failed: {e}") from e
 
     return result.to_dict()
 
@@ -274,10 +273,10 @@ async def compute_var(body: VaRRequest) -> dict:
     from datetime import date, timedelta
 
     import numpy as np
-    import pandas as pd
 
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
     from app.risk.var_engine import aggregate_portfolio_returns, compute_portfolio_var
 
@@ -298,14 +297,14 @@ async def compute_var(body: VaRRequest) -> dict:
             try:
                 market_enum = MarketEnum(pos.market)
             except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid market: {pos.market}")
+                raise HTTPException(status_code=400, detail=f"Invalid market: {pos.market}") from None
 
             try:
                 bars = await svc.get_bars(
                     pos.symbol, market_enum, FreqEnum.DAY_1, start_date, end_date
                 )
             except Exception as e:
-                raise HTTPException(status_code=503, detail=f"Data feed error for {pos.symbol}: {e}")
+                raise HTTPException(status_code=503, detail=f"Data feed error for {pos.symbol}: {e}") from e
 
             if len(bars) < 20:
                 raise HTTPException(
@@ -321,7 +320,7 @@ async def compute_var(body: VaRRequest) -> dict:
     try:
         portfolio_ret = aggregate_portfolio_returns(position_returns, weights)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     # Compute VaR
     try:
@@ -330,9 +329,9 @@ async def compute_var(body: VaRRequest) -> dict:
             portfolio_value=body.portfolio_value,
         )
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"VaR computation error: {e}")
+        raise HTTPException(status_code=422, detail=f"VaR computation error: {e}") from e
 
     monetary = result.as_monetary()
     monetary["weights"] = weights

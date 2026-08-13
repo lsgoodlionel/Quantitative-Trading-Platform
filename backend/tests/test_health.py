@@ -1,6 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import AsyncMock, MagicMock
 
 from app.main import app
 

@@ -23,6 +23,9 @@ import { FactorFitness } from "./factor/FactorFitness"
 import { FactorLibrary } from "./factor/FactorLibrary"
 import { FactorMining } from "./factor/FactorMining"
 import { ExperimentLog } from "./factor/ExperimentLog"
+import { FactorStrategyLab } from "./factor/FactorStrategyLab"
+import { FactorStrategyDialog } from "./factor/FactorStrategyDialog"
+import { specFromTokens } from "@/hooks/useFactorStrategy"
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -230,7 +233,9 @@ function FactorSeriesChart({ data }: { data: { time: string; value: number }[] }
 
 // ── Main Page ──────────────────────────────────────────────────────
 
-type FactorMode = "preset" | "formula" | "library" | "processors" | "fitness" | "mining" | "experiments"
+type FactorMode =
+  | "preset" | "formula" | "library" | "processors"
+  | "fitness" | "mining" | "experiments" | "strategy"
 
 const MODE_TABS: { key: FactorMode; label: string; accent: string }[] = [
   { key: "preset",      label: "预设因子",       accent: "#bc8cff" },
@@ -240,6 +245,7 @@ const MODE_TABS: { key: FactorMode; label: string; accent: string }[] = [
   { key: "fitness",     label: "🎯 成本感知适应度", accent: "#e3b341" },
   { key: "mining",      label: "🧬 因子挖掘",     accent: "#3fb950" },
   { key: "experiments", label: "🏆 实验记录",     accent: "#e3b341" },
+  { key: "strategy",    label: "🚀 因子策略",     accent: "#58a6ff" },
 ]
 
 export function FactorAnalysis() {
@@ -256,6 +262,13 @@ export function FactorAnalysis() {
   const [factorName, setFactorName] = useState("momentum_20")
   const [tokens, setTokens] = useState<string[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState<number>(20)
+  const [strategyOpen, setStrategyOpen] = useState(false)
+
+  // 公式页签只分析单标的，做成策略至少要两只：把当前标的作为起点，用户再补齐
+  const formulaSpec = useMemo(
+    () => specFromTokens(tokens, [symbol.trim().toUpperCase()].filter(Boolean)),
+    [tokens, symbol],
+  )
 
   // 当前模式的结果 / 状态（统一为 FactorAnalysisResult 结构）
   const result: FactorAnalysisResult | undefined = mode === "preset" ? presetResult : formulaResult
@@ -327,8 +340,21 @@ export function FactorAnalysis() {
         <FactorMining market={market} freq={freq} />
       )}
       {mode === "experiments" && (
-        <ExperimentLog />
+        <ExperimentLog market={market} freq={freq} />
       )}
+      {mode === "strategy" && (
+        <FactorStrategyLab market={market} freq={freq} />
+      )}
+
+      {/* 公式因子页签的「建策略并回测」入口 */}
+      <FactorStrategyDialog
+        open={strategyOpen}
+        onClose={() => setStrategyOpen(false)}
+        initialSpec={formulaSpec}
+        market={market}
+        freq={freq}
+        title="公式因子 → 因子策略"
+      />
 
       {(mode === "preset" || mode === "formula") && (
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
@@ -448,6 +474,16 @@ export function FactorAnalysis() {
               isRunning={formulaPending}
               error={formulaError?.message ?? null}
             />
+          )}
+
+          {/* 公式 → 可交易策略：不必先注册就能看到净值（V3 G1） */}
+          {mode === "formula" && tokens.length > 0 && (
+            <button
+              className="w-full text-xs px-4 py-2 rounded border border-[#3fb950]/40 text-[#3fb950] hover:bg-[#3fb950]/10 transition-colors"
+              onClick={() => setStrategyOpen(true)}
+            >
+              ▶ 用这条公式建策略并回测
+            </button>
           )}
         </div>
 

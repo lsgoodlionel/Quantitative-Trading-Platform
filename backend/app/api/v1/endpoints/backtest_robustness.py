@@ -50,11 +50,11 @@ async def _validate_and_fetch(
     try:
         market = Market(market_str.upper())
     except ValueError:
-        raise HTTPException(400, f"无效市场 '{market_str}'")
+        raise HTTPException(400, f"无效市场 '{market_str}'") from None
     try:
         frequency = Frequency(frequency_str)
     except ValueError:
-        raise HTTPException(400, f"无效频率 '{frequency_str}'")
+        raise HTTPException(400, f"无效频率 '{frequency_str}'") from None
     if market == Market.A and frequency not in _A_ALLOWED_FREQS:
         raise HTTPException(400, f"A股仅支持日线(1d)和周线(1w)，不支持: {frequency_str}")
     try:
@@ -63,7 +63,7 @@ async def _validate_and_fetch(
             start=start_date, end=end_date,
         )
     except Exception as e:
-        raise HTTPException(503, f"获取行情失败: {e}")
+        raise HTTPException(503, f"获取行情失败: {e}") from e
     if len(bars) < _MIN_BARS:
         raise HTTPException(422, f"数据不足：仅获取到 {len(bars)} 根 K 线，稳健性分析建议 ≥ 60 根。")
     return market, bars
@@ -162,7 +162,7 @@ async def mc_robustness(
             body.strategy_name, body.params, bars, market, body.initial_cash,
         )
     except Exception as e:
-        raise HTTPException(500, f"回测执行失败: {e}")
+        raise HTTPException(500, f"回测执行失败: {e}") from e
 
     try:
         outcome = await run_in_threadpool(
@@ -170,9 +170,9 @@ async def mc_robustness(
             pnls, body.initial_cash, body.n_scenarios, body.method, body.seed,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     except Exception as e:
-        raise HTTPException(500, f"蒙特卡洛引擎错误: {e}")
+        raise HTTPException(500, f"蒙特卡洛引擎错误: {e}") from e
 
     return _mc_to_response(outcome)
 
@@ -260,7 +260,7 @@ async def significance_test(
             body.strategy_name, body.params, bars, market, body.initial_cash,
         )
     except Exception as e:
-        raise HTTPException(500, f"回测执行失败: {e}")
+        raise HTTPException(500, f"回测执行失败: {e}") from e
 
     try:
         outcome = await run_in_threadpool(
@@ -268,8 +268,8 @@ async def significance_test(
             pnls, tags, body.n_simulations, body.seed,
         )
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     except Exception as e:
-        raise HTTPException(500, f"显著性检验引擎错误: {e}")
+        raise HTTPException(500, f"显著性检验引擎错误: {e}") from e
 
     return _sig_to_response(outcome)

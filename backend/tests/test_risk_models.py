@@ -185,21 +185,21 @@ class TestFixNonPositiveSemidefinite:
         bad = pd.DataFrame(
             [[1.0, 2.0], [2.0, 1.0]], index=["A", "B"], columns=["A", "B"]
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="未知的 fix_method"):
             fix_nonpositive_semidefinite(bad, fix_method="bogus")
 
 
 class TestValidation:
     def test_single_asset_raises(self) -> None:
         prices = _make_prices(60, ["A"])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="至少需要"):
             risk_matrix(prices)
 
     def test_non_dataframe_raises(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="prices 必须是 DataFrame"):
             sample_cov([1, 2, 3])  # type: ignore[arg-type]
 
     def test_unknown_method_raises(self) -> None:
         prices = _make_prices(60, ["A", "B"])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="未知的风险模型"):
             risk_matrix(prices, method="not_a_model")

@@ -16,10 +16,10 @@ import numpy as np
 import pytest
 
 from app.engine.backtest.mc_robustness import (
+    _METRIC_DIRECTION,
     ALPHA_5_PERCENT,
     MIN_TRADES,
     McRobustnessResult,
-    _METRIC_DIRECTION,
     run_mc_robustness,
 )
 

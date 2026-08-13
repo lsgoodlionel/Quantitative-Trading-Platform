@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from app.notify.config import (
     ChannelConfig,
@@ -29,19 +29,24 @@ _EVENT_LABELS: dict[NotifyEventType, tuple[str, str]] = {
     NotifyEventType.DAILY_SUMMARY: ("📅", "每日汇总"),
     NotifyEventType.RISK_ALERT: ("⚠️", "风控告警"),
     NotifyEventType.PROTECTION: ("🛡️", "防护熔断"),
+    NotifyEventType.BACKTEST_DONE: ("🔬", "回测完成"),
+    NotifyEventType.HYPEROPT_DONE: ("🎛️", "参数寻优完成"),
+    NotifyEventType.MINING_DONE: ("⛏️", "因子挖掘完成"),
+    NotifyEventType.DATA_SOURCE_DEGRADED: ("📡", "数据源降级"),
+    NotifyEventType.RECONCILE_DIFF: ("🧾", "对账差异"),
 }
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
 class NotifyEvent:
     type: NotifyEventType
     title: str
-    symbol: Optional[str] = None
-    market: Optional[str] = None
+    symbol: str | None = None
+    market: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_utcnow)
 

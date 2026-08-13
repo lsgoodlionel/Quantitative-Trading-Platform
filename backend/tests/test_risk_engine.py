@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import patch
-
-import pytest
 
 from app.risk.engine import RiskEngine
 from app.risk.models import (
     RiskConfig,
     RiskRule,
     RuleType,
-    ViolationSeverity,
     default_risk_config,
 )
 
@@ -29,7 +25,7 @@ def _make_engine(**rule_overrides) -> RiskEngine:
         "position_concentration": (RuleType.POSITION_CONCENTRATION, 0.30),
     }
     rule_map.update(rule_overrides)
-    for name, (rule_type, value) in rule_map.items():
+    for _name, (rule_type, value) in rule_map.items():
         if value is not None:
             rules.append(RiskRule(rule_type=rule_type, value=value))
     return RiskEngine(RiskConfig(rules=rules))

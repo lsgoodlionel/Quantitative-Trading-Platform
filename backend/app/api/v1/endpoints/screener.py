@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -79,7 +79,7 @@ class CandidateOut(BaseModel):
     turnover_rate: float | None = None
 
     @classmethod
-    def from_candidate(cls, c: Candidate) -> "CandidateOut":
+    def from_candidate(cls, c: Candidate) -> CandidateOut:
         cap_yi = round(c.market_cap / 1e8, 2) if c.market_cap is not None else None
         return cls(
             symbol=c.symbol, market=c.market, name=c.name, sector=c.sector,
@@ -119,12 +119,12 @@ async def run_screener(body: ScreenerFilter) -> ScreenerRunResponse:
     try:
         snapshot = await svc.get_snapshot(body.market)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"快照采集失败: {exc}")
+        raise HTTPException(status_code=503, detail=f"快照采集失败: {exc}") from exc
 
     matched = svc.apply_filter(snapshot, body.to_criteria())
     return ScreenerRunResponse(
         market=body.market.value,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         universe_size=len(snapshot),
         count=len(matched),
         candidates=[CandidateOut.from_candidate(c) for c in matched],
@@ -152,12 +152,12 @@ async def get_movers(
     try:
         snapshot = await svc.get_snapshot(market)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"快照采集失败: {exc}")
+        raise HTTPException(status_code=503, detail=f"快照采集失败: {exc}") from exc
 
     gainers, losers = svc.get_movers(snapshot, top)
     return MoversResponse(
         market=market.value,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         gainers=[CandidateOut.from_candidate(c) for c in gainers],
         losers=[CandidateOut.from_candidate(c) for c in losers],
     )

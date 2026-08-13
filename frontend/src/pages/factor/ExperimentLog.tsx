@@ -1,11 +1,14 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
 import {
   useExperiments, useDeleteExperiment,
   type ExperimentKind, type ExperimentRecord,
 } from "@/hooks/useFactorMining"
+import { specFromTokens } from "@/hooks/useFactorStrategy"
+import type { Market, Frequency } from "@/types"
 import { fmt } from "./universeConfig"
+import { FactorStrategyDialog } from "./FactorStrategyDialog"
 
 // ── 类型标签映射 ──────────────────────────────────────────────────
 const KIND_META: Record<ExperimentKind, { label: string; color: string }> = {
@@ -39,15 +42,27 @@ function formatTime(ts: number): string {
   return d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
 }
 
-export function ExperimentLog() {
+interface ExperimentLogProps {
+  market?: Market
+  freq?: Frequency
+}
+
+export function ExperimentLog({ market = "US", freq = "1d" }: ExperimentLogProps) {
   const [kind, setKind] = useState<ExperimentKind | "all">("all")
   const [sortBy, setSortBy] = useState<"score" | "time">("score")
+  //「回测 / 注册」弹窗当前编辑的实验记录（null = 未打开）
+  const [promoting, setPromoting] = useState<ExperimentRecord | null>(null)
 
   const { data, isLoading, error } = useExperiments({
     sortBy,
     kind: kind === "all" ? undefined : kind,
     limit: 100,
   })
+
+  const promotingSpec = useMemo(
+    () => specFromTokens(promoting?.tokens ?? [], promoting?.symbols ?? []),
+    [promoting],
+  )
 
   return (
     <div className="space-y-6">
@@ -96,14 +111,36 @@ export function ExperimentLog() {
             <h3 className="text-sm font-semibold text-[#e6edf3]">实验排行榜</h3>
             <span className="text-[10px] text-[#6e7681]">共 {data.count} 条</span>
           </div>
-          <ExperimentTable records={data.records} rankByScore={sortBy === "score"} />
+          <ExperimentTable
+            records={data.records}
+            rankByScore={sortBy === "score"}
+            onPromote={setPromoting}
+          />
         </div>
       )}
+
+      {/* 实验记录 →「一键回测 / 注册为策略」（V3 G1） */}
+      <FactorStrategyDialog
+        open={promoting !== null}
+        onClose={() => setPromoting(null)}
+        initialSpec={promotingSpec}
+        defaultName={promoting?.name.slice(0, 60) ?? ""}
+        experimentId={promoting?.id}
+        market={market}
+        freq={freq}
+        title="实验记录 → 因子策略"
+      />
     </div>
   )
 }
 
-function ExperimentTable({ records, rankByScore }: { records: ExperimentRecord[]; rankByScore: boolean }) {
+interface ExperimentTableProps {
+  records: ExperimentRecord[]
+  rankByScore: boolean
+  onPromote: (record: ExperimentRecord) => void
+}
+
+function ExperimentTable({ records, rankByScore, onPromote }: ExperimentTableProps) {
   const { mutate: remove, isPending } = useDeleteExperiment()
   const { toast } = useToast()
 
@@ -156,7 +193,13 @@ function ExperimentTable({ records, rankByScore }: { records: ExperimentRecord[]
                 </td>
                 <td className="py-1.5 pr-3 text-right font-mono text-[#8b949e]">{fmt(r.metrics.icir, 3)}</td>
                 <td className="py-1.5 pr-3 text-[#6e7681] whitespace-nowrap">{formatTime(r.created_at)}</td>
-                <td className="py-1.5 text-right">
+                <td className="py-1.5 text-right whitespace-nowrap">
+                  {r.tokens.length > 0 && (
+                    <button onClick={() => onPromote(r)}
+                      className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#58a6ff] hover:border-[#58a6ff]/40 transition-colors mr-1">
+                      {r.promoted_strategy ? "★ 已注册" : "回测 / 注册"}
+                    </button>
+                  )}
                   <button onClick={() => handleDelete(r.id)} disabled={isPending}
                     className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#8b949e] hover:text-[#f85149] hover:border-[#f85149]/40 transition-colors">
                     删除

@@ -410,6 +410,12 @@ export type NotifyEventType =
   | "daily_summary"
   | "risk_alert"
   | "protection"
+  // ── v3.0 Wave A-c：长任务与数据源事件 ──
+  | "backtest_done"
+  | "hyperopt_done"
+  | "mining_done"
+  | "data_source_degraded"
+  | "reconcile_diff"
 
 export interface TelegramChannelConfig {
   bot_token: string

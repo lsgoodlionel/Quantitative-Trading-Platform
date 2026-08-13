@@ -17,15 +17,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.data.models import Market, Frequency
+from app.data.models import Frequency, Market
 from app.data.service import DataService
-from app.engine.portfolio.optimizer import OptimizeMethod, optimize_portfolio
-from app.engine.portfolio.risk_models import RiskModel
-from app.engine.portfolio.expected_returns import ReturnsModel
-from app.engine.portfolio.discrete_allocation import AllocationMethod, allocate
 from app.engine.portfolio.black_litterman import InvestorView, ViewKind
 from app.engine.portfolio.cvar_opt import DEFAULT_BETA
+from app.engine.portfolio.discrete_allocation import AllocationMethod, allocate
+from app.engine.portfolio.expected_returns import ReturnsModel
 from app.engine.portfolio.hrp import VALID_LINKAGE
+from app.engine.portfolio.optimizer import OptimizeMethod, optimize_portfolio
+from app.engine.portfolio.risk_models import RiskModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,7 +51,7 @@ class BLViewInput(BaseModel):
         return [s.strip().upper() for s in v]
 
     @model_validator(mode="after")
-    def check_arity(self) -> "BLViewInput":
+    def check_arity(self) -> BLViewInput:
         if self.kind == "absolute" and len(self.assets) != 1:
             raise ValueError("绝对观点必须且仅含 1 个标的")
         if self.kind == "relative" and len(self.assets) != 2:
@@ -102,7 +102,7 @@ class OptimizePortfolioRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def require_views_for_bl(self) -> "OptimizePortfolioRequest":
+    def require_views_for_bl(self) -> OptimizePortfolioRequest:
         if self.method == OptimizeMethod.BLACK_LITTERMAN and not self.views:
             raise ValueError("black_litterman 方法需要至少 1 条投资者观点（views）")
         return self
@@ -171,7 +171,7 @@ async def _fetch_prices(
     try:
         market = Market(market_str.upper())
     except ValueError:
-        raise HTTPException(400, detail=f"Invalid market: {market_str}")
+        raise HTTPException(400, detail=f"Invalid market: {market_str}") from None
 
     start = Date.fromisoformat(start_date)
     end = Date.fromisoformat(end_date)
@@ -200,7 +200,7 @@ async def _fetch_prices(
 
     series_dict: dict[str, pd.Series] = {}
     failed: list[str] = []
-    for sym, res in zip(symbols, results):
+    for sym, res in zip(symbols, results, strict=True):
         if isinstance(res, Exception):
             logger.warning("Could not fetch %s: %s", sym, res)
             failed.append(sym)
@@ -271,10 +271,10 @@ async def optimize(
             cvar_beta=body.cvar_beta,
         )
     except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+        raise HTTPException(400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Portfolio optimization failed")
-        raise HTTPException(500, detail=f"Optimization failed: {e}")
+        raise HTTPException(500, detail=f"Optimization failed: {e}") from e
 
     return PortfolioOptResponse(
         method=result.method,
@@ -315,10 +315,10 @@ async def allocate_portfolio(body: AllocateRequest) -> AllocateResponse:
             body.method,
         )
     except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+        raise HTTPException(400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Discrete allocation failed")
-        raise HTTPException(500, detail=f"Allocation failed: {e}")
+        raise HTTPException(500, detail=f"Allocation failed: {e}") from e
 
     return AllocateResponse(
         method=result.method,

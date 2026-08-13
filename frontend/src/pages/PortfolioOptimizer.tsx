@@ -8,6 +8,7 @@ import { api } from "@/lib/api"
 import { usePortfolioAllocate } from "@/hooks/usePortfolio"
 import { useAdvancedPortfolioOptimize } from "@/hooks/usePortfolioAdvanced"
 import { TopkDropoutPanel } from "@/pages/portfolio/TopkDropoutPanel"
+import { RebalancePanel } from "@/pages/portfolio/RebalancePanel"
 import type {
   AdvancedOptMethod, AdvancedOptResult, AdvancedRiskModel,
   AdvancedReturnsMethod, HrpLinkage, BLViewInput,
@@ -776,10 +777,13 @@ function ResultPanel({ result, market }: { result: PortfolioOptResult; market: M
       {/* 离散配置：连续权重 → 整数股数 */}
       <AllocationPanel result={result} market={market} />
 
+      {/* 再平衡执行：预览 → 确认 → 走 OMS 下单（V3 A-b） */}
+      <RebalancePanel weights={result.weights} market={market} />
+
       {/* 下一步操作 CTA */}
       <div className="card border-[#30363d] space-y-3">
         <p className="text-xs font-semibold text-[#8b949e]">📍 优化完成，建议下一步</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
           <Link to="/risk"
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#f85149]/25 text-[#f85149] bg-[#1a0f0f] hover:bg-[#f85149]/10 transition-colors">
             <span className="text-base">🛡️</span>
@@ -794,14 +798,6 @@ function ResultPanel({ result, market }: { result: PortfolioOptResult; market: M
             <div>
               <p className="font-medium">对权重最高标的回测</p>
               <p className="text-[10px] text-[#58a6ff]/70">验证最优权重的历史表现</p>
-            </div>
-          </Link>
-          <Link to="/orders"
-            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-[#3fb950]/25 text-[#3fb950] bg-[#0d2018] hover:bg-[#3fb950]/10 transition-colors">
-            <span className="text-base">📋</span>
-            <div>
-              <p className="font-medium">执行再平衡</p>
-              <p className="text-[10px] text-[#3fb950]/70">按优化权重手动调整仓位</p>
             </div>
           </Link>
         </div>
@@ -848,15 +844,35 @@ function parseSymbols(text: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * 从 URL 读取选股器带过来的标的（V3 G3：`?symbols=A,B,C&market=US`）。
+ *
+ * 「URL 即状态」：链接可分享、可收藏、刷新不丢。缺省时回落到市场默认篮子。
+ */
+function readInitialSelection(search: string): { symbolsText: string; market: Market } {
+  const params = new URLSearchParams(search)
+  const marketParam = (params.get("market") ?? "").toUpperCase()
+  const market: Market = marketParam in MARKET_DEFAULTS ? (marketParam as Market) : "US"
+  const symbols = parseSymbols(params.get("symbols") ?? "")
+  return {
+    symbolsText: symbols.length > 0
+      ? symbols.join(", ")
+      : (MARKET_DEFAULTS[market] ?? MARKET_DEFAULTS.US).join(", "),
+    market,
+  }
+}
+
 type OptimizerView = "optimize" | "topk"
 
 export function PortfolioOptimizer() {
   const [view, setView] = useState<OptimizerView>("optimize")
   const { mutate: runOpt, isPending, data: result, error } = useAdvancedPortfolioOptimize()
+  // 惰性初始化：只读一次 URL，之后表单完全由用户驱动
+  const [initialSelection] = useState(() => readInitialSelection(window.location.search))
 
   const [form, setForm] = useState<FormState>({
-    symbolsText: MARKET_DEFAULTS.US.join(", "),
-    market: "US",
+    symbolsText: initialSelection.symbolsText,
+    market: initialSelection.market,
     start_date: yearsAgo(3),
     end_date: today(),
     method: "max_sharpe",
@@ -870,7 +886,7 @@ export function PortfolioOptimizer() {
 
   const currentSymbols = parseSymbols(form.symbolsText)
   // 记录发起优化时的市场，供离散配置拉取最新价格（表单市场可能后续被改动）
-  const [submittedMarket, setSubmittedMarket] = useState<Market>("US")
+  const [submittedMarket, setSubmittedMarket] = useState<Market>(initialSelection.market)
 
   function handleMarketChange(m: string) {
     const market = m as Market

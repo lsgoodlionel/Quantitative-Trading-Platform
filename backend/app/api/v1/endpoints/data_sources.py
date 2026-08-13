@@ -16,17 +16,18 @@ import time
 from typing import Annotated, Literal
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
-from app.data.models import Frequency, Market
+from app.data.models import Frequency
 from app.data.source_registry import (
     SOURCE_CATALOG,
     DataSourceRegistry,
     MarketSourceConfig,
 )
+from app.notify.emit import emit_data_source_degraded
 
 router = APIRouter()
 
@@ -105,7 +106,7 @@ async def _probe_source(feed, market: str) -> tuple[bool, int | None, str | None
         if bar is None:
             return False, latency, "返回空数据"
         return True, latency, None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return False, int(_PROBE_TIMEOUT * 1000), "探活超时"
     except Exception as e:  # noqa: BLE001
         err = str(e)
@@ -125,7 +126,7 @@ async def _probe_market(reg: DataSourceRegistry, market: str) -> MarketSources:
     out: list[SourceStatus] = []
     active: str | None = None
     has_rt = False
-    for (sid, meta, _feed, flags), (ok, latency, err) in zip(sources, results):
+    for (sid, meta, _feed, flags), (ok, latency, err) in zip(sources, results, strict=True):
         out.append(SourceStatus(
             id=sid, name=meta.name, requires=meta.requires, realtime=meta.realtime,
             note=meta.note, enabled=flags["enabled"], pinned=flags["pinned"],
@@ -148,7 +149,20 @@ async def get_sources_status() -> StatusResponse:
     """并发探活全部市场全部数据源（真实拉取，含延迟）。"""
     reg = DataSourceRegistry.instance()
     markets = await asyncio.gather(*[_probe_market(reg, m) for m in SOURCE_CATALOG])
+    for m in markets:
+        _notify_if_degraded(m)
     return StatusResponse(markets={m.market: m for m in markets})
+
+
+def _notify_if_degraded(status: MarketSources) -> None:
+    """无可用真实源时发降级事件（旁路，失败不影响状态返回）。"""
+    if status.active_source is not None:
+        return
+    emit_data_source_degraded(
+        market=status.market,
+        failed_sources=[s.id for s in status.sources if not s.ok],
+        active_source=None,
+    )
 
 
 @router.get("/config", response_model=ConfigResponse)

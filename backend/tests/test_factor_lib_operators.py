@@ -105,7 +105,7 @@ class TestRegressionFamily:
     @pytest.mark.parametrize("fn", [rolling_slope, rolling_rsquare, rolling_resi])
     def test_regression_rejects_tiny_window(self, fn) -> None:
         # Arrange / Act / Assert：回归族窗口必须 ≥ 2
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="窗口大小必须为 ≥"):
             fn(pd.Series([1.0, 2.0, 3.0]), 1)
 
 
@@ -240,7 +240,7 @@ class TestDistributionPositionFamily:
 
     def test_quantile_rejects_out_of_range_q(self) -> None:
         # Arrange / Act / Assert
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="分位数 q 必须在 \["):
             rolling_quantile(pd.Series(np.arange(10.0)), 5, 1.5)
 
     def test_quantile_median_of_known_window(self) -> None:

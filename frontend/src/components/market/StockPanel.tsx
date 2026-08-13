@@ -100,7 +100,11 @@ export function StockPanel({
   const [searchQuery, setSearchQuery] = useState("")
   const { data: spotData, dataUpdatedAt } = useSpotQuotes()
 
-  const rawItems: MarketOverviewItem[] = overview?.[activeTab] ?? []
+  // `?? []` 每次渲染都会新建数组，会让下面的 useMemo 每次都重算 —— 用 useMemo 稳定引用
+  const rawItems: MarketOverviewItem[] = useMemo(
+    () => overview?.[activeTab] ?? [],
+    [overview, activeTab],
+  )
 
   // 面板内过滤
   const panelFiltered = useMemo(() => {

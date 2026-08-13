@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -19,12 +19,11 @@ from app.engine.backtest.walkforward import (
     run_walk_forward,
 )
 
-
 # ── 测试辅助 ─────────────────────────────────────────────────────
 
 def _make_bars(n: int, base_price: float = 100.0) -> list[Bar]:
     """生成 n 根等间隔日线 bar（价格单调，避免随机性）。"""
-    start = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 2, tzinfo=UTC)
     bars: list[Bar] = []
     for i in range(n):
         price = base_price + i
@@ -77,7 +76,8 @@ class TestSliceWindows:
         test_ranges = [(te_lo, te_hi) for _, _, te_lo, te_hi in windows]
 
         # Assert: 相邻测试段首尾相接、互不重叠
-        for (_, prev_hi), (nxt_lo, _) in zip(test_ranges, test_ranges[1:]):
+        # pairwise 滑窗：两个序列长度本就差 1，故 strict=False（其余 zip 站点一律 strict=True）
+        for (_, prev_hi), (nxt_lo, _) in zip(test_ranges, test_ranges[1:], strict=False):
             assert prev_hi == nxt_lo
 
     def test_anchored_train_start_is_pinned_to_zero(self):
@@ -89,7 +89,8 @@ class TestSliceWindows:
         train_lengths = [tr_hi - tr_lo for tr_lo, tr_hi, _, _ in windows]
         assert all(s == 0 for s in train_starts)
         assert train_lengths == sorted(train_lengths)  # 单调不减（扩张）
-        assert train_lengths[0] == 40 and train_lengths[-1] == 80
+        assert train_lengths[0] == 40
+        assert train_lengths[-1] == 80
 
     def test_insufficient_data_yields_no_windows(self):
         # Arrange: 数据刚好不足一个 train+test

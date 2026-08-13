@@ -177,7 +177,8 @@ class TestEvolveDeterminism:
         ))
 
         # Assert: 最优个体与逐代历史完全一致
-        assert first.best is not None and second.best is not None
+        assert first.best is not None
+        assert second.best is not None
         assert first.best.tokens == second.best.tokens
         assert first.best.fitness == pytest.approx(second.best.fitness, nan_ok=True)
         assert [h.best_expr for h in first.history] == [h.best_expr for h in second.history]
@@ -203,7 +204,7 @@ class TestEvolveDeterminism:
 class TestEvolveRobustness:
     def test_empty_universe_raises(self) -> None:
         # Arrange / Act / Assert
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="evolve"):
             evolve({}, pd.DataFrame(), None, FitnessConfig(), GAConfig())
 
     def test_constant_series_does_not_crash(self) -> None:

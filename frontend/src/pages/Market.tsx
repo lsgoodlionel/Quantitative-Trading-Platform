@@ -737,7 +737,7 @@ function WatchlistTab({ initialSymbol, initialMarket }: WatchlistTabProps) {
 // ── 主页面 ────────────────────────────────────────────────────
 type PageTab = "query" | "watchlist"
 
-export function Market() {
+export function MarketPage() {
   const [tab, setTab] = useState<PageTab>("query")
   // 左栏选中的标的（跨 tab 共享）
   const [panelSymbol, setPanelSymbol] = useState(MARKET_CONFIGS[0].defaultSymbol)

@@ -20,16 +20,20 @@ import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.v1.endpoints.backtests import (
+    BacktestRequest,
+    _validate_and_fetch,
+    get_service,
+)
 from app.data.models import Market
 from app.data.service import DataService
-from app.engine.backtest.engine import BacktestEngine, BacktestConfig
+from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.engine.backtest.metrics import (
-    TRADING_DAYS_US, TRADING_DAYS_HK, TRADING_DAYS_A,
+    TRADING_DAYS_A,
+    TRADING_DAYS_HK,
+    TRADING_DAYS_US,
 )
 from app.engine.backtest.report_sections import build_extended_sections
-from app.api.v1.endpoints.backtests import (
-    BacktestRequest, get_service, _validate_and_fetch,
-)
 from app.strategy.presets import STRATEGY_REGISTRY
 
 router = APIRouter()
@@ -271,7 +275,7 @@ async def backtest_report(
     try:
         result = engine.run(strategy, bars, strategy_id=backtest_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backtest engine error: {e}")
+        raise HTTPException(status_code=500, detail=f"Backtest engine error: {e}") from e
 
     equity_curve = result.equity_curve
     benchmark_returns = _benchmark_returns(bars, equity_curve.index)

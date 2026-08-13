@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -60,8 +60,8 @@ class UserInfo(BaseModel):
 def create_access_token(data: dict) -> str:
     payload = {
         **data,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes),
-        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes),
+        "iat": datetime.now(UTC),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
@@ -81,7 +81,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserInfo:
         if user_id is None:
             raise credentials_exc
     except JWTError:
-        raise credentials_exc
+        raise credentials_exc from None
 
     return UserInfo(id=user_id, email=email, role=role)
 

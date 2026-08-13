@@ -23,6 +23,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/portfolio",     icon: "💼", label: "持仓"      },
   { to: "/risk",          icon: "🛡️", label: "风控"      },
   { to: "/alerts",        icon: "🔔", label: "价格预警"  },
+  { to: "/notifications", icon: "📬", label: "通知中心"  },
   // ── 量化研究 ─────────────────────────────
   { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化"   },
   { to: "/screener",            icon: "🔍", label: "选股器"     },

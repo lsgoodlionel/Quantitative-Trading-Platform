@@ -21,7 +21,6 @@ from app.engine.portfolio.topk_dropout import (
     run_topk_dropout,
 )
 
-
 # ── 公用构造器 ─────────────────────────────────────────────────
 
 def _dates(n: int) -> list[str]:
@@ -197,19 +196,19 @@ class TestValidation:
         dates = _dates(1)
         scores = pd.DataFrame({"A": [1.0]}, index=dates)
         prices = pd.DataFrame({"A": [100.0]}, index=dates)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="再平衡期数不足"):
             run_topk_dropout(scores, prices)
 
     def test_mismatched_index_raises(self) -> None:
         scores = pd.DataFrame({"A": [1.0, 2.0]}, index=_dates(2))
         prices = pd.DataFrame({"A": [100.0, 101.0]}, index=["2021-05-01", "2021-05-02"])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="scores 与 prices 的日期索引必须一致"):
             run_topk_dropout(scores, prices)
 
     def test_invalid_config_raises(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="topk 必须 >="):
             TopkConfig(topk=0)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="risk_degree 必须在"):
             TopkConfig(risk_degree=1.5)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="method_sell 仅支持 bottom \| random"):
             TopkConfig(method_sell="middle")

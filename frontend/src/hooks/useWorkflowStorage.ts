@@ -44,7 +44,7 @@ export function loadWorkflowState(): WorkflowState | null {
 }
 
 export function clearWorkflowState(): void {
-  try { localStorage.removeItem(STATE_KEY) } catch {}
+  try { localStorage.removeItem(STATE_KEY) } catch { /* 隐私模式下 localStorage 不可用：清理失败无副作用，忽略 */ }
 }
 
 // ── 历史记录 ─────────────────────────────────────────────────
@@ -53,7 +53,7 @@ export function clearWorkflowState(): void {
 export function appendWorkflowHistory(entry: WorkflowHistoryEntry): WorkflowHistoryEntry[] {
   const list = loadWorkflowHistory()
   const updated = [entry, ...list].slice(0, MAX_HISTORY)
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(updated)) } catch {}
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(updated)) } catch { /* 配额超限或隐私模式：历史记录为非关键数据，降级为仅内存 */ }
   return updated
 }
 
@@ -67,5 +67,5 @@ export function loadWorkflowHistory(): WorkflowHistoryEntry[] {
 }
 
 export function clearWorkflowHistory(): void {
-  try { localStorage.removeItem(HISTORY_KEY) } catch {}
+  try { localStorage.removeItem(HISTORY_KEY) } catch { /* 同上：清理失败无副作用，忽略 */ }
 }

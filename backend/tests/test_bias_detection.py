@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.data.models import Bar, Frequency, Market
 from app.engine.backtest.bias_detection import (
@@ -19,12 +19,11 @@ from app.engine.backtest.bias_detection import (
     run_bias_check,
 )
 
-
 # ── 测试辅助 ─────────────────────────────────────────────────────
 
 def _make_bars(n: int, base_price: float = 100.0) -> list[Bar]:
     """单调递增价格日线（保证每根都触发上涨信号，剔除随机性）。"""
-    start = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 2, tzinfo=UTC)
     bars: list[Bar] = []
     for i in range(n):
         price = base_price + i  # 严格单调递增

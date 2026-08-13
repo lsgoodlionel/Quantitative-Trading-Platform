@@ -4,18 +4,18 @@ Phase 1 DataService 集成测试（使用 mock 数据源和内存存储）
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, date, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.data.models import Bar, Frequency, Market
-from app.data.service import DataService, _FeedRegistry
+from app.data.service import DataService
 
 
 def _make_bar(symbol: str = "AAPL", market: Market = Market.US, close: float = 180.0) -> Bar:
     return Bar(
-        time=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        time=datetime(2024, 1, 15, tzinfo=UTC),
         symbol=symbol,
         market=market,
         frequency=Frequency.DAY_1,

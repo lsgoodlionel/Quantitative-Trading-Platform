@@ -9,23 +9,20 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from app.oms.protections.base import LockScope, TradeRecord
 from app.oms.protections.config import (
     ProtectionRuleConfig,
-    ProtectionType,
     ProtectionsConfig,
+    ProtectionType,
 )
 from app.oms.protections.cooldown_period import CooldownPeriod
 from app.oms.protections.manager import ProtectionManager
 from app.oms.protections.max_drawdown import MaxDrawdownProtection
 from app.oms.protections.stoploss_guard import StoplossGuard
 
-NOW = datetime(2020, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2020, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _trade(
@@ -56,7 +53,7 @@ class _FakeTradeSource:
         self._trades = trades
 
     def get_closed_trades(
-        self, symbol: Optional[str], since: datetime
+        self, symbol: str | None, since: datetime
     ) -> list[TradeRecord]:
         out = [t for t in self._trades if t.close_date >= since]
         if symbol is not None:

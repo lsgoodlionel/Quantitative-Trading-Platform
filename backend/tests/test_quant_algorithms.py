@@ -12,10 +12,10 @@ import numpy as np
 import pytest
 
 from app.quant.bsm import price_option
-from app.quant.copula import analyze_copula
 from app.quant.cointegration import analyze_cointegration
-from app.quant.gbm import simulate_gbm
+from app.quant.copula import analyze_copula
 from app.quant.garch import fit_garch11
+from app.quant.gbm import simulate_gbm
 from app.quant.hmm_regime import fit_hmm
 from app.quant.kelly import compute_kelly
 from app.quant.pca_factor import analyze_pca
@@ -121,7 +121,7 @@ class TestBSM:
         # 近到期实值期权内在价值 ≈ 10
         assert result.intrinsic_value == pytest.approx(10.0, abs=0.01)
 
-    def test_invalid_T_raises(self):
+    def test_invalid_time_to_expiry_raises(self):
         with pytest.raises(ValueError, match="T"):
             price_option(S=100, K=100, r=0.05, sigma=0.20, T=0)
 
@@ -199,7 +199,7 @@ class TestKelly:
         assert abs(best["f"] - result.full_kelly) < 0.15
 
     def test_invalid_win_rate_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="胜率 win_rate 必须在"):
             compute_kelly(win_rate=1.5, avg_win=100, avg_loss=100)
 
 
@@ -357,7 +357,7 @@ class TestCopula:
         assert -1 <= result.spearman_rho <= 1
 
     def test_length_mismatch_raises(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="序列长度不一致"):
             analyze_copula([0.01] * 50, [0.01] * 30)
 
     def test_u_v_samples_in_unit_interval(self, correlated_returns):

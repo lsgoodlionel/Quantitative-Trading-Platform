@@ -10,7 +10,6 @@ LowProfitPairs — 锁定长期低盈利/亏损的标的。
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from app.oms.protections.base import (
     IProtection,
@@ -32,7 +31,7 @@ class LowProfitPairs(IProtection):
 
     def global_stop(
         self, now: datetime, trades: list[TradeRecord], starting_balance: float
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         return None
 
     def stop_per_symbol(
@@ -42,7 +41,7 @@ class LowProfitPairs(IProtection):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         if len(trades) < self._cfg.required_trades:
             return None
 

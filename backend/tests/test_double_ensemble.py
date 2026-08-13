@@ -21,7 +21,6 @@ from app.quant.double_ensemble import (
     train_double_ensemble,
 )
 
-
 # ── 公用构造器 ─────────────────────────────────────────────────
 
 def _make_classification(
@@ -215,7 +214,7 @@ class TestTrainDoubleEnsemble:
         df = _make_ohlcv(n=60, seed=1)
 
         # Act / Assert
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Not enough clean samples"):
             train_double_ensemble(df, forward_days=5)
 
 
@@ -223,10 +222,10 @@ class TestTrainDoubleEnsemble:
 
 class TestConfigValidation:
     def test_num_models_below_one_raises(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="num_models 必须 >="):
             DoubleEnsembleConfig(num_models=0)
 
     def test_sample_ratios_length_mismatch_raises(self) -> None:
         # sample_ratios 默认长度 5，与 bins_fs=3 不匹配
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="sample_ratios 长度"):
             DoubleEnsembleConfig(bins_fs=3)

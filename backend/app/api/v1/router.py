@@ -1,22 +1,48 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
-    auth, alerts, bars, broker_config, data_config, strategies, backtests,
-    orders, positions, quant, risk, stream, portfolio_opt,
+    alerts,
+    audit,
+    auth,
+    backtest_batch,
+    backtest_full_validation,
+    backtest_history,
+    backtest_report,
+    backtest_robustness,
+    backtest_validation,
+    backtests,
+    bars,
+    broker_config,
+    calendar,
+    data_config,
+    data_sources,
+    factor_library,
+    factor_mining,
+    factor_processors,
+    factor_strategy,
+    fundamentals,
+    futu_config,
+    live_strategy,
+    news,
+    notifications,
+    notify,
+    options,
+    order_algos,
+    orders,
+    pairlist,
+    portfolio_backtest,
+    portfolio_opt,
+    positions,
+    protections,
+    quant,
+    rebalance,
+    risk,
+    screener,
+    sequence_models,
+    strategies,
+    stream,
+    topk_portfolio,
 )
-from app.api.v1.endpoints import live_strategy
-from app.api.v1.endpoints import (
-    factor_processors, backtest_report, protections, notify,
-)
-from app.api.v1.endpoints import (
-    fundamentals, screener, factor_library, backtest_validation,
-)
-from app.api.v1.endpoints import (
-    factor_mining, topk_portfolio, backtest_robustness, order_algos,
-    pairlist, news, calendar, options, futu_config,
-)
-from app.api.v1.endpoints import sequence_models, audit
-from app.api.v1.endpoints import data_sources
 from app.core.config import settings
 
 api_router = APIRouter()
@@ -66,3 +92,15 @@ api_router.include_router(futu_config.router,         prefix="/broker-config", t
 api_router.include_router(sequence_models.router,     prefix="/quant",        tags=["Sequence Models"])
 api_router.include_router(audit.router,               prefix="/audit",        tags=["Audit"])
 api_router.include_router(data_sources.router,        prefix="/data-sources", tags=["Data Sources"])
+
+# ── v3.0 Wave A ──────────────────────────────────────────────────
+# 这五个子路由此前由各 endpoints 模块在文件末尾 `include_router` 寄生挂载
+# （因为并行开发期 router.py 是禁改的共享文件）。集成时统一提到这里正式注册，
+# 各模块尾部的寄生挂载已一并删除 —— 两处同时保留会导致路由重复注册。
+api_router.include_router(factor_strategy.router,        prefix="/factors",   tags=["Factor Strategy"])
+api_router.include_router(rebalance.router,              prefix="/portfolio", tags=["Portfolio Optimizer"])
+api_router.include_router(backtest_batch.router,         prefix="/backtests", tags=["Backtests"])
+api_router.include_router(backtest_full_validation.router, prefix="/backtests", tags=["Backtest Validation"])
+api_router.include_router(backtest_history.router,       prefix="/backtests", tags=["Backtest History"])
+api_router.include_router(portfolio_backtest.router,      prefix="/backtests", tags=["Portfolio Backtest"])
+api_router.include_router(notifications.router,          prefix="/notify",    tags=["Notifications"])

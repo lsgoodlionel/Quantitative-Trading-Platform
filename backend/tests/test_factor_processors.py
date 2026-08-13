@@ -26,7 +26,6 @@ from app.quant.processors import (
     RobustZScoreNorm,
 )
 
-
 # ── 公用构造器 ─────────────────────────────────────────────────
 
 def _panel(rows: list[tuple[str, str, float]], col: str = "f") -> pd.DataFrame:

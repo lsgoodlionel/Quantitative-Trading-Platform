@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.redis import get_redis
+from app.notify.emit import emit_mining_done
 
 router = APIRouter(tags=["Factor Mining"])
 
@@ -87,7 +88,8 @@ async def _fetch_universe(
     from datetime import date, timedelta
 
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
 
     end_date = date.fromisoformat(end) if end else date.today()
@@ -197,13 +199,23 @@ async def mine_factors(
         "forward_period": req.forward_period,
         "recorded_id": recorded_id,
     })
+    # 长任务完成通知（旁路：失败不影响挖掘结果，见 app/notify/emit.py）
+    emit_mining_done(
+        market=req.market,
+        symbols=list(bars_by_symbol.keys()),
+        generations=req.generations,
+        best_expr=result.best.expr if result.best is not None else None,
+        best_fitness=result.best.fitness if result.best is not None else None,
+    )
     return payload
 
 
 async def _record_best(redis, req: MineRequest, best, bars_by_symbol) -> str:
     """把最优个体写入实验排行榜，返回记录 id。"""
     from app.quant.experiments.recorder import (
-        ExperimentMetrics, build_record, save_experiment,
+        ExperimentMetrics,
+        build_record,
+        save_experiment,
     )
 
     metrics = ExperimentMetrics(
@@ -257,7 +269,9 @@ async def create_experiment(
 ) -> dict:
     """手动记录一次实验（如把某个因子分析结果收藏进排行榜）。"""
     from app.quant.experiments.recorder import (
-        ExperimentMetrics, build_record, save_experiment,
+        ExperimentMetrics,
+        build_record,
+        save_experiment,
     )
 
     metrics = ExperimentMetrics(**req.metrics.model_dump())

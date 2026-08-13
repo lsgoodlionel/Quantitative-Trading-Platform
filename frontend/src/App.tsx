@@ -38,7 +38,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
 
 import { Login } from "@/pages/Login"
 import { Dashboard } from "@/pages/Dashboard"
-import { Market } from "@/pages/Market"
+import { MarketPage } from "@/pages/Market"
 import { Strategies } from "@/pages/Strategies"
 import { Backtest } from "@/pages/Backtest"
 import { Orders } from "@/pages/Orders"
@@ -50,6 +50,7 @@ import { FactorAnalysis } from "@/pages/FactorAnalysis"
 import { Screener } from "@/pages/Screener"
 import { MarketEvents } from "@/pages/MarketEvents"
 import { AlertsPage } from "@/pages/Alerts"
+import { Notifications } from "@/pages/Notifications"
 import { LiveStrategy } from "@/pages/LiveStrategy"
 import { Settings } from "@/pages/Settings"
 
@@ -81,7 +82,7 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/"            element={<Protected element={<Dashboard />} />} />
-              <Route path="/market"      element={<Protected element={<Market />} />} />
+              <Route path="/market"      element={<Protected element={<MarketPage />} />} />
               <Route path="/strategies"  element={<Protected element={<Strategies />} />} />
               <Route path="/backtest"    element={<Protected element={<Backtest />} />} />
               <Route path="/orders"      element={<Protected element={<Orders />} />} />
@@ -93,6 +94,7 @@ export default function App() {
               <Route path="/screener"      element={<Protected element={<Screener />} />} />
               <Route path="/market-events" element={<Protected element={<MarketEvents />} />} />
               <Route path="/alerts"          element={<Protected element={<AlertsPage />} />} />
+              <Route path="/notifications"   element={<Protected element={<Notifications />} />} />
               <Route path="/live-strategy" element={<Protected element={<LiveStrategy />} />} />
               <Route path="/settings"      element={<Protected element={<Settings />} />} />
               <Route path="*"            element={<Navigate to="/" replace />} />

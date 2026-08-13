@@ -24,7 +24,6 @@ from app.data.pairlist import (
     metrics_to_dict,
 )
 
-
 # ── 公用构造器 ─────────────────────────────────────────────────
 
 def _sample_items() -> list[PairMetrics]:

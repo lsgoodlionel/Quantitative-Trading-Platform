@@ -12,23 +12,23 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
-from typing import Optional, Protocol
+from typing import Protocol
 
 from app.oms.protections.config import ProtectionRuleConfig, ProtectionType
 
 
 def utcnow() -> datetime:
     """返回带时区（UTC）的当前时间。"""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def ensure_utc(dt: datetime) -> datetime:
     """将 naive datetime 视作 UTC，返回带时区的副本。"""
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 class LockScope(str, Enum):
@@ -64,11 +64,11 @@ class ProtectionResult:
     until: datetime
     reason: str
     protection_type: ProtectionType
-    symbol: Optional[str] = None
-    market: Optional[str] = None
+    symbol: str | None = None
+    market: str | None = None
     side: str = SIDE_BOTH
 
-    def to_dict(self, now: Optional[datetime] = None) -> dict:
+    def to_dict(self, now: datetime | None = None) -> dict:
         ref = now or utcnow()
         return {
             "scope": self.scope.value,
@@ -90,13 +90,13 @@ class ActiveLock:
     reason: str
     protection_type: ProtectionType
     until: datetime
-    symbol: Optional[str] = None
-    market: Optional[str] = None
+    symbol: str | None = None
+    market: str | None = None
     side: str = SIDE_BOTH
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     locked_at: datetime = field(default_factory=utcnow)
 
-    def is_active(self, now: Optional[datetime] = None) -> bool:
+    def is_active(self, now: datetime | None = None) -> bool:
         return self.until > (now or utcnow())
 
     def dedup_key(self) -> tuple:
@@ -113,7 +113,7 @@ class ActiveLock:
             side=self.side,
         )
 
-    def to_dict(self, now: Optional[datetime] = None) -> dict:
+    def to_dict(self, now: datetime | None = None) -> dict:
         ref = now or utcnow()
         return {
             "id": self.id,
@@ -128,7 +128,7 @@ class ActiveLock:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ActiveLock":
+    def from_dict(cls, data: dict) -> ActiveLock:
         return cls(
             id=data["id"],
             scope=LockScope(data["scope"]),
@@ -146,7 +146,7 @@ class TradeSource(Protocol):
     """闭仓交易历史只读访问接口。OrderManager（或其适配器）实现之。"""
 
     def get_closed_trades(
-        self, symbol: Optional[str], since: datetime
+        self, symbol: str | None, since: datetime
     ) -> list[TradeRecord]: ...
 
 
@@ -179,7 +179,7 @@ class IProtection(ABC):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]: ...
+    ) -> ProtectionResult | None: ...
 
     @abstractmethod
     def stop_per_symbol(
@@ -189,4 +189,4 @@ class IProtection(ABC):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]: ...
+    ) -> ProtectionResult | None: ...
