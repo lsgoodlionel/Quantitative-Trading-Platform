@@ -19,6 +19,8 @@ from app.engine.framework.insight import Insight, InsightDirection
 from app.quant.formula_factor import evaluate_formula
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from app.strategy.context import PortfolioContext
 
 logger = logging.getLogger(__name__)
@@ -103,11 +105,15 @@ class FormulaFactorAlphaModel(AlphaModel):
             history = ctx.histories[symbol]
             if len(history) < self._min_history:
                 continue
-            values = evaluate_formula(history.tail(self._eval_window), self._tokens)
-            score = float(values.iloc[-1]) if len(values) else math.nan
+            score = self._score_one(history.tail(self._eval_window))
             if math.isfinite(score):
                 scores[symbol] = score
         return scores
+
+    def _score_one(self, history: pd.DataFrame) -> float:
+        """单标的的因子值。子类可覆写以换掉打分方式，分位→观点的逻辑完全复用。"""
+        values = evaluate_formula(history, self._tokens)
+        return float(values.iloc[-1]) if len(values) else math.nan
 
 
 def _quantile(ordered: list[float], q: float) -> float:
@@ -145,4 +151,35 @@ def _normalized_weights(
     return {s: abs(scores[s]) / total for s in selected}
 
 
-__all__ = ["FormulaFactorAlphaModel"]
+class LibraryFactorAlphaModel(FormulaFactorAlphaModel):
+    """
+    用**声明式因子库**的条目打分，其余（分位 → 观点 → 权重）与公式因子完全一致。
+
+    这条路径的存在是因为因子库与 RPN 公式引擎是两套不同的表达式语言：
+    因子库条目的 `expr`（如 `($close-$open)/$open`）是 Qlib 风格的**展示用标注**，
+    RPN 引擎的词表则是 `MOM20` / `ATR_RATIO` 这类 token，两者无法互相解析。
+
+    但**根本不需要解析** —— `FactorSpec` 携带的 `compute` 本身就是可调用对象。
+    直接调它，比先把 expr 翻译成 RPN 再求值既准确又省事。
+
+    用法::
+
+        specs = generate_factor_library()
+        LibraryFactorAlphaModel(next(s for s in specs if s.name == "KMID"))
+    """
+
+    def __init__(self, spec, **kwargs) -> None:
+        # 因子库条目自带滚动窗口；历史不足窗口长度时算不出有意义的值。
+        # 调用方没显式给 min_history 时按窗口推一个下界，避免早期用一堆 NaN 建仓。
+        kwargs.setdefault("min_history", max(getattr(spec, "window", 0) * 2, 60))
+        kwargs.setdefault("name", f"library_factor:{spec.name}")
+        # 父类要求 tokens 非空；这里走的是 compute 分支，塞一个占位值即可
+        super().__init__(["ZERO"], **kwargs)
+        self._spec = spec
+
+    def _score_one(self, history: pd.DataFrame) -> float:
+        values = self._spec.compute(history)
+        return float(values.iloc[-1]) if len(values) else math.nan
+
+
+__all__ = ["FormulaFactorAlphaModel", "LibraryFactorAlphaModel"]

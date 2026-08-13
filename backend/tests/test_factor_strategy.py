@@ -23,6 +23,7 @@ from app.engine.framework import (
     EqualWeightingPCM,
     FormulaFactorAlphaModel,
     FrameworkStrategy,
+    ImmediateExecutionModel,
     InsightDirection,
     InsightWeightingPCM,
     OptimizerPCM,
@@ -429,3 +430,67 @@ def test_rebalance_days_actually_changes_turnover() -> None:
     # Assert：低频调仓的成交数必须显著更少
     assert len(frequent.fills) > 0, "样本本身要有成交，否则这个断言没有意义"
     assert len(infrequent.fills) < len(frequent.fills)
+
+
+# ── 因子库条目直接可用（无需 expr → RPN 转译）────────────────────
+#
+# A-a 交付时把「因子库页签的回测按钮」列为未实现，理由是因子库的 expr
+# （`($close-$open)/$open` 这类 Qlib 风格标注）与 RPN 词表（MOM20/ATR_RATIO）
+# 是两套语言、没有可靠映射。
+#
+# 但 FactorSpec 携带的 `compute` 本身就是可调用对象 —— 根本不需要解析 expr。
+# LibraryFactorAlphaModel 直接调它，复用同一套「分位 → 观点 → 权重」逻辑。
+
+class TestLibraryFactorAlpha:
+    @staticmethod
+    def _spec_named(name: str):
+        from app.quant.factor_lib.loader import generate_factor_library
+
+        return next(s for s in generate_factor_library() if s.name == name)
+
+    def test_library_spec_produces_insights(self) -> None:
+        # Arrange
+        from app.engine.framework.factor_alpha import LibraryFactorAlphaModel
+
+        alpha = LibraryFactorAlphaModel(self._spec_named("KMID"), min_history=30)
+
+        # Act
+        insights = alpha.update(_context(_histories()))
+
+        # Assert：每个标的一条观点，且至少有一条非 FLAT
+        assert len(insights) == len(SYMBOLS)
+        assert any(i.direction is not InsightDirection.FLAT for i in insights)
+
+    def test_library_factor_runs_a_full_portfolio_backtest(self) -> None:
+        # Arrange：这是 A-a 说做不到的那条链路
+        from app.engine.framework.factor_alpha import LibraryFactorAlphaModel
+
+        strategy = FrameworkStrategy(
+            alpha=LibraryFactorAlphaModel(self._spec_named("KMID"), min_history=30),
+            portfolio_construction=EqualWeightingPCM(),
+            execution=ImmediateExecutionModel(),
+        )
+        config = PortfolioBacktestConfig(
+            initial_cash=1_000_000.0,
+            market=Market.US,
+            slippage_model=NoSlippage(),
+            commission_model=_ZeroCommission(),
+        )
+
+        # Act
+        result = PortfolioBacktestEngine(config).run(strategy, _universe_bars())
+
+        # Assert
+        assert result.fills, "因子库条目应当能产生真实成交"
+        assert math.isfinite(result.final_value)
+
+    def test_min_history_defaults_from_the_factor_window(self) -> None:
+        """带窗口的因子在历史不足时不该拿一堆 NaN 建仓。"""
+        from app.engine.framework.factor_alpha import LibraryFactorAlphaModel
+        from app.quant.factor_lib.loader import generate_factor_library
+
+        spec = self._spec_named("KMID")
+        windowed = next(s for s in generate_factor_library() if s.window >= 20)
+
+        assert LibraryFactorAlphaModel(spec)._min_history >= 60
+        assert LibraryFactorAlphaModel(windowed)._min_history >= windowed.window * 2
