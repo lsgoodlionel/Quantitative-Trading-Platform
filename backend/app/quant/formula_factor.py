@@ -141,10 +141,16 @@ def _op_rank(x: pd.Series) -> pd.Series:
     """滚动分位排名（经典 alpha 截面 rank 的**时序近似**，非真截面）。
 
     真正的「同一时刻跨标的排名」请用 `CS_RANK`（需 panel 模式，见
-    `evaluate_formula_panel`）。本算子保留原样是为了兼容既有公式与已保存策略。
+    `evaluate_formula_panel`）。本算子保留是为了兼容既有公式与已保存策略。
+
+    ⚠️ 这里必须是 `raw=True`。曾经写的是 `raw=False`，于是 lambda 收到的是
+    Series 而非 ndarray，而 `series[-1]` 在 pandas 3 下是**标签**查找 ——
+    对任何输入都抛 KeyError，被包成 `FormulaError: 算子 RANK 求值失败: -1`。
+    也就是说 RANK 曾经对一切输入都失败，且失败得很安静：遗传挖掘捕获
+    FormulaError 后给候选打底分、不留日志，含 RANK 的个体全被静默淘汰。
     """
     return x.rolling(60, min_periods=10).apply(
-        lambda w: (w.argsort().argsort()[-1] + 1) / len(w), raw=False
+        lambda w: (w.argsort().argsort()[-1] + 1) / len(w), raw=True
     )
 
 

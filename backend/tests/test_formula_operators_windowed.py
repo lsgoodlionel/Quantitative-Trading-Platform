@@ -160,3 +160,62 @@ class TestWindowedOpErrors:
         # Act / Assert
         with pytest.raises(FormulaError, match="不平衡"):
             evaluate_formula(df, ["MOM20", "RET1", "SLOPE10"])
+
+
+# ── RANK / ZSCORE：非窗口标注但同样带滚动窗口的两个算子 ────────────
+#
+# 回归用例：`RANK` 曾经对**任何**输入都抛 FormulaError —— `raw=False` 让 lambda
+# 收到 Series，而 `series[-1]` 在 pandas 3 下是标签查找而非位置索引。
+#
+# 它能死这么久，是因为整个测试套件里没有一条用例碰过它；而失败又是安静的：
+# 遗传挖掘捕获 FormulaError 后给候选打底分、不留日志，含 RANK 的个体
+# 全被静默淘汰，还有一个用到它的 preset 一直是坏的。
+
+class TestRollingRank:
+    @staticmethod
+    def _frame(closes: np.ndarray) -> pd.DataFrame:
+        return pd.DataFrame({
+            "open": closes, "high": closes + 1.0, "low": closes - 1.0,
+            "close": closes, "volume": np.full(len(closes), 1e6),
+        })
+
+    def test_rank_evaluates_without_error(self) -> None:
+        # Arrange / Act：这条断言本身就是回归 —— 它曾经必抛 FormulaError
+        values = evaluate_formula(self._frame(np.arange(100.0) + 100.0), ["MOM20", "RANK"])
+
+        # Assert
+        assert len(values) == 100
+        assert values.notna().any()
+
+    def test_rank_is_one_when_latest_is_the_window_maximum(self) -> None:
+        from app.quant.formula_factor import _op_rank
+
+        # Arrange：单调上行 → 末值是窗口内最大
+        ranked = _op_rank(pd.Series(np.arange(100.0)))
+
+        # Assert
+        assert float(ranked.iloc[-1]) == pytest.approx(1.0)
+
+    def test_rank_is_lowest_bucket_when_latest_is_the_window_minimum(self) -> None:
+        from app.quant.formula_factor import _op_rank
+
+        # Arrange：单调下行 → 末值是窗口内最小，分位 = 1/60
+        ranked = _op_rank(pd.Series(np.arange(100.0)[::-1].copy()))
+
+        # Assert
+        assert float(ranked.iloc[-1]) == pytest.approx(1.0 / 60.0)
+
+    def test_rank_stays_within_unit_interval(self) -> None:
+        from app.quant.formula_factor import _op_rank
+
+        rng = np.random.default_rng(7)
+        ranked = _op_rank(pd.Series(rng.normal(size=200))).dropna()
+
+        assert len(ranked) > 0
+        assert ranked.between(0.0, 1.0).all()
+
+    def test_zscore_evaluates_without_error(self) -> None:
+        values = evaluate_formula(self._frame(np.arange(100.0) + 100.0), ["MOM20", "ZSCORE"])
+
+        assert len(values) == 100
+        assert values.notna().any()
