@@ -25,6 +25,7 @@ from app.api.v1.endpoints import (
     futu_config,
     lab,
     live_strategy,
+    llm,
     news,
     notifications,
     notify,
@@ -112,3 +113,6 @@ api_router.include_router(notifications.router,          prefix="/notify",    ta
 api_router.include_router(data_archive.router, prefix="/data",     tags=["Data Archive"])
 api_router.include_router(universe.router,     prefix="/universe", tags=["Universe"])
 api_router.include_router(lab.router,          prefix="/lab",      tags=["Lab Artifacts"])
+
+# ── v3.0 Wave B-a：LLM 网关 ──────────────────────────────────────
+api_router.include_router(llm.router, prefix="/llm", tags=["LLM Gateway"])

@@ -63,7 +63,7 @@ function renderScreener() {
         <MemoryRouter initialEntries={["/screener"]}>
           <Routes>
             <Route path="/screener" element={<Screener />} />
-            <Route path="/portfolio-optimizer" element={<OptimizerProbe />} />
+            <Route path="/portfolio" element={<OptimizerProbe />} />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -142,8 +142,10 @@ describe("Screener multi-select (G3)", () => {
     fireEvent.click(screen.getByRole("button", { name: /送组合优化/ }))
 
     const url = screen.getByTestId("optimizer-url").textContent ?? ""
-    expect(url).toContain("/portfolio-optimizer?")
+    expect(url).toContain("/portfolio?")
     const params = new URLSearchParams(url.split("?")[1])
+    // V3 H1：组合优化合并进持仓页后，链接要带上 Tab 才落在优化器上
+    expect(params.get("tab")).toBe("optimizer")
     expect(params.get("symbols")).toBe("AAPL,MSFT,NVDA")
     expect(params.get("market")).toBe("US")
   })

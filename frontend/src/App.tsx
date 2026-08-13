@@ -1,9 +1,9 @@
 import { Component, type ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom"
-import { useAuthStore } from "@/stores/auth"
+import { BrowserRouter, Routes } from "react-router-dom"
 import { ToastProvider } from "@/components/ui/Toast"
+import { appRouteElements } from "@/routes"
 
 // ── Error Boundary ─────────────────────────────────────────────
 interface EBState { hasError: boolean; message: string }
@@ -36,25 +36,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, EBState> {
   }
 }
 
-import { Login } from "@/pages/Login"
-import { Dashboard } from "@/pages/Dashboard"
-import { MarketPage } from "@/pages/Market"
-import { Strategies } from "@/pages/Strategies"
-import { Backtest } from "@/pages/Backtest"
-import { Orders } from "@/pages/Orders"
-import { Portfolio } from "@/pages/Portfolio"
-import { Risk } from "@/pages/Risk"
-import { AlgoLab } from "@/pages/AlgoLab"
-import { Lab } from "@/pages/Lab"
-import { PortfolioOptimizer } from "@/pages/PortfolioOptimizer"
-import { FactorAnalysis } from "@/pages/FactorAnalysis"
-import { Screener } from "@/pages/Screener"
-import { MarketEvents } from "@/pages/MarketEvents"
-import { AlertsPage } from "@/pages/Alerts"
-import { Notifications } from "@/pages/Notifications"
-import { LiveStrategy } from "@/pages/LiveStrategy"
-import { Settings } from "@/pages/Settings"
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -64,15 +45,6 @@ const queryClient = new QueryClient({
   },
 })
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
-}
-
-function Protected({ element }: { element: React.ReactNode }) {
-  return <ProtectedRoute>{element}</ProtectedRoute>
-}
-
 export default function App() {
   return (
     <ErrorBoundary>
@@ -80,27 +52,7 @@ export default function App() {
         <ToastProvider>
           <BrowserRouter>
             <div className="min-h-screen bg-[#0d1117]">
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/"            element={<Protected element={<Dashboard />} />} />
-              <Route path="/market"      element={<Protected element={<MarketPage />} />} />
-              <Route path="/strategies"  element={<Protected element={<Strategies />} />} />
-              <Route path="/backtest"    element={<Protected element={<Backtest />} />} />
-              <Route path="/orders"      element={<Protected element={<Orders />} />} />
-              <Route path="/portfolio"   element={<Protected element={<Portfolio />} />} />
-              <Route path="/portfolio-optimizer" element={<Protected element={<PortfolioOptimizer />} />} />
-              <Route path="/risk"        element={<Protected element={<Risk />} />} />
-              <Route path="/algolab"       element={<Protected element={<AlgoLab />} />} />
-              <Route path="/lab"           element={<Protected element={<Lab />} />} />
-              <Route path="/factor"        element={<Protected element={<FactorAnalysis />} />} />
-              <Route path="/screener"      element={<Protected element={<Screener />} />} />
-              <Route path="/market-events" element={<Protected element={<MarketEvents />} />} />
-              <Route path="/alerts"          element={<Protected element={<AlertsPage />} />} />
-              <Route path="/notifications"   element={<Protected element={<Notifications />} />} />
-              <Route path="/live-strategy" element={<Protected element={<LiveStrategy />} />} />
-              <Route path="/settings"      element={<Protected element={<Settings />} />} />
-              <Route path="*"            element={<Navigate to="/" replace />} />
-            </Routes>
+              <Routes>{appRouteElements}</Routes>
             </div>
           </BrowserRouter>
         </ToastProvider>

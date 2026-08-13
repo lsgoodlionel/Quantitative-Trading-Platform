@@ -43,7 +43,7 @@ export function SelectionActions({ selected, market, onClear }: SelectionActions
       toast(`组合优化最多 ${MAX_OPTIMIZE_SYMBOLS} 个标的，已取前 ${MAX_OPTIMIZE_SYMBOLS} 个`, "warning")
     }
     const query = new URLSearchParams({ symbols: picked.join(","), market })
-    navigate(`/portfolio-optimizer?${query.toString()}`)
+    navigate(`/portfolio?tab=optimizer&${query.toString()}`)
   }
 
   const addWatchlist = () => {

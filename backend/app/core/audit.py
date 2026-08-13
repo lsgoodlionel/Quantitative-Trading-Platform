@@ -31,6 +31,10 @@ class AuditAction:
     BROKER_CONFIG_SAVE = "broker_config.save"
     BROKER_CONFIG_DELETE = "broker_config.delete"
     RISK_CONFIG_UPDATE = "risk_config.update"
+    # V3 Wave B-a：LLM 网关配置（详情只记掩码，绝不记录完整 key）
+    LLM_CONFIG_SAVE = "llm_config.save"
+    LLM_CONFIG_DELETE = "llm_config.delete"
+    LLM_ACTIVE_SWITCH = "llm_config.active_switch"
 
 
 async def audit_log(

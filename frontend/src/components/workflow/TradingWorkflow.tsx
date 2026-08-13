@@ -898,7 +898,7 @@ export function TradingWorkflow() {
               <span className="font-mono text-[10px] text-[#6e7681]">{d.paperStrategyId.slice(-12)}</span>
             </div>
             <Link
-              to="/live-strategy"
+              to="/trading?tab=live"
               className="flex items-center justify-between w-full py-2 px-3 rounded-lg bg-[#1f3d5e]/40 border border-[#58a6ff]/30 text-xs text-[#58a6ff] hover:bg-[#1f3d5e]/60 transition-colors"
             >
               <span>前往「实盘策略」查看运行状态</span>
@@ -910,9 +910,9 @@ export function TradingWorkflow() {
         {/* 快捷导航 */}
         <div className="grid grid-cols-2 gap-2 text-[10px]">
           {[
-            { to: "/live-strategy", icon: "▶", label: "实盘策略监控" },
+            { to: "/trading?tab=live", icon: "▶", label: "实盘策略监控" },
             { to: "/risk",          icon: "⚑", label: "风控中心" },
-            { to: "/orders",        icon: "≡", label: "订单记录" },
+            { to: "/trading?tab=orders",        icon: "≡", label: "订单记录" },
             { to: "/portfolio",     icon: "◈", label: "持仓分析" },
           ].map(item => (
             <Link

@@ -512,7 +512,7 @@ export function Dashboard() {
       {/* ── 交易入口卡（首屏核心导航） ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         {/* 手动下单 */}
-        <Link to="/orders"
+        <Link to="/trading?tab=orders"
           className="flex items-center gap-4 p-4 rounded-xl border border-[#3fb950]/25 bg-[#0d2018] hover:border-[#3fb950]/50 hover:bg-[#0d2018]/80 transition-all group">
           <div className="w-12 h-12 rounded-xl bg-[#3fb950]/15 flex items-center justify-center text-2xl shrink-0">
             📋
@@ -538,7 +538,7 @@ export function Dashboard() {
         </Link>
 
         {/* 量化策略 */}
-        <Link to="/live-strategy"
+        <Link to="/trading?tab=live"
           className="flex items-center gap-4 p-4 rounded-xl border border-[#58a6ff]/25 bg-[#0d1421] hover:border-[#58a6ff]/50 hover:bg-[#0d1421]/80 transition-all group">
           <div className="w-12 h-12 rounded-xl bg-[#58a6ff]/15 flex items-center justify-center text-2xl shrink-0">
             🤖

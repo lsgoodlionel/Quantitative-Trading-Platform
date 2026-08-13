@@ -63,6 +63,13 @@ _ENTRY_MODULES = [
     "app.cli.commands.strategies",
     "app.cli.commands.backtest",
     "app.cli.commands.download",
+    # V3 Wave B-a LLM 网关：registry → 两个协议适配器 → transport → base 必须单向，
+    # service 与 config_store 不得反向引用 registry 之上的任何东西
+    "app.core.llm",
+    "app.core.llm.registry",
+    "app.core.llm.service",
+    "app.core.llm.config_store",
+    "app.api.v1.endpoints.llm",
 ]
 
 

@@ -8,30 +8,26 @@ interface NavItem {
   label: string
 }
 
-// ── 导航分组（按用户工作流顺序）────────────────────────────────
-// 1.看行情 → 2.选策略 → 3.回测 → 4.模拟/实盘 → 5.监控 → 6.研究 → 7.工具
+// ── 导航（V3 · H1：16 项收敛到 9 个主页面 + 4 个独立页）────────
+// 按用户工作流顺序：看行情 → 选标的 → 做研究 → 配策略 → 验证 → 组合 → 交易
 const NAV_ITEMS: NavItem[] = [
-  // ── 核心交易流程 ──────────────────────────
-  { to: "/",              icon: "🏠", label: "仪表盘"    },
-  { to: "/market",        icon: "📈", label: "行情"      },
-  { to: "/market-events", icon: "🗓️", label: "事件期权"  },
-  { to: "/strategies",    icon: "🔧", label: "策略"      },
-  { to: "/backtest",      icon: "🔬", label: "回测"      },
-  { to: "/live-strategy", icon: "🤖",  label: "策略交易"  },
+  // ── 核心工作流 ────────────────────────────
+  { to: "/",           icon: "🏠", label: "仪表盘" },
+  { to: "/market",     icon: "📈", label: "行情"   },
+  { to: "/screener",   icon: "🔍", label: "发现"   },
+  { to: "/research",   icon: "🔭", label: "研究"   },
+  { to: "/strategies", icon: "🔧", label: "策略"   },
+  { to: "/backtest",   icon: "🔬", label: "验证"   },
+  { to: "/portfolio",  icon: "💼", label: "组合"   },
+  { to: "/trading",    icon: "🤖", label: "交易"   },
   // ── 监控 ─────────────────────────────────
-  { to: "/orders",        icon: "📋", label: "手动下单"  },
-  { to: "/portfolio",     icon: "💼", label: "持仓"      },
   { to: "/risk",          icon: "🛡️", label: "风控"      },
   { to: "/alerts",        icon: "🔔", label: "价格预警"  },
   { to: "/notifications", icon: "📬", label: "通知中心"  },
-  // ── 量化研究 ─────────────────────────────
-  { to: "/portfolio-optimizer", icon: "🎯", label: "组合优化"   },
-  { to: "/screener",            icon: "🔍", label: "选股器"     },
-  { to: "/factor",              icon: "🔭", label: "因子分析"   },
-  { to: "/algolab",             icon: "🧪", label: "算法实验室" },
-  { to: "/lab",                 icon: "📦", label: "投研产物库" },
+  { to: "/lab",           icon: "📦", label: "投研产物库" },
   // ── 系统 ─────────────────────────────────
-  { to: "/settings",      icon: "⚙️", label: "设置"      },
+  { to: "/settings",   icon: "⚙️", label: "设置"   },
+  { to: "/settings/models", icon: "🧠", label: "模型管理" },
 ]
 
 export function Sidebar() {
@@ -51,7 +47,8 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to === "/"}
+            // /settings 是 /settings/models 的前缀，不加 end 会两个一起高亮
+            end={item.to === "/" || item.to === "/settings"}
             className={({ isActive }) =>
               clsx(
                 "flex items-center gap-3 px-2 py-2 rounded-md text-sm transition-colors",

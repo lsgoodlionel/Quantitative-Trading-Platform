@@ -59,7 +59,7 @@ function HistoryRow({ e }: { e: WorkflowHistoryEntry }) {
       <div className="shrink-0 flex flex-col items-end gap-1">
         <p className="text-[#6e7681]">{relTime(e.timestamp)}</p>
         {e.instanceId ? (
-          <Link to="/live-strategy"
+          <Link to="/trading?tab=live"
                 className="text-[#3fb950] hover:underline text-[9px]">
             查看模拟盘 →
           </Link>

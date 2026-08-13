@@ -40,6 +40,7 @@ class FakeRedis:
         self.strings: dict[str, str] = {}
         self.sets: dict[str, set[str]] = {}
         self.zsets: dict[str, dict[str, float]] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
 
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
@@ -57,12 +58,46 @@ class FakeRedis:
         return [self.strings.get(k) for k in keys]
 
     async def delete(self, key: str) -> int:
-        existed = key in self.strings
+        # 真 Redis 的 DEL 不区分类型，这里同样跨所有容器删除
+        existed = key in self.strings or key in self.hashes
         self.strings.pop(key, None)
+        self.hashes.pop(key, None)
         return int(existed)
 
     async def exists(self, key: str) -> int:
-        return int(key in self.strings)
+        return int(key in self.strings or key in self.hashes)
+
+    async def incr(self, key: str) -> int:
+        current = int(self.strings.get(key, "0"))
+        self.strings[key] = str(current + 1)
+        return current + 1
+
+    # ── 哈希 ─────────────────────────────────────────────────
+
+    async def hset(
+        self,
+        key: str,
+        field: str | None = None,
+        value: str | None = None,
+        mapping: dict[str, str] | None = None,
+    ) -> int:
+        bucket = self.hashes.setdefault(key, {})
+        incoming = dict(mapping or {})
+        if field is not None:
+            incoming[field] = value if value is not None else ""
+        added = [f for f in incoming if f not in bucket]
+        bucket.update({f: str(v) for f, v in incoming.items()})
+        return len(added)
+
+    async def hget(self, key: str, field: str) -> str | None:
+        return self.hashes.get(key, {}).get(field)
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return dict(self.hashes.get(key, {}))
+
+    async def hdel(self, key: str, *fields: str) -> int:
+        bucket = self.hashes.get(key, {})
+        return len([f for f in fields if bucket.pop(f, None) is not None])
 
     # ── 集合 ─────────────────────────────────────────────────
 
