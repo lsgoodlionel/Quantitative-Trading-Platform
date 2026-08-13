@@ -16,7 +16,10 @@ const BASE = "/api/v1/factors/strategy"
 
 /** 与后端 `FactorStrategySpec` 一一对应的纯数据描述 */
 export interface FactorStrategySpec {
+  /** RPN 表达式。与 library_factor **二选一**，两者都填后端会 400 */
   formula: string
+  /** 声明式因子库的条目名（如 KMID）。与 formula 二选一 */
+  library_factor?: string
   universe: string[]
   /** 做多分数最高的**比例**（0.2 = 前 20%） */
   long_quantile: number
@@ -134,6 +137,26 @@ export function specFromTokens(
   overrides: Partial<FactorStrategySpec> = {},
 ): FactorStrategySpec {
   return { ...DEFAULT_SPEC, formula: tokens.join(" "), universe, ...overrides }
+}
+
+/**
+ * 因子库条目 → spec。
+ *
+ * 与 `specFromTokens` 互斥：库条目走后端的 compute 直接打分，
+ * `formula` 必须留空，否则后端会因「二选一」校验返回 400。
+ */
+export function specFromLibraryFactor(
+  factorName: string,
+  universe: string[],
+  overrides: Partial<FactorStrategySpec> = {},
+): FactorStrategySpec {
+  return {
+    ...DEFAULT_SPEC,
+    formula: "",
+    library_factor: factorName,
+    universe,
+    ...overrides,
+  }
 }
 
 // ── Hooks ─────────────────────────────────────────────────────────

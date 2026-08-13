@@ -149,16 +149,30 @@ function SpecEditor({ spec, universeText, methods, onPatch, onUniverseText }: Sp
   const count = parseUniverse(universeText).length
   return (
     <div className="space-y-3">
-      <div>
-        <label className="label block mb-1">RPN 公式</label>
-        <input
-          className="input w-full font-mono text-xs"
-          value={spec.formula}
-          onChange={(e) => onPatch({ formula: e.target.value })}
-          placeholder="MOM20 ATR_RATIO DIV"
-        />
-        <p className="text-[10px] text-[#6e7681] mt-1">空格分隔的逆波兰表达式，可在「公式因子」页签构建</p>
-      </div>
+      {spec.library_factor ? (
+        // 因子库条目走 compute 直接打分，没有可编辑的表达式 —— 展示即可。
+        // 它的 expr 是 Qlib 风格的展示标注，与 RPN 不是同一种语言，不能填进上面的输入框。
+        <div>
+          <label className="label block mb-1">因子库条目</label>
+          <div className="input w-full font-mono text-xs flex items-center bg-[#0d1117] text-[#bc8cff]">
+            {spec.library_factor}
+          </div>
+          <p className="text-[10px] text-[#6e7681] mt-1">
+            来自声明式因子库，直接用其内置算子打分，无需 RPN 表达式
+          </p>
+        </div>
+      ) : (
+        <div>
+          <label className="label block mb-1">RPN 公式</label>
+          <input
+            className="input w-full font-mono text-xs"
+            value={spec.formula}
+            onChange={(e) => onPatch({ formula: e.target.value })}
+            placeholder="MOM20 ATR_RATIO DIV"
+          />
+          <p className="text-[10px] text-[#6e7681] mt-1">空格分隔的逆波兰表达式，可在「公式因子」页签构建</p>
+        </div>
+      )}
 
       <div>
         <div className="flex items-center justify-between mb-1">

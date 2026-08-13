@@ -43,7 +43,12 @@ MAX_FILLS = 500
 class SpecModel(BaseModel):
     """`FactorStrategySpec` 的 API 形态（字段与语义一一对应）。"""
 
-    formula: str = Field(min_length=1, max_length=400, description="RPN 表达式，空格分隔")
+    formula: str = Field(
+        default="", max_length=400, description="RPN 表达式，空格分隔（与 library_factor 二选一）"
+    )
+    library_factor: str = Field(
+        default="", max_length=64, description="因子库条目名，如 KMID（与 formula 二选一）"
+    )
     universe: list[str] = Field(min_length=2, max_length=60)
     long_quantile: float = Field(default=0.2, gt=0.0, le=1.0, description="做多分数最高的比例")
     short_quantile: float | None = Field(default=None, ge=0.0, lt=1.0)
@@ -227,6 +232,28 @@ async def list_portfolio_methods() -> dict:
     from app.strategy.factor_strategy import PORTFOLIO_METHODS
 
     return {"methods": list(PORTFOLIO_METHODS)}
+
+
+@router.get("/library")
+async def list_library_factors(group: str | None = None) -> dict:
+    """
+    列出声明式因子库的条目，供前端「因子库」页签直接建策略。
+
+    这些条目的 `expr` 是 Qlib 风格的展示标注（`($close-$open)/$open`），
+    与 RPN 词表不是同一种语言 —— 但它们自带 compute，可直接打分，
+    所以 `SpecModel.library_factor` 填条目名即可回测，无需任何转译。
+    """
+    from app.strategy.factor_strategy import library_factor_specs
+
+    specs = library_factor_specs().values()
+    items = [
+        s.to_meta() for s in specs if group is None or s.group == group
+    ]
+    return {
+        "count": len(items),
+        "groups": sorted({s.group for s in specs}),
+        "factors": sorted(items, key=lambda m: (m["group"], m["name"])),
+    }
 
 
 @router.delete("/strategy/{name}", status_code=status.HTTP_204_NO_CONTENT)

@@ -12,6 +12,8 @@ import {
   type FactorICRow, type LibraryMethod, type FactorLibraryAnalyzeResult,
 } from "@/hooks/useFactorLibrary"
 import { MARKETS, FREQS, parseUniverse, fmt } from "./universeConfig"
+import { FactorStrategyDialog } from "./FactorStrategyDialog"
+import { specFromLibraryFactor } from "@/hooks/useFactorStrategy"
 
 const METHODS: { key: LibraryMethod; label: string; hint: string }[] = [
   { key: "rank_ic", label: "RankIC", hint: "按秩相关排序，抗离群更稳健" },
@@ -42,6 +44,14 @@ export function FactorLibrary({ market: initMarket, freq: initFreq }: FactorLibr
   const [method, setMethod] = useState<LibraryMethod>("rank_ic")
   const [topK, setTopK] = useState(30)
   const [selectedGroups, setSelectedGroups] = useState<string[]>([])
+  //「回测 / 注册」弹窗当前选中的因子库条目名（null = 未打开）
+  const [strategyFactor, setStrategyFactor] = useState<string | null>(null)
+
+  // 弹窗每次打开都拿一个新对象，重置内部编辑状态
+  const strategySpec = useMemo(
+    () => specFromLibraryFactor(strategyFactor ?? "", parseUniverse(universe)),
+    [strategyFactor, universe],
+  )
 
   const symbolCount = parseUniverse(universe).length
 
@@ -188,15 +198,33 @@ export function FactorLibrary({ market: initMarket, freq: initFreq }: FactorLibr
           </div>
         )}
         {isPending && <div className="card flex items-center justify-center h-64"><Spinner /></div>}
-        {result && <LibraryResultView result={result} method={method} />}
+        {result && (
+          <LibraryResultView result={result} method={method} onStrategy={setStrategyFactor} />
+        )}
       </div>
+
+      {/* 因子库条目 →「一键回测 / 注册为策略」（V3 G1）。
+          库条目走后端 compute 直接打分，无需把 expr 翻译成 RPN。 */}
+      <FactorStrategyDialog
+        open={strategyFactor !== null}
+        onClose={() => setStrategyFactor(null)}
+        initialSpec={strategySpec}
+        defaultName={strategyFactor ?? ""}
+        market={market}
+        freq={freq}
+        title="因子库条目 → 因子策略"
+      />
     </div>
   )
 }
 
 // ── 结果视图 ────────────────────────────────────────────────────────
 
-function LibraryResultView({ result, method }: { result: FactorLibraryAnalyzeResult; method: LibraryMethod }) {
+function LibraryResultView({ result, method, onStrategy }: {
+  result: FactorLibraryAnalyzeResult
+  method: LibraryMethod
+  onStrategy: (factorName: string) => void
+}) {
   const primaryKey = method === "rank_ic" ? "rank_ic_mean" : "ic_mean"
 
   const chartData = useMemo(
@@ -249,7 +277,7 @@ function LibraryResultView({ result, method }: { result: FactorLibraryAnalyzeRes
       {/* 排行表 */}
       <div className="card">
         <h3 className="text-sm font-semibold text-[#e6edf3] mb-3">因子 IC 排行</h3>
-        <RankingTable rows={result.ranking} />
+        <RankingTable rows={result.ranking} onStrategy={onStrategy} />
       </div>
 
       <LibraryInsight result={result} method={method} />
@@ -257,7 +285,10 @@ function LibraryResultView({ result, method }: { result: FactorLibraryAnalyzeRes
   )
 }
 
-function RankingTable({ rows }: { rows: FactorICRow[] }) {
+function RankingTable({ rows, onStrategy }: {
+  rows: FactorICRow[]
+  onStrategy: (factorName: string) => void
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -270,7 +301,8 @@ function RankingTable({ rows }: { rows: FactorICRow[] }) {
             <th className="text-right py-2 pr-3">IC 均值</th>
             <th className="text-right py-2 pr-3">ICIR</th>
             <th className="text-right py-2 pr-3">正比率</th>
-            <th className="text-right py-2">覆盖率</th>
+            <th className="text-right py-2 pr-3">覆盖率</th>
+            <th className="text-right py-2" />
           </tr>
         </thead>
         <tbody>
@@ -288,8 +320,14 @@ function RankingTable({ rows }: { rows: FactorICRow[] }) {
               <td className="py-1.5 pr-3 text-right font-mono text-[#8b949e]">
                 {r.positive_rate == null ? "—" : `${(r.positive_rate * 100).toFixed(0)}%`}
               </td>
-              <td className="py-1.5 text-right font-mono text-[#8b949e]">
+              <td className="py-1.5 pr-3 text-right font-mono text-[#8b949e]">
                 {r.coverage == null ? "—" : `${(r.coverage * 100).toFixed(0)}%`}
+              </td>
+              <td className="py-1.5 text-right">
+                <button onClick={() => onStrategy(r.name)}
+                  className="text-[10px] px-2 py-1 rounded border border-[#30363d] text-[#58a6ff] hover:border-[#58a6ff]/40 transition-colors whitespace-nowrap">
+                  回测 / 注册
+                </button>
               </td>
             </tr>
           ))}

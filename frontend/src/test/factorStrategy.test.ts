@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
-  DEFAULT_SPEC, METHOD_LABELS, specFromTokens, validateSpec,
+  DEFAULT_SPEC, METHOD_LABELS, specFromLibraryFactor, specFromTokens, validateSpec,
   type FactorStrategySpec,
 } from "@/hooks/useFactorStrategy"
 
@@ -97,5 +97,42 @@ describe("METHOD_LABELS", () => {
     ]
 
     expect(backendMethods.every((m) => METHOD_LABELS[m])).toBe(true)
+  })
+})
+
+// ── 因子库条目 → spec ────────────────────────────────────────────
+//
+// 因子库的 expr（`($close-$open)/$open`）是 Qlib 风格的展示标注，
+// 与 RPN 词表不是同一种语言。后端靠 FactorSpec 自带的 compute 打分，
+// 因此 spec 里 formula 必须留空 —— 两个都填后端会按「二选一」返回 400。
+
+describe("specFromLibraryFactor", () => {
+  it("sets library_factor and leaves formula empty", () => {
+    const built = specFromLibraryFactor("KMID", ["AAPL", "MSFT"])
+
+    expect(built.library_factor).toBe("KMID")
+    expect(built.formula).toBe("")
+  })
+
+  it("keeps the rest of the defaults", () => {
+    const built = specFromLibraryFactor("KMID", ["AAPL", "MSFT"])
+
+    expect(built.long_quantile).toBe(DEFAULT_SPEC.long_quantile)
+    expect(built.rebalance_days).toBe(DEFAULT_SPEC.rebalance_days)
+    expect(built.universe).toEqual(["AAPL", "MSFT"])
+  })
+
+  it("honours overrides", () => {
+    const built = specFromLibraryFactor("KMID", ["AAPL", "MSFT"], { max_positions: 3 })
+
+    expect(built.max_positions).toBe(3)
+    expect(built.library_factor).toBe("KMID")
+  })
+
+  it("never carries a formula that would collide with library_factor", () => {
+    // 即便调用方手滑传了 formula，也不该让它和 library_factor 同时生效
+    const built = specFromLibraryFactor("KMID", ["AAPL", "MSFT"])
+
+    expect(built.formula && built.library_factor).toBeFalsy()
   })
 })

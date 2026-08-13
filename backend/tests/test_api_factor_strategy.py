@@ -271,3 +271,81 @@ class TestDeleteEndpoint:
         resp = await client.delete("/api/v1/factors/strategy/坏*名")
 
         assert resp.status_code == 400
+
+
+# ── 因子库条目直接建策略（无需 expr → RPN 转译）────────────────────
+
+
+class TestLibraryFactors:
+    @pytest.mark.asyncio
+    async def test_lists_factors_with_groups(self, client: AsyncClient) -> None:
+        resp = await client.get("/api/v1/factors/library")
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["count"] > 0
+        assert payload["groups"]
+        # expr 是展示用标注，前端要显示；name 才是 library_factor 该填的值
+        assert {"name", "label", "group", "expr"} <= set(payload["factors"][0])
+
+    @pytest.mark.asyncio
+    async def test_filters_by_group(self, client: AsyncClient) -> None:
+        group = (await client.get("/api/v1/factors/library")).json()["groups"][0]
+
+        resp = await client.get("/api/v1/factors/library", params={"group": group})
+
+        assert resp.status_code == 200
+        assert {f["group"] for f in resp.json()["factors"]} == {group}
+
+    @pytest.mark.asyncio
+    async def test_library_factor_backtest_runs(self, client: AsyncClient) -> None:
+        spec = {k: v for k, v in BASE_SPEC.items() if k != "formula"}
+        resp = await client.post(
+            "/api/v1/factors/strategy/backtest",
+            json={"spec": spec | {"library_factor": "KMID"}, "market": "US"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["spec"]["library_factor"] == "KMID"
+        assert body["equity_curve"]
+
+    @pytest.mark.asyncio
+    async def test_both_formula_and_library_factor_is_400(
+        self, client: AsyncClient
+    ) -> None:
+        resp = await client.post(
+            "/api/v1/factors/strategy/backtest",
+            json={"spec": BASE_SPEC | {"library_factor": "KMID"}, "market": "US"},
+        )
+
+        assert resp.status_code == 400
+        assert "二选一" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_neither_formula_nor_library_factor_is_400(
+        self, client: AsyncClient
+    ) -> None:
+        spec = {k: v for k, v in BASE_SPEC.items() if k != "formula"}
+        resp = await client.post(
+            "/api/v1/factors/strategy/backtest", json={"spec": spec, "market": "US"}
+        )
+
+        assert resp.status_code == 400
+        assert "二选一" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_library_factor_suggests_similar_names(
+        self, client: AsyncClient
+    ) -> None:
+        spec = {k: v for k, v in BASE_SPEC.items() if k != "formula"}
+        resp = await client.post(
+            "/api/v1/factors/strategy/backtest",
+            json={"spec": spec | {"library_factor": "KMIDX"}, "market": "US"},
+        )
+
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "未知因子库条目" in detail
+        # 因子库有数百条，全列出来没帮助；给同前缀的候选才有用
+        assert "KMID" in detail

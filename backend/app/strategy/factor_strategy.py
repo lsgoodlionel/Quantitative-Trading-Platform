@@ -23,7 +23,10 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime, timedelta
 
 from app.engine.framework.alpha import AlphaModel
-from app.engine.framework.factor_alpha import FormulaFactorAlphaModel
+from app.engine.framework.factor_alpha import (
+    FormulaFactorAlphaModel,
+    LibraryFactorAlphaModel,
+)
 from app.engine.framework.insight import Insight
 from app.engine.framework.optimizer_pcm import OptimizerPCM
 from app.engine.framework.portfolio_construction import (
@@ -37,6 +40,9 @@ from app.quant.formula_factor import FEATURE_META, OP_META
 
 #: 因子求值与组合优化共同的历史长度门槛（`OptimizerPCM.MIN_HISTORY` 亦为 60）
 MIN_HISTORY = 60
+
+#: 因子库条目缓存（生成有开销，且进程内不变）
+_LIBRARY_CACHE: dict | None = None
 #: 截面因子至少要有两个标的才谈得上分位
 MIN_UNIVERSE = 2
 
@@ -68,8 +74,13 @@ _OP_ARITY = {meta["name"]: int(meta["arity"]) for meta in OP_META}
 class FactorStrategySpec:
     """一条「因子 → 策略」的完整描述，可序列化、可持久化、可重放。"""
 
-    #: RPN 表达式，空格分隔，如 "MOM20 ATR_RATIO DIV"
-    formula: str
+    #: RPN 表达式，空格分隔，如 "MOM20 ATR_RATIO DIV"。
+    #: 用因子库条目时留空，改填 `library_factor`（两者互斥）。
+    formula: str = ""
+    #: 声明式因子库的条目名（如 "KMID" / "MA20"）。与 `formula` 互斥。
+    #: 因子库的 expr 是 Qlib 风格的展示标注，与 RPN 词表不是同一种语言，
+    #: 但 FactorSpec 自带 compute 可调用对象，无需翻译即可直接打分。
+    library_factor: str = ""
     #: 标的池（构造时统一大写并去重，顺序保持首次出现）
     universe: tuple[str, ...] = field(default=())
     #: 做多分数最高的这一**比例**（0.2 = 前 20%）
@@ -95,6 +106,7 @@ class FactorStrategySpec:
     def to_dict(self) -> dict:
         return {
             "formula": self.formula,
+            "library_factor": self.library_factor,
             "universe": list(self.universe),
             "long_quantile": self.long_quantile,
             "short_quantile": self.short_quantile,
@@ -128,7 +140,15 @@ def _normalized_universe(universe) -> tuple[str, ...]:
 
 def _validate(spec: FactorStrategySpec) -> None:
     """spec 是系统边界（API / Redis / 前端）上的数据，必须快速失败。"""
-    _validate_formula(spec.formula)
+    if bool(spec.formula) == bool(spec.library_factor):
+        raise ValueError(
+            "formula 与 library_factor 必须二选一：两者都给会产生歧义，"
+            "都不给则没有因子可算"
+        )
+    if spec.formula:
+        _validate_formula(spec.formula)
+    else:
+        _validate_library_factor(spec.library_factor)
 
     if len(spec.universe) < MIN_UNIVERSE:
         raise ValueError(f"标的池至少需要 {MIN_UNIVERSE} 个标的，收到 {len(spec.universe)} 个")
@@ -145,6 +165,28 @@ def _validate(spec: FactorStrategySpec) -> None:
         )
     if spec.max_positions is not None and spec.max_positions < 1:
         raise ValueError(f"max_positions 至少为 1，收到 {spec.max_positions}")
+
+
+def library_factor_specs() -> dict:
+    """因子库条目名 → FactorSpec。首次调用时生成并缓存（生成有一定开销）。"""
+    global _LIBRARY_CACHE
+    if _LIBRARY_CACHE is None:
+        from app.quant.factor_lib.loader import generate_factor_library
+
+        _LIBRARY_CACHE = {spec.name: spec for spec in generate_factor_library()}
+    return _LIBRARY_CACHE
+
+
+def _validate_library_factor(name: str) -> None:
+    specs = library_factor_specs()
+    if name not in specs:
+        # 因子库有数百个条目，全列出来对用户没帮助，给几个同前缀的更有用
+        prefix = name[:2].upper()
+        hint = sorted(n for n in specs if n.startswith(prefix))[:8]
+        raise ValueError(
+            f"未知因子库条目: {name}"
+            + (f"（是否想找：{', '.join(hint)}）" if hint else "")
+        )
 
 
 def _validate_short_band(long_quantile: float, short_quantile: float) -> None:
@@ -187,14 +229,21 @@ def _validate_formula(formula: str) -> None:
 def build_factor_strategy(spec: FactorStrategySpec) -> FrameworkStrategy:
     """把 spec 装配成可直接喂给 `PortfolioBacktestEngine` 的策略。"""
     period = timedelta(days=spec.rebalance_days)
-    factor = FormulaFactorAlphaModel(
-        tokens=spec.tokens,
-        period=period,
-        # 比例 → 分位切点：取前 20% ⇒ 分数 ≥ 第 80 百分位
-        long_quantile=1.0 - spec.long_quantile,
-        short_quantile=spec.short_quantile,
-        min_history=MIN_HISTORY,
-    )
+    # 比例 → 分位切点：取前 20% ⇒ 分数 ≥ 第 80 百分位
+    common = {
+        "period": period,
+        "long_quantile": 1.0 - spec.long_quantile,
+        "short_quantile": spec.short_quantile,
+    }
+    if spec.formula:
+        factor = FormulaFactorAlphaModel(
+            tokens=spec.tokens, min_history=MIN_HISTORY, **common
+        )
+    else:
+        # min_history 交给 LibraryFactorAlphaModel 按因子自带窗口推
+        factor = LibraryFactorAlphaModel(
+            library_factor_specs()[spec.library_factor], **common
+        )
     return FrameworkStrategy(
         alpha=_RebalanceThrottledAlpha(factor, period),
         portfolio_construction=_build_pcm(spec, period),
