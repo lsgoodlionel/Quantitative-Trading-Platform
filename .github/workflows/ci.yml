@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新推送取消旧的运行，省 runner 时间
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff · pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check app tests
+
+      # 测试不依赖 Redis/Postgres（外部依赖在测试中均被 mock），因此无需 services。
+      # 覆盖率门禁见 pyproject.toml [tool.pytest.ini_options].addopts —
+      # 当前是防倒退的 ratchet 值，不是最终目标，详见该处注释。
+      - name: Test (pytest + coverage ratchet)
+        run: pytest -q
+
+      # strict mypy 在现有代码上会产生大量告警，作为「只看不拦」的信息项运行，
+      # 待 DEVPLAN_V4 Epic O 逐步收敛后再转为门禁。
+      - name: Type check (mypy, non-blocking)
+        continue-on-error: true
+        run: mypy app
+
+  frontend:
+    name: Frontend (eslint · tsc · vitest · build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (eslint, --max-warnings 0)
+        run: npm run lint
+
+      - name: Type check (tsc --noEmit)
+        run: npm run type-check
+
+      - name: Test (vitest)
+        run: npm run test
+
+      - name: Build
+        run: npm run build

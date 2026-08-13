@@ -11,9 +11,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from app.oms.order import LiveOrder, LiveFill, LiveOrderSide, LiveOrderType
+if TYPE_CHECKING:
+    # 运行期不要 import：`app.oms.order` 会触发 `app.oms.__init__` → `app.oms.manager`，
+    # 后者又 import 本模块，形成环。全量测试此前只是靠字母序碰巧先加载 `app.oms` 才没炸，
+    # 单独跑 `pytest tests/test_oms_manager.py` 就是 ImportError。
+    # `LiveOrder` 在本模块仅用于类型标注（`from __future__ import annotations` 已生效）。
+    from app.oms.order import LiveOrder
 
 
 @dataclass
@@ -32,9 +37,9 @@ class BrokerPosition:
     market: str
     qty: int
     avg_cost: float
-    current_price: Optional[float] = None
-    market_value: Optional[float] = None
-    unrealized_pnl: Optional[float] = None
+    current_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
 
 
 class TradingGateway(ABC):

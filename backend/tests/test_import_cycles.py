@@ -1,0 +1,56 @@
+"""导入环回归测试。
+
+背景：`app/gateway/base.py` 曾在运行期 `from app.oms.order import LiveOrder`，
+而 `app.oms.__init__` 会加载 `app.oms.manager`，后者又 import `app.gateway.base` —— 成环。
+全量测试当时并没红，只是因为 pytest 按字母序碰巧先加载了 `app.oms`；
+单独跑 `pytest tests/test_oms_manager.py` 就是 ImportError。
+
+这类问题的危险在于「看起来是绿的」：加一个测试文件、重命名一个模块，
+都可能改变导入顺序而突然引爆整个测试套件。
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+
+import pytest
+
+# 每个模块都必须能作为**第一个**被导入的模块单独加载
+_ENTRY_MODULES = [
+    "app.gateway.base",
+    "app.oms.manager",
+    "app.oms.order",
+    "app.engine.controls",
+    "app.engine.framework",
+    "app.engine.framework.risk",
+    "app.engine.framework.execution",
+    "app.engine.backtest.broker",
+    "app.engine.backtest.portfolio_engine",
+    # Wave L-d 实盘接线：engine → live_runner → live_context 必须是单向的
+    "app.strategy.engine",
+    "app.strategy.live_runner",
+    "app.strategy.live_context",
+    "app.strategy.paper_sim",
+    # V3 Wave A-a 因子策略适配器：strategy → engine.framework 必须是单向的，
+    # 且实验记录器 → factor_store 的延迟导入不得反过来把环补上
+    "app.strategy.factor_strategy",
+    "app.strategy.factor_store",
+    "app.quant.experiments.recorder",
+    "app.api.v1.endpoints.factor_strategy",
+]
+
+
+@pytest.mark.parametrize("module", _ENTRY_MODULES)
+def test_module_imports_standalone(module: str) -> None:
+    """在全新解释器里单独导入该模块，不依赖任何导入顺序。"""
+    # 必须起子进程：同进程内 sys.modules 已被其他测试填满，测不出真实的首次导入
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {module}"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"{module} 无法独立导入（很可能是循环依赖）：\n{result.stderr}"
+    )
