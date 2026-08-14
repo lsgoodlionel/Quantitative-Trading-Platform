@@ -1,11 +1,24 @@
 -- 业务数据库初始化
 
 -- 用户表
+--
+-- ⚠️ 这里必须与 `05_users.sql` / `app/data/storage/users.py` 的 _DDL 保持一致。
+--    此前两处各定义了一版不兼容的 users（这里没有 username 列），而 05 用的是
+--    `CREATE TABLE IF NOT EXISTS` —— 02 先建好，05 静默跳过，紧接着
+--    `CREATE INDEX ... ON users(is_active, username)` 报「column does not exist」，
+--    **整个数据库容器初始化失败退出**。全新部署根本起不来。
+--
+--    权威口径是带 username 的这一版：`PostgresUserStore` 按 username 查用户。
+--
+--    email 刻意**不加 UNIQUE**：管理员建的账户可以没有邮箱（默认空串），
+--    两个空串会撞唯一约束。用户名才是登录标识。
 CREATE TABLE IF NOT EXISTS users (
     id          UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
-    email       VARCHAR(255)    NOT NULL UNIQUE,
+    username    VARCHAR(64)     NOT NULL UNIQUE,
+    email       VARCHAR(255)    NOT NULL DEFAULT '',
     hashed_pw   VARCHAR(255)    NOT NULL,
-    role        VARCHAR(20)     NOT NULL DEFAULT 'trader',  -- admin/trader/viewer
+    role        VARCHAR(20)     NOT NULL DEFAULT 'viewer'
+                CHECK (role IN ('admin', 'trader', 'viewer')),
     is_active   BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
@@ -164,9 +177,13 @@ CREATE TABLE IF NOT EXISTS alerts (
 -- 默认管理员账户: admin / admin123
 -- bcrypt hash 对应密码: admin123  (rounds=12)
 -- 生产环境务必通过 API 修改密码
-INSERT INTO users (id, email, hashed_pw, role)
+-- id / username / hash 与 `app/data/storage/users.py::seed_builtin_users()` 的
+-- admin 账户完全一致 —— 两处种子写的是同一个账户，不一致会让
+-- 「库里已有 admin」与「代码认为该播种」互相打架。
+INSERT INTO users (id, username, email, hashed_pw, role)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
+    'admin',
     'admin@quantbot.local',
     '$2b$12$0kMLEk./lr7l8hLBc4MIaeZTrJwp03XI3Zjw2LmiBjp5Of.KqvwWC',
     'admin'

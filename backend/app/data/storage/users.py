@@ -271,8 +271,32 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     BOOLEAN       NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(64);
+UPDATE users SET username = split_part(email, '@', 1)
+ WHERE username IS NULL AND email <> '';
+UPDATE users SET username = 'user_' || left(id::text, 8)
+ WHERE username IS NULL OR username = '';
+UPDATE users u
+   SET username = u.username || '_' || left(u.id::text, 8)
+  FROM (
+        SELECT id, row_number() OVER (PARTITION BY username ORDER BY created_at, id) AS rn
+          FROM users
+       ) d
+ WHERE d.id = u.id AND d.rn > 1;
+ALTER TABLE users ALTER COLUMN username SET NOT NULL;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+ALTER TABLE users ALTER COLUMN email SET DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active, username)
+"""
+"""与 `infra/init-db/05_users.sql` 逐句对应，两处必须同步改。
+
+`CREATE TABLE IF NOT EXISTS` 之后那一串 ALTER/UPDATE 不是冗余：
+`02_init_business.sql` 曾建过一版**没有 username 列**的 users，对那种库
+建表语句是空操作，紧接着的索引会直接报「column does not exist」——
+全新部署时容器初始化失败退出，已有数据卷的部署则在这里第一次跑 DDL 时炸。
+全部写成幂等，重复执行不报错也不覆盖数据。
 """
 
 _COLUMNS = "id, username, email, hashed_pw, role, is_active, created_at"
