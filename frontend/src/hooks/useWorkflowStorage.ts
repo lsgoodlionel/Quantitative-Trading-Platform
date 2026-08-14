@@ -24,9 +24,10 @@ export interface WorkflowHistoryEntry {
 
 // ── 存储 Key ─────────────────────────────────────────────────
 
-const STATE_KEY   = "qb_wf_state"
-const HISTORY_KEY = "qb_wf_history"
-const MAX_HISTORY = 20
+const STATE_KEY    = "qb_wf_state"
+const HISTORY_KEY  = "qb_wf_history"
+const PLAYBOOK_KEY = "qb_playbook_progress"
+const MAX_HISTORY  = 20
 
 // ── 当前进度 ─────────────────────────────────────────────────
 
@@ -68,4 +69,60 @@ export function loadWorkflowHistory(): WorkflowHistoryEntry[] {
 
 export function clearWorkflowHistory(): void {
   try { localStorage.removeItem(HISTORY_KEY) } catch { /* 同上：清理失败无副作用，忽略 */ }
+}
+
+// ── Playbook 进度（V3 · H4）──────────────────────────────────
+//
+// 只记「用户点过哪些步骤」，不反查后端真实进度 —— 那需要一堆新端点，
+// 而且判错了比不判更让人困惑。所以这是**引导标记**，不是进度追踪。
+
+/** playbookId → 已标记完成的 stepId 列表 */
+export type PlaybookProgress = Record<string, string[]>
+
+/** localStorage 里的内容可能被手改或跨版本残留：只收下形状正确的条目 */
+function sanitizeProgress(raw: unknown): PlaybookProgress {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {}
+
+  const entries = Object.entries(raw as Record<string, unknown>).filter(
+    (entry): entry is [string, string[]] =>
+      Array.isArray(entry[1]) && entry[1].every((v) => typeof v === "string"),
+  )
+  return Object.fromEntries(entries)
+}
+
+export function loadPlaybookProgress(): PlaybookProgress {
+  try {
+    const raw = localStorage.getItem(PLAYBOOK_KEY)
+    return raw ? sanitizeProgress(JSON.parse(raw)) : {}
+  } catch {
+    // JSON 畸形或隐私模式：退回空进度，引导从头开始比整页崩掉好
+    return {}
+  }
+}
+
+export function savePlaybookProgress(progress: PlaybookProgress): void {
+  try { localStorage.setItem(PLAYBOOK_KEY, JSON.stringify(progress)) } catch { /* 配额超限：进度为非关键数据，降级为仅内存 */ }
+}
+
+/** 切换某一步的完成标记，返回更新后的完整进度（不修改入参） */
+export function togglePlaybookStep(playbookId: string, stepId: string): PlaybookProgress {
+  const current = loadPlaybookProgress()
+  const done = current[playbookId] ?? []
+  const next = done.includes(stepId)
+    ? done.filter((id) => id !== stepId)
+    : [...done, stepId]
+
+  const updated: PlaybookProgress = { ...current, [playbookId]: next }
+  savePlaybookProgress(updated)
+  return updated
+}
+
+/** 重置一条 Playbook 的全部标记，其它路径不受影响 */
+export function resetPlaybookProgress(playbookId: string): PlaybookProgress {
+  const current = loadPlaybookProgress()
+  const updated = Object.fromEntries(
+    Object.entries(current).filter(([id]) => id !== playbookId),
+  )
+  savePlaybookProgress(updated)
+  return updated
 }

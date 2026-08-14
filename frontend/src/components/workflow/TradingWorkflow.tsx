@@ -8,6 +8,7 @@ import {
 } from "./workflowTypes"
 import { StepParamAdjust } from "./StepParamAdjust"
 import { WorkflowHistory } from "./WorkflowHistory"
+import { StepTrack, type StepTrackItem, type StepTrackStatus } from "./StepTrack"
 import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import { useRunBacktest } from "@/hooks/useBacktest"
 import { useKelly } from "@/hooks/useQuant"
@@ -74,40 +75,20 @@ function buildInitSteps(): WorkflowStep[] {
   })
 }
 
+// 进度条本身已抽到 StepTrack（Playbook 用同一套），这里只做 WorkflowStep → StepTrackItem 的映射
+function toTrackStatus(step: WorkflowStep, isActive: boolean): StepTrackStatus {
+  if (step.status === "done") return "done"
+  if (step.status === "error") return "error"
+  return isActive ? "active" : "pending"
+}
+
 function StepIndicator({ steps, currentIdx }: { steps: WorkflowStep[]; currentIdx: number }) {
-  return (
-    <div className="flex items-center gap-0 overflow-x-auto pb-1">
-      {steps.map((step, i) => {
-        const isActive = i === currentIdx
-        const isDone   = step.status === "done"
-        const isErr    = step.status === "error"
-        return (
-          <div key={step.id} className="flex items-center shrink-0">
-            <div className="flex flex-col items-center">
-              <div
-                className={`
-                  w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold
-                  border transition-all
-                  ${isDone ? "bg-[#1a3a1a] border-[#3fb950] text-[#3fb950]"
-                  : isErr  ? "bg-[#3a1a1a] border-[#f85149] text-[#f85149]"
-                  : isActive ? "bg-[#1f3d5e] border-[#58a6ff] text-[#58a6ff] shadow-[0_0_8px_#58a6ff40]"
-                  : "bg-[#161b22] border-[#30363d] text-[#6e7681]"}
-                `}
-              >
-                {isDone ? "✓" : isErr ? "!" : step.stepNumber}
-              </div>
-              <span className={`text-[9px] mt-0.5 whitespace-nowrap
-                ${isDone ? "text-[#3fb950]" : isActive ? "text-[#58a6ff]" : "text-[#6e7681]"}
-              `}>{step.title}</span>
-            </div>
-            {i < steps.length - 1 && (
-              <div className={`w-6 h-px mx-0.5 mb-3 ${isDone ? "bg-[#3fb950]" : "bg-[#30363d]"}`} />
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
+  const items: StepTrackItem[] = steps.map((step, i) => ({
+    id: step.id,
+    label: step.title,
+    status: toTrackStatus(step, i === currentIdx),
+  }))
+  return <StepTrack items={items} />
 }
 
 // ── Step 1: 选择标的 ──────────────────────────────────────────

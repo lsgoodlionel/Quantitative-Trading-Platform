@@ -70,6 +70,13 @@ _ENTRY_MODULES = [
     "app.core.llm.service",
     "app.core.llm.config_store",
     "app.api.v1.endpoints.llm",
+    # V3 Wave B-c Copilot：app.copilot 反向依赖了 app.api.v1.endpoints.*
+    # （工具处理器刻意复用端点函数），这条边必须保持单向 —— 端点模块不得回头 import app.copilot
+    "app.copilot",
+    "app.copilot.tools",
+    "app.copilot.engine",
+    "app.copilot.execute",
+    "app.api.v1.endpoints.copilot",
 ]
 
 

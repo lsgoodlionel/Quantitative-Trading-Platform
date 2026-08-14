@@ -1,9 +1,9 @@
 // 行情页（V3 · H1）：原「行情」+「事件期权」两页合并为三个 Tab。
 // Tab 状态进 URL（?tab=），标的选择继续走 ?symbol=/&market=。
-import { useCallback, useMemo, useState } from "react"
-import { useLocation } from "react-router-dom"
+import { useCallback, useMemo } from "react"
 import { AppShell } from "@/components/layout/AppShell"
 import { StockPanel } from "@/components/market/StockPanel"
+import { useSymbolContext } from "@/contexts/SymbolContext"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { useUrlTab } from "@/hooks/useUrlTab"
 import { useMarketOverview } from "@/hooks/useMarketData"
@@ -12,7 +12,6 @@ import type { Market } from "@/types"
 import { QuoteTab } from "./QuoteTab"
 import { WatchlistTab } from "./WatchlistTab"
 import { EVENTS_HELP, EventsTab } from "./events/EventsTab"
-import { readSymbolSelection } from "./symbolParam"
 
 const TABS = ["quote", "watchlist", "events"] as const
 type MarketTab = (typeof TABS)[number]
@@ -24,14 +23,12 @@ const TAB_LABELS: { key: MarketTab; label: string }[] = [
 ]
 
 export function MarketPage() {
-  const { search } = useLocation()
   const [tab, setTab] = useUrlTab<MarketTab>(TABS, "quote")
 
-  // 左栏选中的标的（跨 Tab 共享）。惰性初始化：只读一次 URL，
-  // 之后完全由用户在左栏的点选驱动，避免切 Tab 把选择弹回链接里的标的。
-  const [initial] = useState(() => readSymbolSelection(search))
-  const [panelSymbol, setPanelSymbol] = useState(initial.symbol)
-  const [panelMarket, setPanelMarket] = useState<Market>(initial.market)
+  // 左栏选中的标的走全局标的上下文（V3 · H3）：选中即写回 URL 的 ?symbol=，
+  // 于是刷新、分享链接、跳到验证页时这个选择都还在。
+  // 切 Tab 不会把它弹回链接里的旧值 —— useUrlTab 只改 tab，symbol 原样保留。
+  const { symbol: panelSymbol, market: panelMarket, setSymbol } = useSymbolContext()
 
   const { data: overview, isLoading: overviewLoading } = useMarketOverview()
   const { data: spotData } = useSpotQuotes()
@@ -62,10 +59,10 @@ export function MarketPage() {
     }
   }, [overview, spotData])
 
-  const handlePanelSelect = useCallback((symbol: string, market: Market) => {
-    setPanelSymbol(symbol)
-    setPanelMarket(market)
-  }, [])
+  const handlePanelSelect = useCallback(
+    (symbol: string, market: Market) => setSymbol(symbol, market),
+    [setSymbol],
+  )
 
   // 事件期权原本是独立页，有自己的帮助文案：选中该 Tab 时顶栏换成它
   const help = tab === "events" ? EVENTS_HELP : PAGE_HELP.market

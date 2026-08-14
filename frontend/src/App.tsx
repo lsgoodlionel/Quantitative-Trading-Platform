@@ -3,7 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { BrowserRouter, Routes } from "react-router-dom"
 import { ToastProvider } from "@/components/ui/Toast"
+import { CommandPaletteHost } from "@/components/palette/CommandPaletteHost"
+import { CopilotLauncher } from "@/components/copilot/CopilotLauncher"
+import { SymbolProvider } from "@/contexts/SymbolContext"
 import { appRouteElements } from "@/routes"
+import { useAuthStore } from "@/stores/auth"
 
 // ── Error Boundary ─────────────────────────────────────────────
 interface EBState { hasError: boolean; message: string }
@@ -45,15 +49,34 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * 路由内部的外壳：命令面板与全局标的上下文都依赖 router
+ * （前者要 navigate，后者要读写 ?symbol=），所以只能挂在 BrowserRouter 里面。
+ */
+function RoutedShell() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+
+  return (
+    <SymbolProvider>
+      <div className="min-h-screen bg-[#0d1117]">
+        <Routes>{appRouteElements}</Routes>
+      </div>
+      {/* 登录页不挂：那里按 ⌘K 跳过去只会被路由守卫弹回来 */}
+      <CommandPaletteHost enabled={isAuthenticated} />
+      {/* Copilot 挂在 SymbolProvider 之内：它要读当前标的来补全「回测一下这只」这类指代。
+          同样登录后才挂 —— 未登录时它的工具一个都调不通。 */}
+      {isAuthenticated && <CopilotLauncher />}
+    </SymbolProvider>
+  )
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <BrowserRouter>
-            <div className="min-h-screen bg-[#0d1117]">
-              <Routes>{appRouteElements}</Routes>
-            </div>
+            <RoutedShell />
           </BrowserRouter>
         </ToastProvider>
         <ReactQueryDevtools />

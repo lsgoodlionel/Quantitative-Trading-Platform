@@ -12,6 +12,7 @@ import { Spinner } from "@/components/ui/Spinner"
 import { StatusBadge } from "@/components/ui/StatusBadge"
 import { PnlCell } from "@/components/ui/PnlCell"
 import { TradingWorkflow } from "@/components/workflow/TradingWorkflow"
+import { PlaybookHub } from "@/components/workflow/PlaybookHub"
 import { useTradingMode } from "@/hooks/useBrokerConfig"
 import { PAGE_HELP } from "@/data/pageHelp"
 import type { Market, Position, LiveOrder, MarketOverviewItem } from "@/types"
@@ -552,6 +553,9 @@ export function Dashboard() {
           </div>
         </Link>
       </div>
+
+      {/* ── 操作引导 Playbook（V3 · H4）：三条路径，选一条按步骤走 ── */}
+      <PlaybookHub />
 
       {/* ── 智能交易引导（置顶，首屏可见） ── */}
       <TradingWorkflow />

@@ -14,6 +14,7 @@ from app.api.v1.endpoints import (
     bars,
     broker_config,
     calendar,
+    copilot,
     data_archive,
     data_config,
     data_sources,
@@ -116,3 +117,4 @@ api_router.include_router(lab.router,          prefix="/lab",      tags=["Lab Ar
 
 # ── v3.0 Wave B-a：LLM 网关 ──────────────────────────────────────
 api_router.include_router(llm.router, prefix="/llm", tags=["LLM Gateway"])
+api_router.include_router(copilot.router, prefix="/copilot", tags=["Copilot"])
