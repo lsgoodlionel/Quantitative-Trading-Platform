@@ -33,6 +33,7 @@ from app.copilot import (
 )
 from app.core.database import get_db
 from app.core.llm import ChatMessage, LLMNotConfiguredError, LLMUnavailableError, resolve_active
+from app.core.llm_quota_dep import charge_llm_quota
 from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
 
@@ -140,15 +141,23 @@ async def chat(
     body: CopilotChatRequest,
     redis: RedisDep,
     session: SessionDep,
-    _user: AuthedDep,
+    user: AuthedDep,
 ) -> CopilotChatResponse:
-    """一次问答。只读工具直接执行，写动作只产出草稿。"""
+    """一次问答。只读工具直接执行，写动作只产出草稿。
+
+    权限保持 `Role.VIEWER` —— 只读用户来问「这个指标怎么看」正是本功能存在的
+    理由。「它花钱」这个顾虑由**日配额**承担，不由角色承担（见 `core/llm_quota`）。
+    """
     try:
         resolved = await resolve_active(redis, model_override=body.model)
     except LLMNotConfiguredError as exc:
         return _setup_guidance(str(exc))
     except LLMUnavailableError as exc:
         return _unavailable(str(exc), None, None)
+
+    # 扣配额必须在这里而不是路由依赖里：上面两条分支一次模型都没调，
+    # 挂成依赖的话没配模型的用户靠反复收引导语就能把额度烧光。
+    await charge_llm_quota(user)
 
     ctx = CopilotContext(session=session, redis=redis)
     messages = [ChatMessage(role=m.role, content=m.content) for m in body.messages]

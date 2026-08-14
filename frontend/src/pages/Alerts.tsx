@@ -4,11 +4,13 @@ import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { Spinner } from "@/components/ui/Spinner"
 import { useToast } from "@/components/ui/Toast"
+import { useUrlTab } from "@/hooks/useUrlTab"
 import {
   useAlerts, useCreateAlert, useDeleteAlert, useToggleAlert,
   useCheckAlerts, useResetAlert,
   type AlertCondition, type PriceAlert,
 } from "@/hooks/useAlerts"
+import { NotificationInboxTab } from "@/pages/notifications/NotificationInboxTab"
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -355,9 +357,9 @@ function CheckPanel({ alertCount }: { alertCount: number }) {
   )
 }
 
-// ── Alerts Page ───────────────────────────────────────────────────
+// ── 预警规则 Tab ──────────────────────────────────────────────────
 
-export function AlertsPage() {
+function AlertRulesTab() {
   const { data: alerts = [], isLoading } = useAlerts()
   const [showCreate, setShowCreate] = useState(false)
 
@@ -366,7 +368,6 @@ export function AlertsPage() {
   const paused   = alerts.filter(a => !a.is_active && !a.is_triggered)
 
   return (
-    <AppShell title="价格预警" help={PAGE_HELP.alerts}>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Left: Create + Check */}
         <div className="xl:col-span-1 space-y-4">
@@ -452,6 +453,51 @@ export function AlertsPage() {
           )}
         </div>
       </div>
+  )
+}
+
+// ── Alerts Page ───────────────────────────────────────────────────
+
+const TABS = ["rules", "inbox"] as const
+type AlertsTab = (typeof TABS)[number]
+
+const TAB_LABELS: { key: AlertsTab; label: string }[] = [
+  { key: "rules", label: "🔔 预警规则" },
+  { key: "inbox", label: "📬 通知中心" },
+]
+
+/**
+ * 预警与通知（V3 · 页面收敛）
+ *
+ * 「规则触发」与「通知送达」本来就是一件事的两半，此前却占了侧边栏两格，
+ * 用户得先猜自己要找的东西属于哪一半。合并成一页两 Tab。
+ *
+ * `/notifications` 保留为重定向而非删除 —— 已有的书签、通知里的深链
+ * 都指向那个地址，直接删会变成 404。
+ */
+export function AlertsPage() {
+  const [tab, setTab] = useUrlTab<AlertsTab>(TABS, "rules")
+
+  return (
+    <AppShell title="预警与通知" help={PAGE_HELP.alerts}>
+      <div className="flex gap-1 mb-4 border-b border-[#30363d]">
+        {TAB_LABELS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === key
+                ? "border-[#58a6ff] text-[#58a6ff]"
+                : "border-transparent text-[#8b949e] hover:text-[#e6edf3]"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "rules" && <AlertRulesTab />}
+      {tab === "inbox" && <NotificationInboxTab />}
     </AppShell>
   )
 }

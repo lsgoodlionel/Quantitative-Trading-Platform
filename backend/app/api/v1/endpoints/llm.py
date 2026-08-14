@@ -42,6 +42,8 @@ from app.core.llm.config_store import (
 )
 from app.core.llm.registry import PRESET_IDS, PROVIDER_PRESETS, ProviderPreset, get_preset
 from app.core.llm.service import is_ready, resolve_active, resolve_named
+from app.core.llm_quota import peek
+from app.core.llm_quota_dep import charge_llm_quota
 from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
 
@@ -296,10 +298,20 @@ async def set_active(body: SetActiveRequest, redis: RedisDep, user: TraderDep) -
 # ── 端点：统一对话入口 ────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponseOut)
-async def chat(body: ChatRequest, redis: RedisDep, _user: AuthedDep) -> ChatResponseOut:
-    """统一对话入口（供 I1 Copilot 与 I4/I5 复用）。非流式。"""
+async def chat(body: ChatRequest, redis: RedisDep, user: AuthedDep) -> ChatResponseOut:
+    """统一对话入口（供 I1 Copilot 与 I4/I5 复用）。非流式。
+
+    这是最原始的透传入口，也最该限量。权限保持 VIEWER，花费由日配额约束。
+    """
     try:
         resolved = await resolve_active(redis, model_override=body.model)
+    except LLMNotConfiguredError as exc:
+        raise _not_configured(exc) from exc
+
+    # 解析成功之后才扣：未配模型抛的是 501，那次并没有调用模型。
+    await charge_llm_quota(user)
+
+    try:
         response = await resolved.provider.chat(
             [ChatMessage(role=m.role, content=m.content, tool_call_id=m.tool_call_id)
              for m in body.messages],
@@ -309,8 +321,6 @@ async def chat(body: ChatRequest, redis: RedisDep, _user: AuthedDep) -> ChatResp
             max_tokens=body.max_tokens,
             timeout=body.timeout,
         )
-    except LLMNotConfiguredError as exc:
-        raise _not_configured(exc) from exc
     except LLMUnavailableError as exc:
         raise _unavailable(exc) from exc
 
@@ -321,6 +331,32 @@ async def chat(body: ChatRequest, redis: RedisDep, _user: AuthedDep) -> ChatResp
         provider_id=resolved.preset.id,
         model=response.model or resolved.model,
         usage=response.usage,
+    )
+
+
+# ── 端点：日配额 ─────────────────────────────────────────────────────────────
+
+class QuotaOut(BaseModel):
+    """当日 LLM 用量。`degraded=True` 表示计数器不可用、本期不限量。"""
+
+    used: int
+    limit: int
+    remaining: int
+    degraded: bool = Field(
+        default=False,
+        description="计数器（Redis）不可用，调用被放行而非「确实没超」",
+    )
+
+
+@router.get("/quota", response_model=QuotaOut)
+async def get_quota(user: AuthedDep) -> QuotaOut:
+    """看一眼当天还剩多少次。**只读，不计数。**"""
+    state = await peek(user.id, user.role)
+    return QuotaOut(
+        used=state.used,
+        limit=state.limit,
+        remaining=state.remaining,
+        degraded=state.degraded,
     )
 
 

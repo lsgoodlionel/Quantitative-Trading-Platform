@@ -8,7 +8,10 @@ interface NavItem {
   label: string
 }
 
-// ── 导航（V3 · H1：16 项收敛到 9 个主页面 + 4 个独立页）────────
+// ── 导航（V3 · H1：16 项收敛到 9 个主页面 + 3 个独立页）────────
+// 「价格预警」与「通知中心」已合并为 /alerts 的两个 Tab：规则触发与通知送达
+// 本就是一件事的两半，占两格只会让人先猜自己要找的属于哪一半。
+// /notifications 仍是有效路由（重定向），书签与历史深链不会 404。
 // 按用户工作流顺序：看行情 → 选标的 → 做研究 → 配策略 → 验证 → 组合 → 交易
 const NAV_ITEMS: NavItem[] = [
   // ── 核心工作流 ────────────────────────────
@@ -22,8 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/trading",    icon: "🤖", label: "交易"   },
   // ── 监控 ─────────────────────────────────
   { to: "/risk",          icon: "🛡️", label: "风控"      },
-  { to: "/alerts",        icon: "🔔", label: "价格预警"  },
-  { to: "/notifications", icon: "📬", label: "通知中心"  },
+  { to: "/alerts",        icon: "🔔", label: "预警与通知" },
   { to: "/lab",           icon: "📦", label: "投研产物库" },
   // ── 系统 ─────────────────────────────────
   { to: "/settings",   icon: "⚙️", label: "设置"   },

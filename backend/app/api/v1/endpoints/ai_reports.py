@@ -35,6 +35,7 @@ from app.ai_reports import (
 from app.api.v1.endpoints.auth import UserInfo
 from app.core.database import get_db
 from app.core.llm import LLMNotConfiguredError, LLMUnavailableError, resolve_active
+from app.core.llm_quota_dep import charge_llm_quota
 from app.core.logging import get_logger
 from app.core.rbac import Role, require_role
 from app.core.redis import get_redis
@@ -182,12 +183,14 @@ async def stock_report(
     body: StockReportRequest,
     redis: RedisDep,
     session: SessionDep,
-    _user: AuthedDep,
+    user: AuthedDep,
 ) -> StockReportResponse:
-    """生成一份个股研报。不缓存 —— 依赖实时行情与新闻（契约 §1.1 第 4 点）。"""
+    """生成一份个股研报。不缓存 —— 依赖实时行情与新闻（契约 §1.1 第 4 点）。
+
+    权限 `Role.VIEWER` + 日配额，理由见 `core/llm_quota` 模块文档。
+    """
     market = _parse_market(body.market)
     resolved = await _resolve_provider(redis, body.model)
-
     try:
         snapshot = await build_stock_snapshot(
             session,
@@ -197,6 +200,10 @@ async def stock_report(
         )
     except SnapshotError as exc:
         raise HTTPException(HTTP_422_UNPROCESSABLE, str(exc)) from exc
+
+    # 紧贴真正的模型调用扣配额：上面的 501（未配模型）与 422（行情不足）
+    # 都没调过 LLM，为它们计数会让用户被自己没发生的调用耗光额度。
+    await charge_llm_quota(user)
 
     try:
         report = await generate_stock_report(resolved.provider, snapshot)
@@ -224,10 +231,11 @@ async def stock_report(
 async def backtest_diagnosis(
     body: BacktestDiagnosisRequest,
     redis: RedisDep,
-    _user: AuthedDep,
+    user: AuthedDep,
 ) -> BacktestDiagnosisResponse:
     """把完整验证的规则判据翻译成人能读的诊断。AI 解读评级，不取代评级。"""
     resolved = await _resolve_provider(redis, body.model)
+    await charge_llm_quota(user)
 
     try:
         diagnosis = await generate_backtest_diagnosis(

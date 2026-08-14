@@ -30,8 +30,9 @@ export const PAGE_COMMANDS: readonly CommandItem[] = [
   { id: "page-trading-orders", kind: "page", label: "订单中心", hint: "委托、成交与算法单", to: "/trading?tab=orders", keywords: ["orders", "订单", "委托", "成交"] },
 
   { id: "page-risk", kind: "page", label: "风险控制", hint: "敞口、限额与保护机制", to: "/risk", keywords: ["risk", "风控", "风险", "敞口"] },
-  { id: "page-alerts", kind: "page", label: "预警规则", hint: "价格与指标预警", to: "/alerts", keywords: ["alerts", "预警", "报警"] },
-  { id: "page-notifications", kind: "page", label: "通知中心", hint: "推送渠道与历史消息", to: "/notifications", keywords: ["notifications", "通知", "消息"] },
+  // 两个 Tab 各留一条：面板要能直达具体 Tab，而不是只跳到页面默认 Tab
+  { id: "page-alerts", kind: "page", label: "预警规则", hint: "价格与指标预警", to: "/alerts?tab=rules", keywords: ["alerts", "预警", "报警"] },
+  { id: "page-notifications", kind: "page", label: "通知中心", hint: "历史消息与已读状态", to: "/alerts?tab=inbox", keywords: ["notifications", "通知", "消息", "收件箱"] },
   { id: "page-lab", kind: "page", label: "实验室产物", hint: "模型与实验记录", to: "/lab", keywords: ["lab", "artifacts", "产物", "实验"] },
 
   { id: "page-settings", kind: "page", label: "系统设置", hint: "券商、数据源与通知配置", to: "/settings", keywords: ["settings", "配置", "设置"] },
