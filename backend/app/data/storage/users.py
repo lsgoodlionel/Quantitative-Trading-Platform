@@ -286,6 +286,12 @@ UPDATE users u
 ALTER TABLE users ALTER COLUMN username SET NOT NULL;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 ALTER TABLE users ALTER COLUMN email SET DEFAULT '';
+UPDATE users SET role = 'viewer'
+ WHERE role NOT IN ('admin', 'trader', 'viewer');
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'viewer';
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+      CHECK (role IN ('admin', 'trader', 'viewer'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active, username)
@@ -297,6 +303,14 @@ CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active, username)
 建表语句是空操作，紧接着的索引会直接报「column does not exist」——
 全新部署时容器初始化失败退出，已有数据卷的部署则在这里第一次跑 DDL 时炸。
 全部写成幂等，重复执行不报错也不覆盖数据。
+
+role 那几句同理：早期那版没有 CHECK、DEFAULT 还是 'trader'。而 `_row_to_record()`
+用严格的 `Role(row.role)` 读，前提正是「CHECK 已经挡住非法值」—— 对存量库不成立，
+一行越界的 role 会让该用户的查询直接抛 ValueError。越界值统一降到 viewer
+（最小权限，也让 CHECK 加得上），DEFAULT 一并改回 viewer。
+
+⚠️ `ensure_schema()` 按 `;` 切分执行，所以这里只能写不含分号的普通语句 ——
+想用 `DO $$ ... $$` 做「存在则跳过」会被切坏，幂等靠 DROP IF EXISTS + ADD 实现。
 """
 
 _COLUMNS = "id, username, email, hashed_pw, role, is_active, created_at"

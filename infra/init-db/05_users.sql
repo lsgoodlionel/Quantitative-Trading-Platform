@@ -60,6 +60,27 @@ ALTER TABLE users ALTER COLUMN username SET NOT NULL;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 ALTER TABLE users ALTER COLUMN email SET DEFAULT '';
 
+-- role 也要对齐，补列不够。02 早期版本的 role 是「无 CHECK + DEFAULT 'trader'」：
+--
+--   1. 没有 CHECK。而读路径 `_row_to_record()` 用的是严格的 `Role(row.role)`，
+--      注释写着「非法值在这里已被 DDL CHECK 挡住」—— 对存量库这个前提不成立。
+--      一行 role 越界的脏数据会让该用户的查询直接抛 ValueError（登录一并挂掉）。
+--   2. DEFAULT 是 'trader' 而非 'viewer'。不带 role 的插入拿到的是**可下单**的角色，
+--      与 `rbac.normalize_role()`「绝不默认提权」的口径相反。
+--
+-- 越界的 role 一律降到 viewer：既是最小权限，也让下面的 CHECK 不会因脏数据加不上。
+-- 这里只动本就无法被应用正确读出的行，合法的 admin / trader / viewer 一个不碰。
+UPDATE users SET role = 'viewer'
+ WHERE role NOT IN ('admin', 'trader', 'viewer');
+
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'viewer';
+
+-- Postgres 没有 ADD CONSTRAINT IF NOT EXISTS；先 DROP IF EXISTS 再 ADD 即为幂等。
+-- 约束名沿用全新库上 Postgres 自动生成的那个，两条路径最终收敛到同一个名字。
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+      CHECK (role IN ('admin', 'trader', 'viewer'));
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active, username);
