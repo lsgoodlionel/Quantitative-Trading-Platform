@@ -144,7 +144,10 @@ class RollingStats(BaseModel):
     rolling_volatility: list[SeriesPoint] = Field(default_factory=list)
     rolling_beta: list[SeriesPoint] = Field(default_factory=list)
     exposure_series: list[SeriesPoint] = Field(default_factory=list)
-    turnover_series: list[SeriesPoint] = Field(default_factory=list)
+    # 累计换手（倍数，单调不减），不是日换手率 —— 后者在 CapacityAnalysis.turnover
+    turnover_series: list[SeriesPoint] = Field(
+        default_factory=list, description="累计成交名义 / 平均净值，单调不减的倍数"
+    )
     avg_exposure_pct: float
     total_turnover: float
     beta: float
@@ -225,11 +228,19 @@ class TagMetrics(BaseModel):
 # ── N2 容量 · 换手 · 杠杆 (CapacityAnalysis) ─────────────────────
 
 class TurnoverBlock(BaseModel):
+    """N2 日换手率：当日成交额 / **当日**净值。
+
+    与 `RollingStats.turnover_series`（累计成交名义 / 平均净值，单调不减的倍数）
+    量纲不同，见 `app/engine/backtest/capacity.py` 模块文档的对照表。
+    """
+
     avg_daily_pct: float
     median_daily_pct: float
     max_daily_pct: float
     annualized_pct: float
-    series: list[SeriesPoint] = Field(default_factory=list)
+    series: list[SeriesPoint] = Field(
+        default_factory=list, description="日换手率序列（比率，非百分数）"
+    )
 
 
 class LeverageBlock(BaseModel):

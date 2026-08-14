@@ -15,9 +15,19 @@
 - 容量    在「单标的单日成交额不超过其 ADV 的 `max_adv_share`」约束下，
   策略最多能管多少钱。**这是粗估**，见 `CapacityEstimate.assumptions`。
 
-口径冲突提示：`rolling_stats.py` 另有一条 `turnover_series`，它由 fills 重算且以
-「成交额 / 初始资金」为分母，与本模块的「成交额 / 当日净值」不是同一个数。
-本模块是 N2 的规范口径，两者不要混用。
+口径冲突提示：`rolling_stats.py` 另有一条 `turnover_series`，两者**量纲都不同**，
+不是「同一个数的两种算法」：
+
+| | 本模块（N2） | `rolling_stats._turnover_series` |
+|---|---|---|
+| 数据源 | `PortfolioDailyResult.turnover` | 由 fills 重算 |
+| 分子 | 当日成交额 | 累计成交名义 |
+| 分母 | **当日**净值 | **全样本平均**净值 |
+| 结果 | 日换手**率**（可年化） | 累计换手**倍数**（单调不减） |
+
+两条都有各自的用处，但**必须分别命名**：对外展示时本模块叫「日换手率」，
+那条叫「累计换手」。绝不要把其中一条的数字填进另一条的位置 ——
+把一个单调递增的累计倍数当成日比率来看，会得出「换手率一路飙升」的假结论。
 """
 
 from __future__ import annotations
