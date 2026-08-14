@@ -5,6 +5,8 @@
 #   1. 复制 .env.example 为 .env，填写所有 CHANGE_ME 字段
 #   2. 确保 SECRET_KEY 已通过 `openssl rand -hex 32` 生成
 #   3. ALLOWED_ORIGINS 设置为你的域名，如 https://quantbot.example.com
+#   4. 放置 TLS 证书并把 nginx/conf.d/quantbot.conf 的 server_name 改成真实域名
+#      —— 见 infra/nginx/README.md（证书缺失时 nginx 会启动失败，这是有意的）
 
 services:
 
@@ -77,7 +79,9 @@ services:
       retries: 3
       start_period: 40s
 
-  # ── 前端 (Nginx 静态 + 反向代理) ─────────────────────────────────
+  # ── 前端 (容器内 Nginx 托管静态站) ───────────────────────────────
+  # 注意：不再对宿主发布端口。对外入口统一收敛到下面的 nginx 边缘反代，
+  # 否则会与它争抢 80 端口，且绕过 TLS 直接裸奔 HTTP。
   frontend:
     build:
       context: ../frontend
@@ -86,8 +90,8 @@ services:
     image: quantbot-frontend:latest
     container_name: qb_frontend
     restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT:-80}:80"
+    expose:
+      - "80"
     networks:
       - backend_net
     depends_on:
@@ -98,6 +102,35 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ── 边缘反向代理 + TLS 终止 ──────────────────────────────────────
+  # 配置与证书说明见 infra/nginx/README.md
+  # ⚠️ 首次启动前必须先放置证书，否则 nginx 起不来（有意为之）
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: qb_nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ${TLS_CERT_DIR:-./nginx/certs}:/etc/nginx/certs:ro
+      - certbot_webroot:/var/www/certbot
+    networks:
+      - backend_net
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # ── 监控 ─────────────────────────────────────────────────────────
   prometheus:
@@ -140,3 +173,4 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
+  certbot_webroot:

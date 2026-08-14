@@ -24,6 +24,23 @@ frontend/.vite/
 # 数据库数据
 infra/data/
 
+# ── TLS 证书（绝不提交）─────────────────────────────────────────
+# 私钥进仓库 = 证书作废 + 必须吊销重签。目录本身保留（.gitkeep）。
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep
+*.pem
+*.key
+*.crt
+*.csr
+letsencrypt/
+
+# ── 数据库备份产物（绝不提交）───────────────────────────────────
+# 备份里是完整的生产数据（含用户表、审计日志）。
+backups/
+*.dump
+*.dump.partial
+*.bak
+
 # 用户策略（O2）：用户自己的代码，不进仓库
 user_data/
 
