@@ -27,8 +27,6 @@ import pandas as pd
 
 from app.quant.formula_factor import (
     FormulaError,
-    evaluate_formula,
-    evaluate_formula_panel,
     formula_requires_panel,
 )
 from app.quant.mining.expression_tree import (
@@ -39,14 +37,25 @@ from app.quant.mining.expression_tree import (
     random_tree,
     to_rpn,
 )
+from app.quant.mining.panel_eval import (
+    build_factor_panel,
+    cross_sectional_ic_stats,
+    ohlcv_to_panel,
+)
 
 logger = logging.getLogger(__name__)
 
-# 单日横截面 IC 所需最少标的数（与 factor_lib/ranking 口径一致）
-_MIN_NAMES = 3
-
 # 汇总日志里最多列出几种失败原因（同一算子坏掉时原因高度重复，列几条就够定位）
 _MAX_REPORTED_ERROR_REASONS = 5
+
+
+class BudgetExhaustedError(Exception):
+    """评估预算（`GAConfig.max_evaluations`）用尽 —— 由 `evolve` 捕获后提前收尾。
+
+    不是错误：这是「资源上限到了，如实标注 truncated 并交出目前最好的东西」，
+    而不是「搜索失败」。用异常是因为预算可能在任意一次 `evaluate()` 上耗尽，
+    逐层返回哨兵值会把整条评分链路弄脏。
+    """
 
 
 @dataclass(frozen=True)
@@ -64,6 +73,9 @@ class GAConfig:
     #: 默认关闭：搜索空间变化会改变「相同 seed → 相同结果」的映射，
     #: 既有实验记录必须保持可复现。
     use_cross_section: bool = False
+    #: 不同公式的评估次数硬上限（V3 I2）。None = 不设限，与历史行为完全一致。
+    #: 达到上限时进化提前停止，`GAResult.truncated` 置 True。
+    max_evaluations: int | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +125,8 @@ class GAResult:
     history: list[GenerationStat]
     n_evaluated: int
     n_unique: int
+    #: 是否因评估预算耗尽而提前停止（V3 I2）。False = 跑满了配置的代数。
+    truncated: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -121,56 +135,11 @@ class GAResult:
             "history": [h.to_dict() for h in self.history],
             "n_evaluated": self.n_evaluated,
             "n_unique": self.n_unique,
+            "truncated": self.truncated,
         }
 
 
-# ── 因子面板构建 & 评分 ────────────────────────────────────────────
-
-def _build_factor_panel(
-    ohlcv_by_symbol: dict[str, pd.DataFrame], tokens: list[str],
-) -> pd.DataFrame:
-    """逐标的执行 RPN 公式，拼为 (datetime, instrument) 单列因子面板。"""
-    parts: list[pd.DataFrame] = []
-    for symbol, frame in ohlcv_by_symbol.items():
-        series = evaluate_formula(frame, tokens).astype(float)
-        df = series.to_frame("factor")
-        df.index.name = "datetime"
-        df["instrument"] = symbol
-        parts.append(df.set_index("instrument", append=True))
-    return pd.concat(parts).sort_index()
-
-
-def _ohlcv_to_panel(ohlcv_by_symbol: dict[str, pd.DataFrame]) -> pd.DataFrame:
-    """每标的 OHLCV 帧 → (datetime, instrument) 面板（截面求值的输入形态）。"""
-    parts: list[pd.DataFrame] = []
-    for symbol, frame in ohlcv_by_symbol.items():
-        df = frame.copy()
-        df.index = pd.Index(df.index, name="datetime")
-        df["instrument"] = symbol
-        parts.append(df.set_index("instrument", append=True))
-    return pd.concat(parts).sort_index()
-
-
-def _build_cs_factor_panel(panel: pd.DataFrame, tokens: list[str]) -> pd.DataFrame:
-    """含 CS_* 的公式：整块面板一次求值，输出同样的单列因子面板。"""
-    return evaluate_formula_panel(panel, tokens).astype(float).to_frame("factor")
-
-
-def _cross_sectional_ic_stats(
-    factor: pd.Series, forward_return: pd.Series,
-) -> tuple[float, float, float]:
-    """复用 factor_lib.ranking 的横截面 IC 口径，返回 (ic_mean, rank_ic_mean, icir)。"""
-    from app.quant.factor_lib.ranking import _cross_sectional_ic
-
-    ic_arr, rank_arr = _cross_sectional_ic(factor, forward_return, _MIN_NAMES)
-    if ic_arr.size == 0:
-        return float("nan"), float("nan"), float("nan")
-    ic_mean = float(np.mean(ic_arr))
-    ic_std = float(np.std(ic_arr))
-    icir = ic_mean / ic_std if ic_std > 1e-9 else float("nan")
-    rank_ic_mean = float(np.mean(rank_arr)) if rank_arr.size else float("nan")
-    return ic_mean, rank_ic_mean, icir
-
+# ── 评分 ──────────────────────────────────────────────────────────
 
 class _Evaluator:
     """封装评分所需的共享面板；带缓存避免重复评估同一公式。"""
@@ -181,11 +150,13 @@ class _Evaluator:
         forward_return_panel: pd.DataFrame,
         liquidity_panel: pd.DataFrame | None,
         fitness_config,
+        max_evaluations: int | None = None,
     ) -> None:
         self._ohlcv = ohlcv_by_symbol
         self._fwd = forward_return_panel
         self._liq = liquidity_panel
         self._fit_cfg = fitness_config
+        self._max_evaluations = max_evaluations
         self._cache: dict[tuple[str, ...], Candidate] = {}
         #: OHLCV 面板惰性构建一次，供所有含 CS_* 的候选公式复用
         self._panel: pd.DataFrame | None = None
@@ -201,17 +172,19 @@ class _Evaluator:
     def _factor_panel(self, tokens: tuple[str, ...]) -> pd.DataFrame:
         """按公式形态选择求值路径：含 CS_* 走面板，否则逐标的。"""
         token_list = list(tokens)
-        if not formula_requires_panel(token_list):
-            return _build_factor_panel(self._ohlcv, token_list)
-        if self._panel is None:
-            self._panel = _ohlcv_to_panel(self._ohlcv)
-        return _build_cs_factor_panel(self._panel, token_list)
+        if formula_requires_panel(token_list) and self._panel is None:
+            self._panel = ohlcv_to_panel(self._ohlcv)
+        return build_factor_panel(self._ohlcv, token_list, panel=self._panel)
 
     def evaluate(self, tree: Node) -> Candidate:
         tokens = tuple(to_rpn(tree))
         cached = self._cache.get(tokens)
         if cached is not None:
             return cached
+        if self._max_evaluations is not None and self.n_evaluated >= self._max_evaluations:
+            raise BudgetExhaustedError(
+                f"已评估 {self.n_evaluated} 个不同公式，达到上限 {self._max_evaluations}"
+            )
         candidate = self._score(tokens)
         self._cache[tokens] = candidate
         self.n_evaluated += 1
@@ -254,7 +227,7 @@ class _Evaluator:
         except Exception:  # noqa: BLE001 — 退化因子记为触底适应度
             return _floor_candidate(tokens, floor)
 
-        ic_mean, rank_ic_mean, icir = _cross_sectional_ic_stats(
+        ic_mean, rank_ic_mean, icir = cross_sectional_ic_stats(
             factor_panel["factor"], self._fwd.iloc[:, 0],
         )
         return Candidate(
@@ -271,6 +244,11 @@ class _Evaluator:
     @property
     def n_unique(self) -> int:
         return len(self._cache)
+
+    @property
+    def scored_candidates(self) -> tuple[Candidate, ...]:
+        """本轮评估过的全部不同公式（只读快照）。"""
+        return tuple(self._cache.values())
 
 
 # ── 遗传算子编排 ──────────────────────────────────────────────────
@@ -325,6 +303,8 @@ def evolve(
     liquidity_panel: pd.DataFrame | None,
     fitness_config,
     config: GAConfig = GAConfig(),
+    *,
+    seed_trees: tuple[Node, ...] = (),
 ) -> GAResult:
     """运行遗传因子挖掘主循环，返回按适应度降序的候选因子。
 
@@ -335,29 +315,57 @@ def evolve(
     liquidity_panel      : 流动性面板（可选，用于滑点冲击）
     fitness_config       : factor_fitness.FitnessConfig
     config               : 遗传算法超参
+    seed_trees           : 播进初代种群的种子表达式树（V3 I2）。
+                           空元组（默认）时行为与历史完全一致。
     """
     if not ohlcv_by_symbol:
         raise ValueError("evolve: 空 universe")
 
     rng = random.Random(config.seed)
     evaluator = _Evaluator(
-        ohlcv_by_symbol, forward_return_panel, liquidity_panel, fitness_config,
+        ohlcv_by_symbol,
+        forward_return_panel,
+        liquidity_panel,
+        fitness_config,
+        config.max_evaluations,
     )
 
-    population = [
+    population = _initial_population(rng, config, seed_trees)
+    history: list[GenerationStat] = []
+    truncated = False
+
+    try:
+        for gen in range(config.generations):
+            scored = _score_population(evaluator, population)
+            history.append(_generation_stat(gen, scored))
+            if gen < config.generations - 1:
+                population = _next_population(rng, scored, config)
+    except BudgetExhaustedError as exc:
+        # 预算耗尽不是失败：把已经评估出来的东西如实交出去，并标 truncated。
+        logger.info("进化提前停止（%s），返回已评估候选中的最优解", exc)
+        truncated = True
+
+    _log_formula_error_summary(evaluator)
+    return _finalize(evaluator, history, config.top_k, truncated)
+
+
+def _initial_population(
+    rng: random.Random, config: GAConfig, seed_trees: tuple[Node, ...]
+) -> list[Node]:
+    """初代种群：先按历史方式随机生成满员，再用种子**覆盖**前若干个。
+
+    刻意「先生成再覆盖」而不是「少生成几个」——后者会改变 rng 的消费序列，
+    于是「无种子」的调用也会算出与历史不同的结果，把
+    「相同 seed → 相同结果」这条可复现性承诺悄悄毁掉。
+    """
+    random_pop = [
         random_tree(rng, config.max_depth, include_cross_section=config.use_cross_section)
         for _ in range(config.population_size)
     ]
-    history: list[GenerationStat] = []
-
-    for gen in range(config.generations):
-        scored = _score_population(evaluator, population)
-        history.append(_generation_stat(gen, scored))
-        if gen < config.generations - 1:
-            population = _next_population(rng, scored, config)
-
-    _log_formula_error_summary(evaluator)
-    return _finalize(evaluator, history, config.top_k)
+    if not seed_trees:
+        return random_pop
+    seeds = list(seed_trees[: config.population_size])
+    return seeds + random_pop[len(seeds):]
 
 
 def _log_formula_error_summary(evaluator: _Evaluator) -> None:
@@ -394,9 +402,14 @@ def _generation_stat(gen: int, scored: list[tuple[Node, Candidate]]) -> Generati
     )
 
 
-def _finalize(evaluator: _Evaluator, history: list[GenerationStat], top_k: int) -> GAResult:
+def _finalize(
+    evaluator: _Evaluator,
+    history: list[GenerationStat],
+    top_k: int,
+    truncated: bool = False,
+) -> GAResult:
     """从缓存中挑出全局最优的 top_k 个不同公式作为候选。"""
-    unique = list(evaluator._cache.values())
+    unique = list(evaluator.scored_candidates)
     unique.sort(key=lambda c: c.fitness, reverse=True)
     candidates = unique[:top_k]
     return GAResult(
@@ -405,6 +418,7 @@ def _finalize(evaluator: _Evaluator, history: list[GenerationStat], top_k: int) 
         history=history,
         n_evaluated=evaluator.n_evaluated,
         n_unique=evaluator.n_unique,
+        truncated=truncated,
     )
 
 

@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { useToast } from "@/components/ui/Toast"
 import { ArtifactRow } from "@/pages/lab/ArtifactRow"
 import { ArtifactDetailPanel } from "@/pages/lab/ArtifactDetailPanel"
+import { AutoLoopPanel } from "@/pages/lab/AutoLoopPanel"
 import {
   KIND_LABELS,
   useDeleteArtifact,
@@ -16,6 +17,13 @@ import {
 const KINDS: ArtifactKind[] = ["dataset", "model", "signal"]
 const PAGE_LIMIT = 50
 
+type LabTab = "artifacts" | "auto-loop"
+
+const TAB_LABELS: Record<LabTab, string> = {
+  artifacts: "产物",
+  "auto-loop": "自动循环",
+}
+
 /**
  * 投研产物库（V4 M4）
  *
@@ -26,6 +34,7 @@ const PAGE_LIMIT = 50
  */
 export function Lab() {
   const { toast } = useToast()
+  const [tab, setTab] = useState<LabTab>("artifacts")
   const [kind, setKind] = useState<ArtifactKind | undefined>(undefined)
   const [keyword, setKeyword] = useState("")
   const [selected, setSelected] = useState<ArtifactMeta | null>(null)
@@ -51,6 +60,18 @@ export function Lab() {
 
   return (
     <AppShell title="投研产物库">
+      <div className="mb-4 flex gap-1" role="tablist" aria-label="产物库视图">
+        {(Object.keys(TAB_LABELS) as LabTab[]).map((t) => (
+          <FilterChip key={t} active={tab === t} onClick={() => setTab(t)}>
+            {TAB_LABELS[t]}
+          </FilterChip>
+        ))}
+      </div>
+
+      {tab === "auto-loop" && <AutoLoopPanel />}
+
+      {tab === "artifacts" && (
+        <>
       {/* 筛选 */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex gap-1">
@@ -134,6 +155,8 @@ export function Lab() {
           <ArtifactDetailPanel item={selected} />
         </div>
       </div>
+        </>
+      )}
     </AppShell>
   )
 }

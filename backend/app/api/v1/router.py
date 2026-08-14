@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     fundamentals,
     futu_config,
     lab,
+    lab_auto_loop,
     live_strategy,
     llm,
     news,
@@ -130,3 +131,8 @@ api_router.include_router(ai_reports.router, prefix="/ai/reports", tags=["AI Rep
 # users 全部端点要求 Role.ADMIN，本期只做「管理员维护账户」，不做自助注册。
 api_router.include_router(reconcile.router, prefix="/reconcile", tags=["Reconcile"])
 api_router.include_router(users.router,     prefix="/users",     tags=["Users"])
+
+# ── v3.0 Wave C-c：自动因子研发循环（I2）────────────────────────
+# 必须在 lab.router 之后注册：lab 的 /artifacts/{artifact_id} 不会吞掉
+# /auto-loop（前缀不同段），但保持「专用路由跟在通用路由后面」的既有约定。
+api_router.include_router(lab_auto_loop.router, prefix="/lab", tags=["Auto Factor Loop"])

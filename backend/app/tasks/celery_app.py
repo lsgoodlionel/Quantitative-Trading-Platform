@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.tasks.notify",
         "app.tasks.validation",
         "app.tasks.archive",
+        "app.tasks.auto_loop",
         "app.tasks.reconcile",
     ],
 )
@@ -52,6 +53,8 @@ celery_app.conf.update(
         # 完整验证是长耗时纯计算，单独排队避免把数据回填的队列堵死
         "app.tasks.validation.*": {"queue": "compute"},
         "app.tasks.archive.*":    {"queue": "data"},
+        # 自动因子循环同属长耗时纯计算，与完整验证共用 compute 队列
+        "app.tasks.auto_loop.*":  {"queue": "compute"},
         # 对账是只读的券商查询，走默认队列即可（不与数据回填抢 IO）
         "app.tasks.reconcile.*":  {"queue": "default"},
     },

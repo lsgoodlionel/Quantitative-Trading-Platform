@@ -96,6 +96,18 @@ _ENTRY_MODULES = [
     "app.api.v1.endpoints.reconcile",
     "app.api.v1.endpoints.users",
     "app.api.v1.endpoints.auth",
+    # V3 Wave C-c 自动因子循环：quant.lab.* 同时引用 mining、factor_fitness、
+    # lab.store 与 core.llm 四块，是全项目扇出最宽的一处；
+    # 尤其 mining.panel_eval 从 genetic 抽出后，genetic 反过来引它，方向必须保持单向
+    "app.quant.mining.panel_eval",
+    "app.quant.mining.expression_tree",
+    "app.quant.lab.sample_split",
+    "app.quant.lab.factor_eval",
+    "app.quant.lab.auto_loop",
+    "app.quant.lab.loop_llm",
+    "app.quant.lab.loop_runner",
+    "app.tasks.auto_loop",
+    "app.api.v1.endpoints.lab_auto_loop",
 ]
 
 

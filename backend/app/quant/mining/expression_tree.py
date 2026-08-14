@@ -12,6 +12,13 @@ formula_factor.py 的栈式虚拟机（evaluate_formula）执行——与 AlphaG
   - Node 为 frozen dataclass，所有变换返回新树（不可变，符合项目风格）。
   - 生成用「grow」法：越深越可能收敛为叶子，从而约束公式长度。
   - 交叉/变异按前序索引随机选点，重建时复制未改动子树。
+
+⚠️ `parse_expr` 是**唯一**允许把外部字符串（例如 LLM 提出的种子表达式）变成
+可执行个体的入口。它是一个手写的递归下降解析器 —— 不是 `eval`，也不是
+`ast.literal_eval`：函数名必须命中 `formula_factor` 的算子/特征白名单，
+元数必须对得上，规模必须在 RPN token 上限内，任何不满足的输入一律抛
+`ExpressionParseError`。让模型输出的字符串走 Python 求值等于把 RCE 面
+交给一个正在猜测的东西。
 """
 
 from __future__ import annotations
@@ -190,3 +197,147 @@ def clamp_size(
     return random_tree(
         rng, max_depth=min(max_depth, 3), include_cross_section=include_cross_section
     )
+
+
+# ── 解析（`to_expr` 的逆运算）─────────────────────────────────────
+#
+# 存在的唯一理由：把**不可信来源**的表达式字符串（LLM 提出的种子）安全地
+# 变成个体。安全性完全来自「白名单 + 元数 + 规模」三重校验，见模块 docstring。
+
+#: 输入字符串长度上限 —— 模型偶尔会吐出一整段散文，没必要拿去解析
+MAX_EXPR_CHARS = 400
+#: 嵌套深度上限，防止病态输入把递归解析器压爆
+MAX_PARSE_DEPTH = 12
+#: 与 formula_factor.MAX_TOKENS 对齐的 RPN 长度上限
+_MAX_PARSED_TOKENS = 32
+
+
+class ExpressionParseError(ValueError):
+    """表达式字符串非法：语法错误 / 名字不在白名单 / 元数不符 / 规模超限。"""
+
+
+def parse_expr(text: str, include_cross_section: bool = False) -> Node:
+    """
+    解析 `to_expr` 形态的表达式（如 ``DIV(MOM20, ATR_RATIO)``）为表达式树。
+
+    语法只有两条产生式，刻意做到没有任何求值语义::
+
+        expr := NAME "(" expr ("," expr)* ")"   # 算子
+              | NAME                             # 叶子特征
+
+    Raises
+    ------
+    ExpressionParseError : 任何不满足白名单 / 元数 / 规模约束的输入
+    """
+    if not isinstance(text, str):
+        raise ExpressionParseError(f"表达式必须是字符串，实得 {type(text).__name__}")
+    source = text.strip()
+    if not source:
+        raise ExpressionParseError("表达式为空")
+    if len(source) > MAX_EXPR_CHARS:
+        raise ExpressionParseError(f"表达式过长（最多 {MAX_EXPR_CHARS} 字符）")
+
+    tokens = _lex(source)
+    parser = _Parser(tokens, include_cross_section)
+    node = parser.parse_expr(depth=0)
+    parser.expect_end()
+
+    if tree_size(node) > _MAX_NODES:
+        raise ExpressionParseError(f"表达式节点过多（最多 {_MAX_NODES} 个）")
+    if len(to_rpn(node)) > _MAX_PARSED_TOKENS:
+        raise ExpressionParseError(f"表达式过长（最多 {_MAX_PARSED_TOKENS} 个 RPN token）")
+    return node
+
+
+_NAME_START = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+_NAME_BODY = _NAME_START | frozenset("0123456789")
+_PUNCT = frozenset("(),")
+
+
+def _lex(source: str) -> list[str]:
+    """切成 `NAME` 与 `( ) ,` 三类记号。出现其他字符直接拒绝。"""
+    tokens: list[str] = []
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch in _PUNCT:
+            tokens.append(ch)
+            i += 1
+            continue
+        if ch not in _NAME_START:
+            raise ExpressionParseError(f"表达式含非法字符 {ch!r}")
+        start = i
+        while i < len(source) and source[i] in _NAME_BODY:
+            i += 1
+        tokens.append(source[start:i])
+    return tokens
+
+
+class _Parser:
+    """递归下降解析器。只认名字与括号，不认字面量、运算符、属性访问。"""
+
+    def __init__(self, tokens: list[str], include_cross_section: bool) -> None:
+        self._tokens = tokens
+        self._pos = 0
+        leaves, ops_by_arity = _vocab(include_cross_section)
+        self._leaves = frozenset(leaves)
+        self._arity_by_op = {
+            name: arity for arity, names in ops_by_arity.items() for name in names
+        }
+
+    def _peek(self) -> str | None:
+        return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+    def _next(self) -> str:
+        token = self._peek()
+        if token is None:
+            raise ExpressionParseError("表达式意外结束")
+        self._pos += 1
+        return token
+
+    def expect_end(self) -> None:
+        if self._peek() is not None:
+            raise ExpressionParseError(f"表达式尾部有多余内容：{self._peek()!r}")
+
+    def parse_expr(self, depth: int) -> Node:
+        if depth > MAX_PARSE_DEPTH:
+            raise ExpressionParseError(f"表达式嵌套过深（最多 {MAX_PARSE_DEPTH} 层）")
+        name = self._next()
+        if name in _PUNCT:
+            raise ExpressionParseError(f"期待特征名或算子名，实得 {name!r}")
+        if self._peek() != "(":
+            return self._leaf(name)
+        self._next()  # 吃掉 "("
+        children = self._parse_arguments(depth)
+        return self._op(name, children)
+
+    def _parse_arguments(self, depth: int) -> tuple[Node, ...]:
+        children: list[Node] = [self.parse_expr(depth + 1)]
+        while self._peek() == ",":
+            self._next()
+            children.append(self.parse_expr(depth + 1))
+        if self._next() != ")":
+            raise ExpressionParseError("括号不匹配，缺少 ')'")
+        return tuple(children)
+
+    def _leaf(self, name: str) -> Node:
+        if name in self._arity_by_op:
+            raise ExpressionParseError(
+                f"{name} 是算子，需要写成 {name}(...) 的形式"
+            )
+        if name not in self._leaves:
+            raise ExpressionParseError(f"未知特征名：{name}（不在白名单内）")
+        return Node("leaf", name)
+
+    def _op(self, name: str, children: tuple[Node, ...]) -> Node:
+        arity = self._arity_by_op.get(name)
+        if arity is None:
+            raise ExpressionParseError(f"未知算子：{name}（不在白名单内）")
+        if len(children) != arity:
+            raise ExpressionParseError(
+                f"算子 {name} 需要 {arity} 个参数，实得 {len(children)} 个"
+            )
+        return Node("op", name, children)
