@@ -108,10 +108,19 @@ class PortfolioConstructionModel(ABC):
     def _liquidations(
         ctx: PortfolioContext, covered: set[str]
     ) -> list[PortfolioTarget]:
-        """持有但本轮没有观点的标的必须显式清零，否则会被无限期遗留在账上。"""
+        """持有但本轮没有观点的标的必须显式清零，否则会被无限期遗留在账上。
+
+        持仓走 `ctx.open_symbols` 而不是下探 `ctx.broker.positions` —— 这是
+        `PortfolioContext.open_symbols` 明写的框架层约定。
+
+        今天下探也能跑通：实盘的 `_SnapshotBroker` 恰好也暴露了 `.positions`。
+        但那是它的实现细节而非承诺 —— 它的 `__getattr__` 对未实现属性一律抛
+        AttributeError，哪天投影层改成不建 `_SnapshotPositions`，穿透的代码
+        会在实盘挂而回测全绿。走公共访问器就没有这层耦合。
+        """
         return [
             PortfolioTarget(symbol=symbol, quantity=0, tag="liquidate")
-            for symbol in sorted(ctx.broker.positions.open_symbols)
+            for symbol in sorted(ctx.open_symbols)
             if symbol not in covered
         ]
 
