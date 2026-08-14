@@ -85,6 +85,17 @@ _ENTRY_MODULES = [
     "app.ai_reports.stock_report",
     "app.ai_reports.diagnosis",
     "app.api.v1.endpoints.ai_reports",
+    # V3 Wave C-b 对账与多用户：
+    #   oms.reconcile → notify.emit / oms.order 必须单向（不得回头引 oms.manager）
+    #   data.storage.users → core.rbac → endpoints.auth，因此 auth 只能**惰性**引用 users
+    "app.oms.reconcile",
+    "app.tasks.reconcile",
+    "app.data.storage.users",
+    "app.data.storage.audit_log",
+    "app.core.audit",
+    "app.api.v1.endpoints.reconcile",
+    "app.api.v1.endpoints.users",
+    "app.api.v1.endpoints.auth",
 ]
 
 

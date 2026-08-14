@@ -30,7 +30,12 @@ celery = { version = "^5.4.0", extras = ["redis"] }
 
 # 认证
 python-jose = { version = "^3.3.0", extras = ["cryptography"] }
-passlib = { version = "^1.7.4", extras = ["bcrypt"] }
+# 直接依赖 bcrypt，不经 passlib。
+# passlib 1.7.4 读 `bcrypt.__about__.__version__`，而 bcrypt ≥4.1 已移除该属性 ——
+# `passlib.hash.bcrypt.hash()` 会抛 AttributeError，再被包装成一条误导性的
+# 「password cannot be longer than 72 bytes」。auth.py 本来就直接调 bcrypt，
+# passlib 是个只会把人带沟里的死依赖（V3 Wave C-b 契约就是照它写错的）。
+bcrypt = "^5.0.0"
 
 # 数据处理
 pandas = "^2.2.3"
@@ -146,6 +151,9 @@ testpaths = ["tests"]
 #   2026-08-11  71.32% → 71.97%（V3 Wave B-a LLM 网关），ratchet 保持 71（余量不足 1pp）
 #   2026-08-12  71.97% → 72.51%（V3 Wave B-c Copilot），ratchet 上调至 72
 #   2026-08-14  72.51% → 73.01%（V3 Wave C-a AI 研报/回测诊断），ratchet 保持 72（余量不足 1pp）
+#   2026-08-14  + V3 Wave C-b（实盘对账 + 多用户/审计落库）
+#               两个 Postgres 仓储的 SQL 分支需要真实库才能覆盖，故合并后仍先保持 72，
+#               待 Wave C 全部合入后统一按实测值上调
 addopts = "--cov=app --cov-report=term-missing --cov-fail-under=72"
 
 [tool.coverage.run]

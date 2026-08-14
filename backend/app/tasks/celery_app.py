@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.tasks.notify",
         "app.tasks.validation",
         "app.tasks.archive",
+        "app.tasks.reconcile",
     ],
 )
 
@@ -51,6 +52,8 @@ celery_app.conf.update(
         # 完整验证是长耗时纯计算，单独排队避免把数据回填的队列堵死
         "app.tasks.validation.*": {"queue": "compute"},
         "app.tasks.archive.*":    {"queue": "data"},
+        # 对账是只读的券商查询，走默认队列即可（不与数据回填抢 IO）
+        "app.tasks.reconcile.*":  {"queue": "default"},
     },
 
     # 结果保留时间
@@ -91,6 +94,15 @@ celery_app.conf.update(
         "cleanup-redis-cache": {
             "task": "app.tasks.data.cleanup_cache",
             "schedule": crontab(minute="*/5"),
+            "options": {"queue": "default"},
+        },
+        # 每天 20:00 实盘对账（V3 G6）。只读：拉券商持仓/资金与本地 OMS 比对，
+        # 有差异或券商不可达才发通知，一致时静默。
+        # ⚠️ worker 进程的 OMS 订单簿与交易进程不共享，见 app/tasks/reconcile.py 的
+        # 模块 docstring；要拿到有意义的结果请走 POST /api/v1/reconcile/{market}。
+        "reconcile-live-positions": {
+            "task": "app.tasks.reconcile.reconcile_all_markets",
+            "schedule": crontab(hour=20, minute=0),
             "options": {"queue": "default"},
         },
     },

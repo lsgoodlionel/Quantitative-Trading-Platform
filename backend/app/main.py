@@ -22,6 +22,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
     logger.info("Database connection pool ready")
 
+    # 用户表播种（V3 J3）：空表时写入 admin / trader / viewer 三个内置账户。
+    # 失败只警告不阻断启动 —— 登录路径本身也会在数据库不可达时回落内置账户。
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.data.storage.users import PostgresUserStore, seed_builtin_users
+
+        async with AsyncSessionLocal() as session:
+            seed = await seed_builtin_users(PostgresUserStore(session))
+        if seed.warning:
+            logger.warning(seed.warning)
+    except Exception as e:
+        logger.warning("User seeding skipped: %s", e)
+
     # 初始化 OMS：自动检测 Redis 中的 Alpaca 配置
     # - 已配置 Alpaca → AlpacaGateway (Paper/Live) 处理美股
     # - 未配置 Alpaca → PaperGateway（本地纸面交易）

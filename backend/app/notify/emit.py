@@ -239,9 +239,33 @@ def emit_reconcile_diff(
     market: str,
     diff_count: int,
     detail: str = "",
+    broker_reachable: bool = True,
 ) -> dict:
-    """实盘对账差异（G6 预留；本期只提供发射器，不接对账逻辑）。"""
-    payload: dict[str, Any] = {"差异条数": diff_count}
+    """
+    实盘对账结果通知（V3 G6 接入 `app/oms/reconcile.py`）。
+
+    `broker_reachable=False` 时标题与载荷都要说清「没对上账」而不是「对账正常」——
+    此时 `diff_count` 恒为 0，若沿用「存在差异」的文案，用户会读成「0 条差异 = 通过」，
+    那正是 G6 要避免的假阳性。
+
+    ⚠️ 一致（可达且零差异）时**不要**调用本函数：判断在 `reconcile.notify_reconcile`，
+    每次对账都响一下等于训练用户忽略它。
+    """
+    if not broker_reachable:
+        payload: dict[str, Any] = {
+            "状态": "券商不可达，未完成对账",
+            "提示": "本次结果不代表账目一致，请检查券商连接后重跑",
+        }
+        if detail:
+            payload["原因"] = detail
+        return notify_safe(NotifyEvent(
+            type=NotifyEventType.RECONCILE_DIFF,
+            title="实盘对账未完成 · 券商不可达",
+            market=market,
+            payload=payload,
+        ))
+
+    payload = {"差异条数": diff_count}
     if detail:
         payload["明细"] = detail
     return notify_safe(NotifyEvent(

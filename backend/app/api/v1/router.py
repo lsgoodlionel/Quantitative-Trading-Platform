@@ -41,6 +41,7 @@ from app.api.v1.endpoints import (
     protections,
     quant,
     rebalance,
+    reconcile,
     risk,
     screener,
     sequence_models,
@@ -48,6 +49,7 @@ from app.api.v1.endpoints import (
     stream,
     topk_portfolio,
     universe,
+    users,
 )
 from app.core.config import settings
 
@@ -122,3 +124,9 @@ api_router.include_router(copilot.router, prefix="/copilot", tags=["Copilot"])
 
 # ── v3.0 Wave C-a：AI 研报 / 回测诊断 ────────────────────────────
 api_router.include_router(ai_reports.router, prefix="/ai/reports", tags=["AI Reports"])
+
+# ── v3.0 Wave C-b：实盘对账（G6）+ 多用户（J3）─────────────────────
+# reconcile 只读：对账端点不提交/撤销任何订单，也不自动纠正差异。
+# users 全部端点要求 Role.ADMIN，本期只做「管理员维护账户」，不做自助注册。
+api_router.include_router(reconcile.router, prefix="/reconcile", tags=["Reconcile"])
+api_router.include_router(users.router,     prefix="/users",     tags=["Users"])
