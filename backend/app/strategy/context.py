@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from app.core.errors import StrategyContractError
 from app.data.models import Bar, Market
 from app.engine.backtest.broker import Order, SimulatedBroker
 from app.engine.backtest.order_types import OrderType
 from app.engine.backtest.portfolio_broker import PortfolioBroker
 from app.engine.backtest.position import Position
 from app.engine.portfolio.rebalance import plan_rebalance
+from app.strategy.precompute import IndicatorProvider, IndicatorView
 
 if TYPE_CHECKING:
     from app.engine.backtest.trade import Trade
@@ -34,6 +36,12 @@ logger = logging.getLogger(__name__)
 
 #: 目标权重总敞口的容差（浮点求和误差 + 手续费预留）
 _WEIGHT_TOLERANCE = 1e-6
+
+#: `ctx.ind` 在策略未声明指标时的报错文案（两个上下文共用一份）
+_NO_INDICATORS = (
+    "ctx.ind 需要策略覆盖 declare_indicators() 来声明指标。"
+    "未声明时请照旧用 ctx.history / ctx.close_series 自行计算。"
+)
 
 
 def _backtest_order_kwargs(order_type: str, limit_price: float | None) -> dict:
@@ -64,12 +72,28 @@ class StrategyContext:
     history        — 包含当前 bar 在内的所有历史 bar（DataFrame）
     broker         — 回测模式：模拟券商；实盘模式：None
     live_order_ctx — 实盘模式：LiveOrderContext，负责将信号路由到 OMS
+    indicators     — E-a 预算指标视图；策略未声明指标时为 None
     """
 
     bar: Bar
     history: pd.DataFrame
     broker: SimulatedBroker | None
     live_order_ctx: LiveOrderContext | None = field(default=None)
+    indicators: IndicatorView | None = field(default=None)
+
+    # ── 预算指标 (E-a) ───────────────────────────────────────
+
+    @property
+    def ind(self) -> IndicatorView:
+        """
+        截至**当前时点**的预算指标（见 `app/strategy/precompute.py`）。
+
+        视图不提供任何返回完整序列的接口 —— 预算是在全量帧上算的，
+        能拿到整条 Series 就等于能取到回测结束时的值。
+        """
+        if self.indicators is None:
+            raise StrategyContractError(_NO_INDICATORS)
+        return self.indicators
 
     # ── 模式判断 ─────────────────────────────────────────────
 
@@ -253,6 +277,21 @@ class PortfolioContext:
     market: Market
     #: 每仓固定金额（PortfolioBacktestConfig.cash_per_position），None = 由策略自行决定
     cash_per_position: float | None = None
+    #: E-a 预算指标；回测装 `IndicatorBook`，实盘装 `LiveIndicatorBook`，未声明时 None
+    indicators: IndicatorProvider | None = None
+
+    # ── 预算指标 (E-a) ───────────────────────────────────────
+
+    def ind(self, symbol: str) -> IndicatorView:
+        """
+        该标的截至**当前时点**的预算指标（见 `app/strategy/precompute.py`）。
+
+        组合下没有「当前标的」这一概念，所以这里是方法而不是属性 ——
+        与 `history(symbol)` / `close_series(symbol, n)` 的形状一致。
+        """
+        if self.indicators is None:
+            raise StrategyContractError(_NO_INDICATORS)
+        return self.indicators.view(symbol)
 
     # ── 账户状态 ─────────────────────────────────────────────
 

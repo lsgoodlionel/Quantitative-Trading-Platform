@@ -17,11 +17,18 @@ from typing import TYPE_CHECKING
 
 from app.core.errors import StrategyContractError
 from app.engine.backtest.trade import ExitRules
+from app.strategy.precompute import IndicatorSpec
 
 #: re-export：策略作者从 `app.strategy.base` 拿更自然。
 #: 定义放在 `app/core/errors.py` 这个中立位置，是为了避免引擎↔策略成环
 #: —— 引擎侧的 `broker_order_hooks` 也要抛它，而它不能 import `app.strategy`。
-__all__ = ["ORDER_HOOK_NAMES", "PortfolioStrategyBase", "StrategyBase", "StrategyContractError"]
+__all__ = [
+    "ORDER_HOOK_NAMES",
+    "IndicatorSpec",
+    "PortfolioStrategyBase",
+    "StrategyBase",
+    "StrategyContractError",
+]
 
 if TYPE_CHECKING:
     from app.engine.backtest.trade import Trade
@@ -99,6 +106,42 @@ class StrategyBase(ABC):
 
     def on_stop(self, ctx: StrategyContext) -> None:
         """回测/实盘结束时调用一次。子类可覆盖以清仓或打印统计。"""
+
+    # ── E-a 指标预算（可选，不覆盖 = 一行不变地走原路径）──────
+
+    def declare_indicators(self, spec: IndicatorSpec) -> None:
+        """
+        **可选**钩子：声明本策略要用的指标，框架一次算完并按游标喂给 `ctx.ind`。
+
+        默认为空 = 不启用预算，`on_bar` 里怎么算指标都不受影响。实测把
+        「每 bar 对全量历史重算」换成预算后单标的快 ~10×（见
+        `docs/profiling-backtest-j2.md`）。
+
+        ::
+
+            def declare_indicators(self, spec: IndicatorSpec) -> None:
+                spec.add("fast", sma, self.param("fast_period", 10))
+                spec.add("slow", sma, self.param("slow_period", 30))
+
+            def on_bar(self, ctx: StrategyContext) -> None:
+                if ctx.ind.crossed_up("fast", "slow") and ctx.qty == 0:
+                    ...
+
+        约束：指标函数必须是**因果**的（第 i 个值只依赖前 i 根 bar）。
+        框架会抽检并对 `close.shift(-1)` 这类写法直接抛
+        `StrategyContractError` —— 预算路径在全量帧上计算，非因果指标等于偷看未来。
+        """
+
+    def indicator_spec(self) -> IndicatorSpec | None:
+        """
+        收敛出本策略的指标声明。未覆盖 `declare_indicators` 时返回 None，
+        引擎据此走原路径 —— 整条预算路径不构造、不计算、不进上下文。
+        """
+        if type(self).declare_indicators is StrategyBase.declare_indicators:
+            return None
+        spec = IndicatorSpec()
+        self.declare_indicators(spec)
+        return spec
 
     # ── K4 风险闸门 ──────────────────────────────────────────
 

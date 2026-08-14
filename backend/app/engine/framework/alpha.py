@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from app.data.models import Market
 from app.engine.framework.insight import NEVER_EXPIRES, Insight, InsightDirection
 from app.strategy.context import StrategyContext
+from app.strategy.precompute import indicator_spec_of, view_from_history
 
 if TYPE_CHECKING:
     from app.engine.backtest.broker import Order
@@ -126,6 +127,8 @@ class LegacyStrategyAlphaAdapter(AlphaModel):
         self._period = period
         self._symbols = symbols
         self._instances: dict[str, StrategyBase] = {}
+        #: E-a：被包策略的指标声明，每标的解析一次（值为 None = 该策略没声明）
+        self._specs: dict[str, object] = {}
         self._started: set[str] = set()
         self.name = name or f"legacy:{strategy.name}"
 
@@ -144,10 +147,15 @@ class LegacyStrategyAlphaAdapter(AlphaModel):
 
     def _insights_for(self, ctx: PortfolioContext, symbol: str) -> list[Insight]:
         strategy = self._instance_for(symbol)
+        history = ctx.histories[symbol]
+        # E-a：被包的 preset 可能声明了预算指标（`ctx.ind`）。这里的指标声明属于
+        # **被包的策略**，与外层组合策略的声明无关，所以不能借 `ctx.indicators`
+        # —— 只能在这条前缀历史上现算。成本与 preset 改造前相同，且前缀天然无前视。
         capture = _CapturingContext(
             bar=ctx.bars[symbol],
-            history=ctx.histories[symbol],
+            history=history,
             broker=ctx.broker,
+            indicators=view_from_history(self._spec_for(symbol, strategy), history),
         )
         if symbol not in self._started:
             strategy.on_start(capture)
@@ -168,6 +176,12 @@ class LegacyStrategyAlphaAdapter(AlphaModel):
             )
             for direction in capture.signals
         ]
+
+    def _spec_for(self, symbol: str, strategy: StrategyBase):
+        """指标声明每标的解析一次 —— 逐 bar 重跑 `declare_indicators` 是白搭的分配。"""
+        if symbol not in self._specs:
+            self._specs[symbol] = indicator_spec_of(strategy)
+        return self._specs[symbol]
 
     def _instance_for(self, symbol: str) -> StrategyBase:
         if not self._is_class:

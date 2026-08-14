@@ -49,6 +49,7 @@ from app.strategy.paper_sim import (
     PaperTrade,
     run_paper_simulation,
 )
+from app.strategy.precompute import indicator_spec_of, view_from_history
 from app.strategy.presets import STRATEGY_REGISTRY
 
 if TYPE_CHECKING:
@@ -235,7 +236,14 @@ class StrategyEngine:
         strategy_obj = strategy_cls(params=params)
         if bars:
             full_df = _bars_to_df(bars)
-            init_ctx = StrategyContext(bar=bars[-1], history=full_df, broker=None)
+            # 这里的 history 是「到此刻为止的全部已知行情」，实盘下不含未来，
+            # 所以给 on_start 挂视图是安全的
+            init_ctx = StrategyContext(
+                bar=bars[-1],
+                history=full_df,
+                broker=None,
+                indicators=view_from_history(indicator_spec_of(strategy_obj), full_df),
+            )
             try:
                 strategy_obj.on_start(init_ctx)
             except Exception:
@@ -428,6 +436,11 @@ class StrategyEngine:
     ) -> None:
         history = list(warmup_bars)
         history_df = _bars_to_df(history) if history else pd.DataFrame()
+        # E-a：声明只解析一次。实盘拿不到「完整帧」，`history_df` 本身就是
+        # 截至当前 bar 的前缀 —— 所以这条路径结构上没有前视风险，代价是
+        # 每根 bar 重算一次（与策略改用 ctx.ind 之前的成本相同）。
+        # 未声明指标的策略在这里得到 None，整条路径零开销。
+        spec = indicator_spec_of(strategy_obj)
 
         try:
             async for bar in data_service.subscribe_bars([inst.symbol], market, frequency):
@@ -436,7 +449,13 @@ class StrategyEngine:
                 history.append(bar)
                 history_df = _bars_to_df(history)
                 order_ctx = LiveOrderContext(inst, bar)
-                ctx = StrategyContext(bar=bar, history=history_df, broker=None, live_order_ctx=order_ctx)
+                ctx = StrategyContext(
+                    bar=bar,
+                    history=history_df,
+                    broker=None,
+                    live_order_ctx=order_ctx,
+                    indicators=view_from_history(spec, history_df),
+                )
                 try:
                     strategy_obj.on_bar(ctx)
                 except Exception:

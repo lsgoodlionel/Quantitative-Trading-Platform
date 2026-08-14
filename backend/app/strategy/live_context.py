@@ -40,6 +40,7 @@ from app.data.models import Bar, Market
 from app.engine.backtest.broker import Order, OrderSide, OrderStatus
 from app.engine.backtest.position import Position
 from app.strategy.context import PortfolioContext, _backtest_order_kwargs
+from app.strategy.precompute import IndicatorProvider
 
 __all__ = ["AccountSnapshot", "LivePortfolioContext"]
 
@@ -175,6 +176,7 @@ class LivePortfolioContext(PortfolioContext):
         time: datetime | None = None,
         cash_per_position: float | None = None,
         allow_short: bool = False,
+        indicators: IndicatorProvider | None = None,
     ) -> None:
         super().__init__(
             time=time or snapshot.taken_at,
@@ -184,6 +186,9 @@ class LivePortfolioContext(PortfolioContext):
             histories=histories,
             market=market,
             cash_per_position=cash_per_position,
+            # E-a：实盘装 `LiveIndicatorBook`（在前缀历史上现算），
+            # 让 `ctx.ind(symbol)` 在回测与实盘是同一份策略代码
+            indicators=indicators,
         )
         self._snapshot = snapshot
         self._pending: list[Order] = []

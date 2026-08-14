@@ -50,6 +50,13 @@ from app.engine.backtest.portfolio_broker import PortfolioBroker
 from app.engine.backtest.report import build_report, metrics_to_dict
 from app.engine.backtest.trade import ExitRules, Trade
 from app.strategy.context import PortfolioContext, StrategyContext
+from app.strategy.precompute import (
+    IndicatorBook,
+    IndicatorSpec,
+    SymbolIndicators,
+    build_indicator_store,
+    indicator_spec_of,
+)
 
 if TYPE_CHECKING:
     from app.strategy.base import PortfolioStrategyBase, StrategyBase
@@ -140,6 +147,8 @@ class _RunState:
     dividend_cash: float = 0.0
     #: 策略是否覆盖了任一 L5 下单钩子（整轮回测判一次，避免逐 bar 反射）
     uses_order_hooks: bool = False
+    #: E-a 预算指标（整轮回测算一次）。None = 策略未声明，整条路径不启用
+    indicator_store: dict[str, SymbolIndicators] | None = None
 
 
 class PortfolioBacktestEngine:
@@ -243,12 +252,16 @@ class PortfolioBacktestEngine:
             controls=cfg.controls,
             account_controls=cfg.account_controls,
         )
-        state = _RunState(broker=broker, uses_order_hooks=_order_hooks_enabled(strategy))
+        state = _RunState(
+            broker=broker,
+            uses_order_hooks=_order_hooks_enabled(strategy),
+            indicator_store=_build_indicator_store(strategy, prep),
+        )
         tracker = DailyPnlTracker()
 
         cursors = dict.fromkeys(prep.symbols, 0)
         first = {s: (1 if s in prep.bars_at[0] else 0) for s in prep.symbols}
-        start_ctx = self._context(prep, 0, first, broker)
+        start_ctx = self._context(prep, state, 0, first)
         self._bind_order_hooks(strategy, state, start_ctx)
         strategy.on_start(start_ctx)
 
@@ -260,7 +273,7 @@ class PortfolioBacktestEngine:
 
         broker.cancel_all_pending()
         last = len(prep.timeline) - 1
-        stop_ctx = self._context(prep, last, cursors, broker)
+        stop_ctx = self._context(prep, state, last, cursors)
         self._bind_order_hooks(strategy, state, stop_ctx)
         strategy.on_stop(stop_ctx)
 
@@ -298,7 +311,7 @@ class PortfolioBacktestEngine:
         self._adjust_positions(strategy, prep, state, cursors, idx, ts)
 
         if idx >= self._config.warmup_bars:
-            ctx = self._context(prep, idx, cursors, broker)
+            ctx = self._context(prep, state, idx, cursors)
             self._bind_order_hooks(strategy, state, ctx)
             try:
                 strategy.on_bars(ctx)
@@ -325,7 +338,7 @@ class PortfolioBacktestEngine:
         """K4 风险闸门。策略未配置止损/ROI/追踪止损时是一条 getattr + 布尔判断。"""
         if not _exit_rules_of(strategy).is_enabled:
             return
-        ctx = self._context(prep, idx, cursors, state.broker)
+        ctx = self._context(prep, state, idx, cursors)
         self._bind_order_hooks(strategy, state, ctx)
         prices = {s: bar.close for s, bar in prep.bars_at[idx].items()}
         state.broker.check_exit_conditions(strategy, ctx, prices, ts)
@@ -342,7 +355,7 @@ class PortfolioBacktestEngine:
         """L4 仓位调整。`position_adjustment_enable=False`（默认）时只有一次 getattr。"""
         if not getattr(strategy, "position_adjustment_enable", False):
             return
-        ctx = self._context(prep, idx, cursors, state.broker)
+        ctx = self._context(prep, state, idx, cursors)
         self._bind_order_hooks(strategy, state, ctx)
         prices = {s: bar.close for s, bar in prep.bars_at[idx].items()}
         state.broker.adjust_positions(strategy, ctx, prices, ts)
@@ -360,19 +373,24 @@ class PortfolioBacktestEngine:
     def _context(
         self,
         prep: _PreparedData,
+        state: _RunState,
         idx: int,
         cursors: dict[str, int],
-        broker: PortfolioBroker,
     ) -> PortfolioContext:
         cfg = self._config
+        # 游标在主循环里原地推进，上下文必须拿一份快照 —— 历史视图与指标视图
+        # 共用同一份，两者对「现在是第几根 bar」的理解不能有第二个来源
+        snapshot = dict(cursors)
+        store = state.indicator_store
         return PortfolioContext(
             time=prep.timeline[idx],
             bars=prep.bars_at[idx],
             symbols=prep.symbols,
-            broker=broker,
-            histories=_LazyHistories(prep.frames, dict(cursors)),
+            broker=state.broker,
+            histories=_LazyHistories(prep.frames, snapshot),
             market=cfg.market,
             cash_per_position=cfg.cash_per_position,
+            indicators=None if store is None else IndicatorBook(store, snapshot),
         )
 
     # ── 结果组装 ─────────────────────────────────────────────
@@ -559,6 +577,11 @@ class _SingleSymbolAdapter:
     def on_stop(self, ctx: PortfolioContext) -> None:
         self._inner.on_stop(self._single(ctx))
 
+    # ── E-a 指标预算的透传 ───────────────────────────────────
+
+    def indicator_spec(self) -> IndicatorSpec | None:
+        return indicator_spec_of(self._inner)
+
     # ── K4 风险闸门的透传 ────────────────────────────────────
 
     def exit_rules(self) -> ExitRules:
@@ -633,10 +656,12 @@ class _SingleSymbolAdapter:
         return self._single(ctx)
 
     def _single(self, ctx: PortfolioContext) -> StrategyContext:
+        book = ctx.indicators
         return StrategyContext(
             bar=ctx.bars[self._symbol],
             history=ctx.histories[self._symbol],
             broker=ctx.broker,
+            indicators=None if book is None else book.view(self._symbol),
         )
 
 
@@ -653,6 +678,21 @@ def _exit_rules_of(strategy: object) -> ExitRules:
     """
     getter = getattr(strategy, "exit_rules", None)
     return getter() if callable(getter) else ExitRules()
+
+
+def _build_indicator_store(
+    strategy: object, prep: _PreparedData
+) -> dict[str, SymbolIndicators] | None:
+    """
+    E-a 指标预算：整轮回测把声明的指标算一次。
+
+    未声明 `declare_indicators` 的策略在这里就返回 None —— 后面 `_context`
+    连 `IndicatorBook` 都不构造，旧策略的每一根 bar 一行不变。
+    """
+    spec: IndicatorSpec | None = indicator_spec_of(strategy)
+    if spec is None or not len(spec):
+        return None
+    return build_indicator_store(spec, prep.frames)
 
 
 def _order_hooks_enabled(strategy: object) -> bool:

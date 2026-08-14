@@ -39,6 +39,7 @@ from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderType
 from app.risk.engine import get_risk_engine
 from app.risk.models import ViolationSeverity
 from app.strategy.live_context import AccountSnapshot, LivePortfolioContext
+from app.strategy.precompute import LiveIndicatorBook, indicator_spec_of
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +394,9 @@ class LivePortfolioRunner:
     ) -> None:
         self._instance_id = instance_id
         self._strategy = strategy
+        # E-a：声明只解析一次。实盘的 histories 是逐 bar 增长的前缀，
+        # 现算即可，结构上没有前视风险。未声明指标的策略在这里得到 None。
+        self._indicator_spec = indicator_spec_of(strategy)
         self._symbols = list(symbols)
         self._market = market
         self._frequency = frequency
@@ -545,15 +549,18 @@ class LivePortfolioRunner:
     def _build_context(
         self, timestamp: datetime, bars: Mapping[str, Bar], snapshot: AccountSnapshot
     ) -> LivePortfolioContext:
+        histories = _LiveHistories(self._history)
+        spec = self._indicator_spec
         return LivePortfolioContext(
             snapshot=snapshot,
             time=timestamp,
             bars=bars,
             symbols=list(self._symbols),
-            histories=_LiveHistories(self._history),
+            histories=histories,
             market=self._market,
             cash_per_position=self._cash_per_position,
             allow_short=self._allow_short,
+            indicators=None if spec is None else LiveIndicatorBook(spec, histories),
         )
 
     def _invoke_strategy(self, ctx: LivePortfolioContext) -> None:

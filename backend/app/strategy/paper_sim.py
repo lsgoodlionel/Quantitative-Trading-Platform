@@ -18,6 +18,7 @@ from datetime import date, timedelta
 from app.data.models import Bar
 from app.engine.backtest.engine import _bars_to_df
 from app.strategy.context import StrategyContext
+from app.strategy.precompute import indicator_spec_of, view_from_history
 
 logger = logging.getLogger(__name__)
 
@@ -287,11 +288,17 @@ def run_paper_simulation(
 
     # 初始化策略（用全部历史做 on_start）
     full_df = _bars_to_df(all_bars)
+    # ★ 这里的 full_df 含**模拟窗口之后**的 bar，相对逐 bar 循环是未来 ——
+    #   所以刻意不给 on_start 挂指标视图。策略在 on_start 里碰 ctx.ind 会拿到
+    #   一条明确的报错，而不是一份偷看了未来的指标。
     init_ctx = StrategyContext(bar=all_bars[-1], history=full_df, broker=None)
     try:
         strategy_obj.on_start(init_ctx)
     except Exception:
         pass
+
+    # E-a：声明解析一次；`history_df` 是逐 bar 增长的前缀，无前视风险
+    spec = indicator_spec_of(strategy_obj)
 
     initial_price = sim_bars[0].close
 
@@ -309,6 +316,7 @@ def run_paper_simulation(
             bar=bar,
             history=history_df,
             broker=broker,    # 使用纸面 broker
+            indicators=view_from_history(spec, history_df),
         )
         try:
             strategy_obj.on_bar(ctx)
