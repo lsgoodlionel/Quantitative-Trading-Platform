@@ -145,6 +145,7 @@ testpaths = ["tests"]
 #   2026-08-11  69.59% → 71.32%（Wave N-a 分析报告 + O-a 热加载/CLI/通知），ratchet 设为 71
 #   2026-08-11  71.32% → 71.97%（V3 Wave B-a LLM 网关），ratchet 保持 71（余量不足 1pp）
 #   2026-08-12  71.97% → 72.51%（V3 Wave B-c Copilot），ratchet 上调至 72
+#   2026-08-14  72.51% → 73.01%（V3 Wave C-a AI 研报/回测诊断），ratchet 保持 72（余量不足 1pp）
 addopts = "--cov=app --cov-report=term-missing --cov-fail-under=72"
 
 [tool.coverage.run]

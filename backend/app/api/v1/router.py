@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    ai_reports,
     alerts,
     audit,
     auth,
@@ -118,3 +119,6 @@ api_router.include_router(lab.router,          prefix="/lab",      tags=["Lab Ar
 # ── v3.0 Wave B-a：LLM 网关 ──────────────────────────────────────
 api_router.include_router(llm.router, prefix="/llm", tags=["LLM Gateway"])
 api_router.include_router(copilot.router, prefix="/copilot", tags=["Copilot"])
+
+# ── v3.0 Wave C-a：AI 研报 / 回测诊断 ────────────────────────────
+api_router.include_router(ai_reports.router, prefix="/ai/reports", tags=["AI Reports"])

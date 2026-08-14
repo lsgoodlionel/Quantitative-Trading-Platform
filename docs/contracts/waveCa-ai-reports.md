@@ -51,11 +51,19 @@ POST /api/v1/ai/reports/stock   { symbol, market, lookback_days? }
 ## 二、I5 回测 AI 诊断
 
 ```
-POST /api/v1/ai/reports/backtest   { backtest_id | full_validation_run_id }
-  → { findings: [...], next_steps: [...], disclaimer, model }
+POST /api/v1/ai/reports/backtest   { run_id?, grade, steps? }
+  → { summary, coverage, is_complete, grade_level, grade_score,
+      findings: [...], next_steps: [...],
+      contradictions: [...], has_contradiction, disclaimer, model }
 ```
 
 **输入**：A-d 已建的 `full-validation` 五步结果 + 规则化评级 `grade`。
+
+> **契约原稿写的是 `{ backtest_id | full_validation_run_id }`，那是错的。**
+> `full_validation.py` 的 `run_id` 是每次请求现生成的 `uuid4().hex[:16]`，
+> 平台**从不落库**；`backtest_id` 同理。按 id 反查必然查空。
+> 改为**直接收结果体本身**（前端手里就有那份数据），`run_id` 仅作溯源展示。
+> 若日后要按 id 取，得先建 `full_validation_runs` 表 —— 那是独立的一项工作。
 
 ### 2.1 关键设计：AI 解读**规则评级**，而不是取代它
 
@@ -70,14 +78,43 @@ I5 的价值是把那些机器判据**翻译成人能读的诊断与下一步**�
 ⚠️ **`grade.based_on` 是「基于 N/5 步」**。诊断里要如实带上这个覆盖度，
 不能拿三步的结果给一个听起来很全面的结论。
 
+### 2.2 「矛盾」如何判定（原稿没定义）
+
+用模型去审模型成本翻倍且同样不可靠。实际实现是 **词表 + 否定护栏** 的启发式
+（`app/ai_reports/contradiction.py`）：每条规则配一组反向断言词表
+（`param_sensitivity` ↔「参数稳健 / 对参数不敏感」…），命中后再检查前后否定词，
+避开「样本外表现稳健**性不足**」「**并非**无过拟合」这类误报。
+
+⚠️ **它是兜底告警，不是准入判定。** 会漏报（模型换个说法就绕过），但极少误报。
+命中时前端出红条「请以规则判据为准」，**报告照常展示** ——
+把报告直接丢掉反而让用户看不到问题出在哪。
+
 ---
 
 ## 三、共用约束
 
 - 两个端点都走 `app/core/llm/service.resolve_active()`；
-  **未配置 provider → 501 + 指向 `/settings/models` 的引导**（与 Copilot 一致）
-- LLM 调用要有超时与轮次上限，失败时返回结构化错误而非半截报告
+  **未配置 provider → 501 + 指向 `/settings/models` 的引导**
+
+  > 原稿这里写「与 Copilot 一致」，**措辞是错的**：Copilot 恰恰不回 501，
+  > 它回 200 + `needs_setup=true`（`copilot.py::_setup_guidance`）。
+  > 两者刻意不同 —— 聊天响应天然有 message 字段能承载引导语；
+  > 研报是产出资源的一次性 POST，回 200 就得往响应体里塞一份假报告。
+  > **用户体验一致（都渲染引导块），协议不一致（501 vs 200）。**
+
+- LLM 调用要有超时；**JSON 解析失败最多纠正一次**（共 2 次调用，测试锁死调用数）。
+  报告场景不调工具，没有 Copilot 那种 tool round —— 原稿的「轮次上限」指的是这个。
+  失败时返回结构化错误而非半截报告
 - **测试全部 mock LLM**，不连任何真实模型
+
+### 3.1 数据覆盖度的真实边界（原稿没写，实现时才发现）
+
+- **A 股没有公司新闻源**：`news_service.get_news` 对 A 股直接返回空。
+  所以 A 股研报的 `sources` 恒为空、消息面恒走「本期无可用新闻」那条路径。
+- **期权 IV 仅美股**（`endpoints/options.py` 明写）。港股/A 股不空跑请求，
+  直接写一条 `data_note` 说明。
+
+§1.1 第 1 点「sources 必须非空」只对 **US/HK** 成立。
 
 ---
 

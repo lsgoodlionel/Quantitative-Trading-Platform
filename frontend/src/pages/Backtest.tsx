@@ -4,6 +4,7 @@ import { AppShell } from "@/components/layout/AppShell"
 import { PAGE_HELP } from "@/data/pageHelp"
 import { useRunBacktest, useStrategies } from "@/hooks/useBacktest"
 import { useFullValidation, VALIDATION_STEPS, type ValidationStep } from "@/hooks/useFullValidation"
+import { BacktestDiagnosisPanel } from "@/components/backtest/BacktestDiagnosisPanel"
 import { BacktestResultPanel } from "@/components/backtest/BacktestResultPanel"
 import { FullValidationPanel } from "@/components/backtest/FullValidationPanel"
 import { HistoryTab } from "@/components/backtest/HistoryTab"
@@ -167,6 +168,13 @@ export function Backtest() {
                 selectedSteps={selectedSteps}
                 onToggleStep={toggleStep}
               />
+              {/* AI 诊断挂在完整验证结果之后：先给可审计的规则判据，
+                  再给人话翻译 —— AI 解读评级，不取代评级（V3 Wave C-a / I5） */}
+              {fullValidation.data && !fullValidation.isPending && (
+                <div className="mt-4">
+                  <BacktestDiagnosisPanel result={fullValidation.data} />
+                </div>
+              )}
             </div>
           </div>
         )}

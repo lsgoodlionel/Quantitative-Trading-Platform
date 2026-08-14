@@ -77,6 +77,14 @@ _ENTRY_MODULES = [
     "app.copilot.engine",
     "app.copilot.execute",
     "app.api.v1.endpoints.copilot",
+    # V3 Wave C-a AI 研报：ai_reports 横跨 core.llm + data.providers + engine.backtest 三块，
+    # 是最容易补出环的位置 —— 尤其 diagnosis 引用 validation_grade，
+    # 而 full_validation 那条链上任何一环回头 import ai_reports 都会成环
+    "app.ai_reports",
+    "app.ai_reports.snapshot",
+    "app.ai_reports.stock_report",
+    "app.ai_reports.diagnosis",
+    "app.api.v1.endpoints.ai_reports",
 ]
 
 

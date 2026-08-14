@@ -9,17 +9,19 @@ import { useUrlTab } from "@/hooks/useUrlTab"
 import { useMarketOverview } from "@/hooks/useMarketData"
 import { useSpotQuotes } from "@/hooks/useSpotQuotes"
 import type { Market } from "@/types"
+import { AiReportTab } from "./AiReportTab"
 import { QuoteTab } from "./QuoteTab"
 import { WatchlistTab } from "./WatchlistTab"
 import { EVENTS_HELP, EventsTab } from "./events/EventsTab"
 
-const TABS = ["quote", "watchlist", "events"] as const
+const TABS = ["quote", "watchlist", "events", "ai"] as const
 type MarketTab = (typeof TABS)[number]
 
 const TAB_LABELS: { key: MarketTab; label: string }[] = [
   { key: "quote", label: "📊 行情查询" },
   { key: "watchlist", label: "⭐ 自选行情" },
   { key: "events", label: "🗓️ 事件期权" },
+  { key: "ai", label: "🤖 AI 研报" },
 ]
 
 export function MarketPage() {
@@ -109,6 +111,9 @@ export function MarketPage() {
             )}
             {tab === "events" && (
               <EventsTab key={tabKey} initialSymbol={panelSymbol} initialMarket={panelMarket} />
+            )}
+            {tab === "ai" && (
+              <AiReportTab key={tabKey} initialSymbol={panelSymbol} initialMarket={panelMarket} />
             )}
           </div>
         </div>
