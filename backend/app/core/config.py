@@ -1,6 +1,21 @@
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 仓库里公开可见的占位密钥。字段默认值与生产校验都必须引用这一个常量：
+# 如果两处各写一份字面量，改了一处忘了另一处，校验就静默失效了。
+INSECURE_SECRET_KEY_DEFAULT = "CHANGE_ME_IN_PRODUCTION_USE_RANDOM_64_CHARS"
+
+# HS256 的密钥短于摘要长度（32 字节）就削弱了签名强度。
+MIN_SECRET_KEY_LENGTH = 32
+
+# `.env.example` 里的占位串是 `CHANGE_ME_RUN_make_gen-secret`，与上面的字段默认值
+# 并不相同 —— 只比对默认值会漏掉「照抄了 .env.example 就上生产」这条最常见的路径。
+# 长度检查目前恰好也能拦住它（29 < 32），但那是巧合：占位串一变长就失效了。
+_PLACEHOLDER_MARKER = "CHANGE_ME"
+
+# 报错里给出可直接执行的修复命令。只写「配置无效」等于让人去翻源码。
+_GEN_SECRET_HINT = "make gen-secret  # 或 openssl rand -hex 32"
 
 
 class Settings(BaseSettings):
@@ -44,7 +59,7 @@ class Settings(BaseSettings):
     redis_stream_maxlen: int = 10_000
 
     # JWT 认证
-    secret_key: str = "CHANGE_ME_IN_PRODUCTION_USE_RANDOM_64_CHARS"
+    secret_key: str = INSECURE_SECRET_KEY_DEFAULT
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24小时
 
@@ -109,6 +124,67 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @model_validator(mode="after")
+    def check_production_hardening(self) -> "Settings":
+        """生产环境的跨字段校验：不合格就**在启动时失败**。
+
+        为什么是启动失败而不是一条 WARNING：一条警告在容器日志里滚过去等于没有，
+        而一个用公开默认密钥跑着的生产实例，是在持续签发任何人都能伪造的令牌。
+
+        为什么只卡 production：development / staging 必须保持零配置可启动。
+        把开发也卡住，人只会去改 `ENVIRONMENT` 绕过，这个控制反而彻底失效。
+        """
+        if self.environment != "production":
+            return self
+
+        problems: list[str] = []
+
+        # ⚠️ 以下任何一条都不得把 secret_key 的实际值写进消息（日志会留存）。
+        if (
+            self.secret_key == INSECURE_SECRET_KEY_DEFAULT
+            or _PLACEHOLDER_MARKER in self.secret_key.upper()
+        ):
+            problems.append(
+                "SECRET_KEY 仍是仓库里公开可见的默认占位值 —— 任何人都能用它伪造 admin 令牌。\n"
+                f"    修复：生成一个随机密钥并写入环境变量 SECRET_KEY：\n      {_GEN_SECRET_HINT}"
+            )
+        elif len(self.secret_key) < MIN_SECRET_KEY_LENGTH:
+            problems.append(
+                f"SECRET_KEY 长度不足：{len(self.secret_key)} 字符 < 要求的 "
+                f"{MIN_SECRET_KEY_LENGTH} 字符。\n"
+                f"    修复：\n      {_GEN_SECRET_HINT}"
+            )
+
+        origins = self.origins_list
+        if not origins:
+            problems.append(
+                "ALLOWED_ORIGINS 为空 —— 浏览器端将无法调用本 API。\n"
+                "    修复：ALLOWED_ORIGINS=https://your-domain.example.com"
+            )
+        elif "*" in origins:
+            problems.append(
+                "ALLOWED_ORIGINS 含通配符 '*' —— 与 allow_credentials=True 组合意味着"
+                "任意站点都能带着用户凭证调用本 API。\n"
+                "    修复：改为逐个列出真实域名，如 "
+                "ALLOWED_ORIGINS=https://your-domain.example.com"
+            )
+
+        if self.debug:
+            problems.append(
+                "DEBUG=True —— 会向调用方泄露堆栈与 SQL 语句。\n"
+                "    修复：DEBUG=false"
+            )
+
+        if problems:
+            detail = "\n".join(f"  [{i}] {p}" for i, p in enumerate(problems, 1))
+            raise ValueError(
+                "ENVIRONMENT=production 下的配置校验未通过，拒绝启动：\n"
+                f"{detail}\n"
+                "  （如果这是本机开发，正确的做法是设置 ENVIRONMENT=development，"
+                "而不是放宽以上任何一条。）"
+            )
+        return self
 
 
 settings = Settings()

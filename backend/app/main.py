@@ -8,6 +8,8 @@ from prometheus_client import make_asgi_app
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import get_logger, setup_logging
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.version import APP_VERSION
 
 logger = get_logger(__name__)
 
@@ -80,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="QuantBot API",
-        version="0.1.0",
+        version=APP_VERSION,
         description="Multi-market quantitative trading platform (US/HK/A)",
         docs_url="/docs" if not settings.is_production else None,
         redoc_url="/redoc" if not settings.is_production else None,
@@ -96,6 +98,12 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
 
+    # 安全响应头。必须在 CORS **之后**注册：add_middleware 是往外层加，
+    # 后加的在更外层，这样 CORS 自己短路返回的预检响应也能带上这些头。
+    # HSTS 只在 production 开启（且中间件内部还要求这一跳确实是 HTTPS）——
+    # 在 http://localhost 上下发会把开发者浏览器锁死在 https。
+    app.add_middleware(SecurityHeadersMiddleware, enable_hsts=settings.is_production)
+
     # Prometheus 指标端点
     if settings.prometheus_enabled:
         metrics_app = make_asgi_app()
@@ -105,9 +113,9 @@ def create_app() -> FastAPI:
     from app.api.v1.router import api_router
     app.include_router(api_router, prefix="/api/v1")
 
-    @app.get("/health", tags=["System"])
-    async def health_check() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0", "environment": settings.environment}
+    # 存活 /health 与就绪 /health/ready（见 app/api/health.py）
+    from app.api.health import router as health_router
+    app.include_router(health_router)
 
     _register_exception_handlers(app)
     return app

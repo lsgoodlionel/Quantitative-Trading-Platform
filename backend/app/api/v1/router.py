@@ -53,13 +53,18 @@ from app.api.v1.endpoints import (
     users,
 )
 from app.core.config import settings
+from app.core.version import APP_VERSION
 
 api_router = APIRouter()
 
 
 @api_router.get("/health", tags=["System"])
 async def api_health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.1.0", "environment": settings.environment}
+    """与 `/health` 同语义的存活探针（前端探测的是带版本前缀的这一个）。
+
+    版本号取自 `APP_VERSION` 单一常量 —— 此前这里和 main.py 各硬编码了一份。
+    """
+    return {"status": "ok", "version": APP_VERSION, "environment": settings.environment}
 
 
 api_router.include_router(auth.router,          prefix="/auth",            tags=["Auth"])

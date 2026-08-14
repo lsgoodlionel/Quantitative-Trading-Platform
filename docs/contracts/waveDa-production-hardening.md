@@ -39,8 +39,14 @@ debug           为 True                       → 拒绝启动
 3. **只在 production 下强制。** development / staging 保持零配置可启动 ——
    把开发也卡住，人只会去改 `environment` 绕过，控制反而失效。
 4. **默认值的判定要基于常量而非字面量重复。** 把
-   `_INSECURE_SECRET_KEY_DEFAULT` 提成模块级常量，字段默认值与校验都引用它，
+   `INSECURE_SECRET_KEY_DEFAULT` 提成模块级常量，字段默认值与校验都引用它，
    否则改了一处忘了另一处，校验就静默失效了。
+
+   > ⚠️ **但只比对这一个常量会漏掉最常见的上生产路径。** `.env.example` 里的占位串
+   > 是 `CHANGE_ME_RUN_make_gen-secret`，**与代码默认值根本不是同一个串** ——
+   > 照抄 `.env.example` 的部署，常量比对完全拦不住。
+   > 目前是长度检查（29 < 32）恰好兜住了它，但那是巧合：占位串一变长就静默失效。
+   > 必须再加一条 `CHANGE_ME` 标记检测，并有一条专门断言「长占位串也被拒」的用例。
 
 ⚠️ **不要把 `secret_key` 的值写进任何日志或错误信息**，哪怕是「当前值是 xxx」。
 
@@ -76,8 +82,22 @@ GET /health/ready     就绪探针（readiness）：逐项探测依赖
    Redis 挂 = `degraded`（200，缓存/通知降级但主要功能仍在）。
    全判成 down 会让一次缓存抖动摘掉整个集群。
 
-⚠️ **版本号目前在 `main.py` 与 `router.py` 各硬编码了一份 `"0.1.0"`**，
-提成单一常量（`app/core/version.py` 或读 `pyproject`），否则发版必漏改一处。
+⚠️ **`/health/ready` 是免鉴权端点，绝不能把驱动层原始异常直接吐出去。**
+（原稿的响应示例就这么写的。）SQLAlchemy/asyncpg 的连接类异常会带上
+`postgresql+asyncpg://user:password@host/db` —— 那这个端点就成了一个
+免鉴权的数据库口令泄露口。出口必须过一层脱敏：正则抹掉连接串凭证 + 截断。
+
+⚠️ **版本号实际散在 4 处**（`pyproject.toml` 是源头、`main.py` 两处、`router.py` 一处，
+原稿只说了两处），提成 `app/core/version.py` 的单一常量。
+
+> **不要用 `importlib.metadata.version()` 读 pyproject**：镜像是以源码目录方式运行的，
+> 没有 `pip install .`，容器里会抛 `PackageNotFoundError`。
+> 用常量，另加一条测试以 `tomllib` 断言它与 `pyproject.toml` 一致 ——
+> 漂移照样会红，但不引入运行时依赖。
+
+⚠️ **探测必须并行**（`asyncio.gather`）。串行时总耗时是各超时之和，
+两个依赖同时挂就翻倍到 4s，很容易越过编排系统自己的超时，
+退化成「探测无响应」—— 那比一个明确的失败更糟。
 
 ---
 
@@ -95,6 +115,22 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 会把开发者的浏览器锁死在 https 上，之后本地开发全部打不开，
 而且清起来很麻烦（要进 `chrome://net-internals`）。
 
+> **「走 HTTPS」不能只看 `scope["scheme"]` —— 照字面实现等于永不生效。**
+> 生产里 TLS 由 Nginx 终止（就是 §五点名的 D-c），到达应用时 scheme 恒为 `http`，
+> 于是 HSTS 在唯一需要它的环境里永远不下发。必须同时读 `X-Forwarded-Proto`
+> （多级代理会串成 `"https, http"`，取第一段）。
+>
+> **这给 D-c 留了个前置条件**：Nginx 必须设 `proxy_set_header X-Forwarded-Proto $scheme`。
+> 伪造该头不构成攻击 —— 至多让攻击者自己的浏览器收到 HSTS。
+
+⚠️ **中间件必须注册在 CORS 之后。** `add_middleware` 是往**外层**加，后加的在更外层。
+加在 CORS 之前的话安全头就成了内层，CORS 自己短路返回的预检（OPTIONS）响应
+不会带安全头，与 §四「四个通用头恒在」不符。
+
+⚠️ **必须写成纯 ASGI 中间件，不要用 `BaseHTTPMiddleware`。** 本项目有 SSE 端点
+（`/api/v1/stream/*`），后者会把响应包进中转的 `StreamingResponse`，
+影响事件缓冲与断连传播。纯 ASGI 只改 `http.response.start` 的头部。
+
 ⚠️ **不在本期加 CSP。** 前端用了 Monaco 编辑器，它需要 worker 与 blob URL，
 一个没测过的 CSP 会静默打碎编辑器。要做得先在真浏览器里逐条验证 —— 单列一项。
 
@@ -111,12 +147,15 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
    - production + debug=True → 启动失败
    - development 下以上全部**允许**（零配置可启动）
    - 报错信息**不含** secret_key 的实际值
-3. tests/test_health.py:
+3. tests/test_health.py（**该文件已存在**且含 bars/presets/risk 三个无关的既有测试，
+   按「新建」照做会静默删掉它们 —— 追加，不要覆盖）:
    - /health 不触碰任何依赖（mock 断言零调用），依赖全挂仍 200
    - /health/ready：Postgres 挂 → status=down 且 HTTP 503
    - /health/ready：仅 Redis 挂 → status=degraded 且 HTTP 200
    - 探测超时被兜住，不会挂起
-   - 版本号只有一个来源（断言两个端点返回同一个值且来自常量）
+   - 版本号只有一个来源（断言两个端点返回同一个值且来自常量，
+     并以 tomllib 断言与 pyproject.toml 一致）
+   - error 字段经过脱敏：含连接串凭证的异常不会把口令吐出去
 4. tests/test_security_headers.py:
    - 四个通用头恒在
    - HSTS 仅 production 下发；development 下**不**下发
