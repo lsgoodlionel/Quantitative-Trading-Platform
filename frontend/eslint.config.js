@@ -46,4 +46,16 @@ export default [
     files: ['**/*.test.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
+  {
+    // Playwright 用例跑在 Node 里（page.evaluate 的回调才跑在浏览器里），
+    // 两边的全局都放开，免得 console / process 之类被判成未定义
+    files: ['e2e/**/*.ts'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
+    rules: {
+      // Playwright 的 fixture 回调第二个参数按约定就叫 `use`，
+      // react-hooks 规则会把 `await use(page)` 误判成在非组件里调用 Hook。
+      // e2e 里没有 React，这条规则在此毫无意义
+      'react-hooks/rules-of-hooks': 'off',
+    },
+  },
 ]

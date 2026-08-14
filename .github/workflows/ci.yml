@@ -76,3 +76,52 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: E2E smoke (Playwright · 非阻塞)
+    runs-on: ubuntu-latest
+    # ⚠️ 暂时不进阻塞门禁（V3 Wave D-b · 契约 §2.4）。
+    #
+    # 理由：一套刚写的 E2E 必然有几轮不稳定期。直接设成阻塞，所有人第一时间学会的
+    # 就是点 "re-run" —— 之后真出问题时也会照点不误，门禁反而白设。
+    #
+    # 收紧条件：**连续 20 次绿**（含至少一次 main 分支推送）之后，
+    # 删掉这行 continue-on-error，并把本 job 加进分支保护的必需检查。
+    # 若中途有红，计数重新从 0 开始；若红的原因是用例本身不稳而非产品缺陷，
+    # 先修用例（或删掉那条用例）再重新计数，不要靠 retries 掩盖。
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 只装 Chromium：跨浏览器矩阵不在本 Wave 范围内，多装两个浏览器会让
+      # 每次 CI 多花几分钟下载，换不来任何额外信号
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+
+      # 后端全部由 page.route 桩住，所以这里不起 Postgres/Redis/Celery，
+      # 也不需要 backend job 先跑完 —— 见契约 §2.1
+      - name: Run E2E smoke
+        run: npm run test:e2e
+
+      - name: Upload Playwright report (trace / 截图 / 视频)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

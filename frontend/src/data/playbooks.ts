@@ -84,7 +84,10 @@ export const PLAYBOOKS: readonly Playbook[] = [
         id: "preview-rebalance",
         title: "预览调仓",
         description: "对照当前持仓看这组权重意味着买卖多少，注意换手率与交易成本。",
-        to: "/portfolio?tab=holdings",
+        // 「预览调仓」按钮在 optimizer tab 的优化结果里（RebalancePanel 挂在
+        // OptimizerResult 内），不在 holdings tab —— 后者只有持仓明细。
+        // 此前指向 holdings，等于把用户送到一个没有这个按钮的页面。
+        to: "/portfolio?tab=optimizer",
         criteria: "看过调仓清单，换手率可接受",
       },
       {
