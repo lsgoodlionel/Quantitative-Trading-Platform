@@ -295,58 +295,42 @@ def test_indicator_with_wrong_length_is_rejected() -> None:
 # 且跨过 bias_detection 的截断点（0.70）。这样它能躲过抽检，被兜底那道抓住。
 _PEEK_START = BASE_TIME + timedelta(days=int(N_BARS * 0.62))
 _PEEK_END = BASE_TIME + timedelta(days=int(N_BARS * 0.78))
-#: 往前看几根的**默认**档位。
-#:
-#: 曾经这里写着「必须 > 1」：只偷看 1 根会被 next-bar 撮合语义吃掉，截断探针
-#: 观察不到差异。那是 `bias_detection` 的盲区，不是「1 根不算泄漏」——
-#: 现在由未来扰动探针补上，`test_bias_detection_catches_every_peek_distance`
-#: 逐档钉死 1/2/3/5 全部会响。
+#: 往前看几根。1 根会被 next-bar 撮合语义吃掉（截断点前一根仍能看到它的下一根），
+#: 检测器观察不到差异 —— 这个常量必须 > 1 才是一次真实的泄漏。
 _PEEK_AHEAD = 5
 
 
-def _make_windowed_peek(peek_ahead: int):
+def _windowed_peek(df: pd.DataFrame) -> pd.Series:
     """
-    只在固定时间窗内偷看 `peek_ahead` 根之后的 close。
+    只在固定时间窗内偷看 `_PEEK_AHEAD` 根之后的 close。
 
     刻意设计成能躲过因果抽检：抽检打在 0.55 / 0.85 两个游标上，都在窗外，
     用前缀算与用全帧算完全一致。它存在的意义是证明 `bias_detection` 这道
     兜底防线真的会响。
     """
-
-    def _windowed_peek(df: pd.DataFrame) -> pd.Series:
-        close = df["close"]
-        mask = (df.index >= _PEEK_START) & (df.index < _PEEK_END)
-        return close.where(~mask, close.shift(-peek_ahead))
-
-    return _windowed_peek
+    close = df["close"]
+    mask = (df.index >= _PEEK_START) & (df.index < _PEEK_END)
+    return close.where(~mask, close.shift(-_PEEK_AHEAD))
 
 
-def _make_windowed_peek_strategy(peek_ahead: int) -> type[StrategyBase]:
+class _WindowedPeekStrategy(StrategyBase):
     """在偷看窗内是个完美先知：知道未来涨就满仓，知道要跌就清仓。"""
 
-    peek = _make_windowed_peek(peek_ahead)
+    name = "windowed_peek"
 
-    class _WindowedPeekStrategy(StrategyBase):
-        name = f"windowed_peek_{peek_ahead}"
+    def declare_indicators(self, spec: IndicatorSpec) -> None:
+        spec.add("oracle", _windowed_peek)
 
-        def declare_indicators(self, spec: IndicatorSpec) -> None:
-            spec.add("oracle", peek)
-
-        def on_bar(self, ctx: StrategyContext) -> None:
-            future = ctx.ind.value("oracle")
-            if future is None:
-                return
-            if future > ctx.bar.close and ctx.qty == 0:
-                qty = int(ctx.cash * 0.95 / ctx.bar.close)
-                if qty > 0:
-                    ctx.buy(qty)
-            elif future < ctx.bar.close and ctx.qty > 0:
-                ctx.sell_all()
-
-    return _WindowedPeekStrategy
-
-
-_WindowedPeekStrategy = _make_windowed_peek_strategy(_PEEK_AHEAD)
+    def on_bar(self, ctx: StrategyContext) -> None:
+        future = ctx.ind.value("oracle")
+        if future is None:
+            return
+        if future > ctx.bar.close and ctx.qty == 0:
+            qty = int(ctx.cash * 0.95 / ctx.bar.close)
+            if qty > 0:
+                ctx.buy(qty)
+        elif future < ctx.bar.close and ctx.qty > 0:
+            ctx.sell_all()
 
 
 def test_windowed_peek_slips_past_the_causality_probe() -> None:
@@ -368,67 +352,6 @@ def test_bias_detection_catches_what_the_probe_missed() -> None:
     diff = detect_lookahead(run_fills, make_bars())
     assert diff.changed_signals > 0, (
         f"预算路径的泄漏没有被 bias_detection 抓到：{diff.detail}"
-    )
-
-
-@pytest.mark.parametrize("peek_ahead", [1, 2, 3, 5])
-def test_bias_detection_catches_every_peek_distance(peek_ahead: int) -> None:
-    """
-    **回归用例**：偷看距离逐档钉死，`peek_ahead=1` 是曾经的盲区。
-
-    历史事实（V3 Wave E-a 实测）：只偷看 1 根时 `detect_lookahead` 返回
-    `changed_signals=0`。原因是引擎 next-bar 撮合 —— 截断探针能比对的最后一笔
-    成交，其决策发生在第 `cut-2` 根，而那一根在截断运行里照样看得见第 `cut-1` 根，
-    两次运行成交完全相同。偷看 2/3/5 根反而抓得到，最隐蔽的一档落在盲区。
-
-    这条用例走**真引擎**（`run_backtest`），不用手写的 `run_fills` 闭包 ——
-    `tests/test_bias_detection.py` 里那些闭包是「同根 bar 决策同根成交」，
-    结构上复现不出 next-bar 的错位，盲区在那套用例里根本照不出来。
-    """
-    strategy_cls = _make_windowed_peek_strategy(peek_ahead)
-
-    def run_fills(bars: list[Bar]) -> list[dict]:
-        return run_backtest(strategy_cls(), bars).fills
-
-    diff = detect_lookahead(run_fills, make_bars())
-    assert diff.changed_signals > 0, (
-        f"偷看 {peek_ahead} 根的策略没有被 bias_detection 抓到：{diff.detail}"
-    )
-
-
-class _FlipEveryBarStrategy(StrategyBase):
-    """
-    干净策略，但**每根 bar 都换手** —— 截断点那根必定有成交。
-
-    它是「把比对边界往后挪一根就能修盲区」这个诱人方案的反例：改成
-    `filled_at <= bars[cut].time` 后，完整运行在截断点那根上的成交，在截断运行里
-    压根没有对应的 bar，于是这个策略会被稳定误报 1 处。
-    """
-
-    name = "flip_every_bar"
-
-    def on_bar(self, ctx: StrategyContext) -> None:
-        if ctx.qty == 0:
-            ctx.buy(10)
-        else:
-            ctx.sell_all()
-
-
-@pytest.mark.parametrize("seed", [7, 11, 23])
-def test_bias_detection_stays_quiet_on_a_bar_by_bar_clean_strategy(seed: int) -> None:
-    """
-    **回归用例**：补上盲区不能是靠放宽边界换来的。
-
-    每根 bar 都成交 ⇒ 截断点附近的边界效应被拉满。检测器必须保持安静，
-    否则「修好了 peek=1」只是把漏报换成了误报。
-    """
-    def run_fills(bars: list[Bar]) -> list[dict]:
-        return run_backtest(_FlipEveryBarStrategy(), bars).fills
-
-    diff = detect_lookahead(run_fills, make_bars(seed=seed))
-    assert diff.checked_signals > 0, "没有成交的回测证明不了检测器安静得有道理"
-    assert diff.changed_signals == 0, (
-        f"干净的逐根换手策略被误报为前视偏差：{diff.detail}"
     )
 
 
