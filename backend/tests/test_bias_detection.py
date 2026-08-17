@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.data.models import Bar, Frequency, Market
 from app.engine.backtest.bias_detection import (
     detect_lookahead,
@@ -48,6 +50,12 @@ def _iso(bar: Bar) -> str:
 
 
 # ── 策略成交生成器（run_fills 代理） ─────────────────────────────
+
+#: 本文件所有 run_fills 桩都是**同 bar 成交**（决策与成交落在同一根 bar），
+#: 而真实引擎是 next-bar 撮合。扰动法的比对窗口取决于这个约定，
+#: 所以每个调用都显式传 `decision_to_fill_bars=0` ——
+#: 用默认的 1 会把这些干净桩误判成有前视偏差。
+
 
 def clean_fills(bars: list[Bar]) -> list[dict]:
     """干净策略：仅依赖当前 bar 自身属性决策（无未来、无历史起点依赖）。
@@ -94,7 +102,7 @@ class TestDetectLookahead:
         bars = _make_bars(40)
 
         # Act
-        diff = detect_lookahead(lookahead_fills, bars, cut_ratio=0.7)
+        diff = detect_lookahead(lookahead_fills, bars, cut_ratio=0.7, decision_to_fill_bars=0)
 
         # Assert: 截断未来数据后，截断点前的成交发生变化
         assert diff.changed_signals > 0
@@ -105,7 +113,7 @@ class TestDetectLookahead:
         bars = _make_bars(40)
 
         # Act
-        diff = detect_lookahead(clean_fills, bars, cut_ratio=0.7)
+        diff = detect_lookahead(clean_fills, bars, cut_ratio=0.7, decision_to_fill_bars=0)
 
         # Assert: 干净策略截断前成交完全一致
         assert diff.changed_signals == 0
@@ -157,7 +165,7 @@ class TestRunBiasCheck:
         bars = _make_bars(60)
 
         # Act
-        outcome = run_bias_check(clean_fills, bars, startup_candles=[5, 10])
+        outcome = run_bias_check(clean_fills, bars, startup_candles=[5, 10], decision_to_fill_bars=0)
 
         # Assert
         assert outcome.has_lookahead_bias is False
@@ -171,7 +179,7 @@ class TestRunBiasCheck:
         bars = _make_bars(60)
 
         # Act
-        outcome = run_bias_check(lookahead_fills, bars, startup_candles=[5, 10])
+        outcome = run_bias_check(lookahead_fills, bars, startup_candles=[5, 10], decision_to_fill_bars=0)
 
         # Assert
         assert outcome.has_lookahead_bias is True
@@ -183,7 +191,7 @@ class TestRunBiasCheck:
         bars = _make_bars(60)
 
         # Act
-        outcome = run_bias_check(recursive_fills, bars, startup_candles=[5, 10])
+        outcome = run_bias_check(recursive_fills, bars, startup_candles=[5, 10], decision_to_fill_bars=0)
 
         # Assert
         assert outcome.has_recursive_bias is True
@@ -194,9 +202,85 @@ class TestRunBiasCheck:
         bars = _make_bars(30)
 
         # Act
-        outcome = run_bias_check(clean_fills, bars, startup_candles=[500])
+        outcome = run_bias_check(clean_fills, bars, startup_candles=[500], decision_to_fill_bars=0)
 
         # Assert
         assert outcome.recursive == []
         assert outcome.has_recursive_bias is False
         assert any("跳过递归偏差检测" in n for n in outcome.notes)
+
+
+# ── 盲区回归：截断法单独用不够 ─────────────────────────────────
+
+
+def _peek_fills_factory(horizon: int, delay: int):
+    """构造一个偷看 `horizon` 根、隔 `delay` 根成交的策略桩。
+
+    `delay=1` 复刻真实引擎的 next-bar 撮合 —— 这正是盲区所在。
+    """
+
+    def run_fills(bars: list[Bar]) -> list[dict]:
+        fills: list[dict] = []
+        for i in range(len(bars) - horizon - delay):
+            if bars[i + horizon].close > bars[i].close:      # ← 偷看未来
+                exec_bar = bars[i + delay]
+                fills.append(
+                    {
+                        "filled_at": _iso(exec_bar),
+                        "side": "BUY",
+                        "qty": 1,
+                        "price": exec_bar.close,
+                    }
+                )
+        return fills
+
+    return run_fills
+
+
+@pytest.mark.parametrize("horizon", [1, 2, 3, 5])
+def test_perturbation_catches_peeking_at_every_horizon(horizon: int) -> None:
+    """偷看 1/2/3/5 根都必须被检出。
+
+    **这条是盯着一个实测出来的盲区写的**：只用截断法时，
+    偷看 1 根的策略在 next-bar 撮合下，那笔发散的成交恰好落在截断时刻，
+    被「严格早于」的比对窗口排除 —— 实测 H=1 漏报、H=2 仅 1/97 个信号变化、
+    H=3/5 均漏报。灵敏度约等于 H/N。
+
+    补上的扰动法（未来价格变成别的值 + 只比对决策不比对价格）覆盖了这一片。
+    如果有人把扰动那段删掉「简化」实现，这条会红。
+    """
+    bars = _make_bars(120)
+    run_fills = _peek_fills_factory(horizon, delay=1)
+
+    diff = detect_lookahead(run_fills, bars, cut_ratio=0.7, decision_to_fill_bars=1)
+
+    assert diff.changed_signals > 0, (
+        f"偷看 {horizon} 根未被检出 —— 盲区回来了：{diff.detail}"
+    )
+
+
+def test_clean_next_bar_strategy_is_not_flagged() -> None:
+    """反面：next-bar 撮合的干净策略不能因为扰动而误报。
+
+    扰动会改变未来 bar 的成交**价**，但不该改变任何**决策**。
+    比对指纹若含价格，这条就会红 —— 那正是它要防的。
+    """
+    bars = _make_bars(120)
+
+    def clean_next_bar(bs: list[Bar]) -> list[dict]:
+        fills: list[dict] = []
+        for i in range(len(bs) - 1):
+            if int(round(bs[i].close)) % 2 == 0:      # 只看当前 bar
+                fills.append(
+                    {
+                        "filled_at": _iso(bs[i + 1]),  # next-bar 成交
+                        "side": "BUY",
+                        "qty": 1,
+                        "price": bs[i + 1].close,
+                    }
+                )
+        return fills
+
+    diff = detect_lookahead(clean_next_bar, bars, cut_ratio=0.7, decision_to_fill_bars=1)
+
+    assert diff.changed_signals == 0, f"干净策略被误报：{diff.detail}"
