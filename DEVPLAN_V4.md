@@ -354,7 +354,7 @@ Wave K（引擎内核，3-4 周）  ──▶  V3 Wave A（串联闭环）  ─�
 > | **N4 归因** | 待做 | 🟡 `tag_metrics.py` 已有 `by_entry_tag` / `by_exit_reason` **各自**分组；缺**交叉表**与**拒绝信号统计** |
 > | **O4 通知事件** | 待做 | 🟡 V3 Wave A-c 已加 5 类（现共 12 类）；缺再训练完成 / 数据缺口 / 再平衡执行 3 类 |
 > | N2 · O2 · O3 | 待做 | ✗ 确实全无，是真缺口 |
-> | M6 · O5 | 待做 | ✗ 真缺口，但均为 L 复杂度，本轮不做（见下） |
+> | M6 · O5 | **已交付（Wave F）** | M6 见 `docs/contracts/waveFa-adaptive-retrain.md`；O5 见 `waveFb-multi-asset.md`（只做「预留」：数据模型能表达非股票资产，交易链路一行未动） |
 
 
 | 特性 | 依赖 |
