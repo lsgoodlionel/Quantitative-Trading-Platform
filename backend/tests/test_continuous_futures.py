@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -79,11 +80,65 @@ class TestEdgeCases:
         spec = futures_spec("CLZ24", date(2024, 12, 20))
         assert stitch_continuous([(spec, [])]) == []
 
-    def test_single_contract_returned_unchanged(self) -> None:
+    def test_single_contract_prices_are_untouched(self) -> None:
+        """口径是「价格不做任何调整」，不是「原样返回」。
+
+        早先写的是后者，与「让 asset_class 有用」直接冲突 —— 不打标签就没法
+        表达资产类别，打了标签单合约就不再是「原样」。现在只保证价格不变。
+        """
         spec = futures_spec("CLZ24", date(2024, 12, 20))
         bars = make_bars("CLZ24", [100.0, 101.0, 99.0])
         for method in ("raw", "back_adjust"):
-            assert stitch_continuous([(spec, bars)], method=method) == bars
+            out = stitch_continuous([(spec, bars)], method=method)
+            assert [(b.open, b.high, b.low, b.close, b.vwap) for b in out] == [
+                (b.open, b.high, b.low, b.close, b.vwap) for b in bars
+            ], f"{method}：单合约的价格被动了"
+
+    def test_asset_class_is_stamped_from_the_spec(self) -> None:
+        """入参 bar 带默认 EQUITY、spec 是 FUTURES —— 产出必须是 FUTURES。
+
+        不打标签的话，从 FUTURES spec 拼出来的连续序列每根 bar 都标着 EQUITY，
+        是个不报错的静默错标。
+        """
+        spec = futures_spec("CLZ24", date(2024, 12, 20))
+        mislabeled = [
+            replace(b, asset_class=AssetClass.EQUITY)
+            for b in make_bars("CLZ24", [100.0, 101.0])
+        ]
+
+        out = stitch_continuous([(spec, mislabeled)])
+
+        assert {b.asset_class for b in out} == {AssetClass.FUTURES}
+
+    def test_continuous_symbol_unifies_the_series(self, two_contracts) -> None:
+        """给了统一代号，整条序列才是「一条 symbol 一致的序列」。
+
+        不给的话每根 bar 带自己的月份代码（可回溯），但按 symbol 分组的下游
+        （归档层的 _assert_bars_match_key）会拒收。
+        """
+        out = stitch_continuous(two_contracts, continuous_symbol="CL.c1")
+
+        assert {b.symbol for b in out} == {"CL.c1"}
+
+    def test_symbol_defaults_to_the_original_month_code(self, two_contracts) -> None:
+        out = stitch_continuous(two_contracts)
+
+        assert {b.symbol for b in out} == {"CLM24", "CLZ24"}
+
+    def test_newest_segment_also_gets_labels_despite_zero_offset(self) -> None:
+        """最新一段偏移为 0，`_shift` 会原样返回 —— 标签不能因此被漏掉。"""
+        old_spec = futures_spec("CLU24", date(2024, 9, 20))
+        new_spec = futures_spec("CLZ24", date(2024, 12, 20))
+        old = [replace(b, asset_class=AssetClass.EQUITY)
+               for b in make_bars("CLU24", [100.0, 100.0])]
+        new = [replace(b, asset_class=AssetClass.EQUITY)
+               for b in make_bars("CLZ24", [110.0, 111.0], day0=2)]
+
+        out = stitch_continuous([(old_spec, old), (new_spec, new)],
+                                continuous_symbol="CL.c1")
+
+        assert {b.asset_class for b in out} == {AssetClass.FUTURES}
+        assert {b.symbol for b in out} == {"CL.c1"}
 
     def test_empty_segments_are_skipped_not_fatal(self, two_contracts) -> None:
         spec = futures_spec("CLU24", date(2024, 9, 20))

@@ -160,15 +160,18 @@ def stitch_continuous(
 6. **（原稿漏了）期权 spec 必须同时强制 `expiry`。** §四.3 只说了 strike + right。
    一份没有到期日的期权既不能定价也不能交割 —— 那是数据模型层面的 bug，不是宽容。
 
-7. **（原稿自相冲突）「单合约输入原样返回」vs「让 asset_class 有用」。**
-   最自然的做法是让 `stitch_continuous` 用 spec 的 `asset_class` 去戳 bar 的标签
-   （否则从 FUTURES spec 拼出来的连续序列每根 bar 都标着 EQUITY，很荒谬），
-   但那样单合约输入就不是「原样返回」了。本期按验收条款选了「一个字段都不改」。
-   **下一期应改成「stitch 按 spec 打标签」，同时把「原样返回」改成「价格不做任何调整」。**
+7. ~~**（原稿自相冲突）「单合约输入原样返回」vs「让 asset_class 有用」。**~~ **已解决。**
+   两者确实互斥：不打标签就没法表达资产类别，打了标签单合约就不是「原样」。
+   **口径已改为「价格不做任何调整」** —— 单合约输入的 OHLC/vwap 逐字节不变，
+   但 `asset_class` 按各段 spec 打标签。
+   不打的话，从 FUTURES spec 拼出来的序列每根 bar 都标着默认的 EQUITY，
+   是个不报错的静默错标。
 
-8. **（原稿签名不够用）拼出来的序列里每根 bar 仍带各自的月份代码**（`CLM24`/`CLZ24`），
-   它不是一条 symbol 一致的序列，按 symbol 分组的下游（如归档层的
-   `_assert_bars_match_key`）会拒收。签名应加 `continuous_symbol: str | None = None`。
-   本期保留原 symbol（可回溯来自哪个月份）并在 docstring 里告知调用方自行 replace。
+   ⚠️ 实现上**必须先平移再打标签**：`_shift` 在偏移为 0 时原样返回 bar，
+   顺序反过来最新那一段就会漏掉标签（有专门用例钉住）。
+
+8. ~~**（原稿签名不够用）**~~ **已解决**：签名加了 `continuous_symbol: str | None = None`。
+   缺省保留各自的月份代码（可回溯来自哪个月份）；要入归档就必须给这个参数 ——
+   否则按 symbol 分组的下游（归档层的 `_assert_bars_match_key`）会拒收。
 6. ruff check app tests → All checks passed! · pytest -q 全绿
 ```

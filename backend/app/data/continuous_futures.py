@@ -63,6 +63,8 @@ ContractSegment = tuple[ContractSpec, list[Bar]]
 def stitch_continuous(
     contracts: Sequence[tuple[ContractSpec, list[Bar]]],
     method: StitchMethod = "back_adjust",
+    *,
+    continuous_symbol: str | None = None,
 ) -> list[Bar]:
     """
     把一串按时间先后排好的月份合约拼成一条连续序列。
@@ -74,6 +76,11 @@ def stitch_continuous(
         每段内部的 bar 会按时间升序排序；段与段之间不做时间重叠检查
         —— 真实换月常有重叠交易日，是否重叠由调用方的换月规则决定。
     method : "raw" 原样拼接 / "back_adjust" 后向回填（默认）。
+    continuous_symbol : 给整条序列统一的代号（如 ``"CL.c1"``）。
+        缺省 `None` 时每根 bar 保留自己的月份合约代码 —— 那是**可回溯**的，
+        但拼出来的序列不是「一条 symbol 一致的序列」，
+        按 symbol 分组的下游（如归档层的 `_assert_bars_match_key`）会拒收。
+        要入归档就必须给这个参数。
 
     返回
     ----
@@ -90,12 +97,20 @@ def stitch_continuous(
       而且长历史 + 大幅升水时**调整后价格可能为负**（Panama 法的已知代价，
       发生时会记 warning）。
 
+    会改的字段
+    ----
+    - ``asset_class`` **按各段 spec 打标签**。否则从 FUTURES spec 拼出来的
+      连续序列，每根 bar 都可能标着默认的 EQUITY —— 一个静默的错标。
+    - ``symbol`` 仅在给了 ``continuous_symbol`` 时统一覆写。
+
+    > 早先这里写的是「单合约输入原样返回」，那条与「让 asset_class 有用」
+    > 直接冲突：不打标签就没法表达资产类别，打了标签单合约就不是「原样」。
+    > 现在的口径是 **「价格不做任何调整」** —— 单合约输入的 OHLC/vwap
+    > 一个字节不动，但标签该对还是要对。
+
     不做的事
     ----
-    - 不改 ``symbol``：每根 bar 仍带原合约代码，方便回溯它来自哪个月份。
-      需要统一代号的调用方自行 ``dataclasses.replace(bar, symbol=...)``。
-    - 不改 ``asset_class``：单合约输入必须原样返回（验收条款），
-      因此不能拿 spec 的 asset_class 去覆写 bar 的标签。
+    - **不动价格**：单合约输入或 ``raw`` 口径下，OHLC 与 vwap 逐字节不变。
     - 不改 ``volume`` / ``trade_count``：换月不改变成交手数。
     - 不改 ``turnover``：成交额 = 价 × 量，加法平移下它无法自洽。
       **回填序列的 turnover 与 OHLC 不在同一口径**，不要用它反推均价。
@@ -107,10 +122,16 @@ def stitch_continuous(
     segments = _normalized_segments(contracts)
     if not segments:
         return []
-    if method == "raw" or len(segments) == 1:
-        return [bar for _, bars in segments for bar in bars]
 
-    return _back_adjust(segments)
+    if method == "raw" or len(segments) == 1:
+        stitched = [
+            _relabel(bar, spec, continuous_symbol)
+            for spec, bars in segments
+            for bar in bars
+        ]
+    else:
+        stitched = _back_adjust(segments, continuous_symbol)
+    return stitched
 
 
 # ── 内部 ──────────────────────────────────────────────────────
@@ -140,7 +161,17 @@ def _unpack(index: int, item: object) -> tuple[ContractSpec, list[Bar]]:
     return spec, list(bars)
 
 
-def _back_adjust(segments: list[ContractSegment]) -> list[Bar]:
+def _relabel(bar: Bar, spec: ContractSpec, continuous_symbol: str | None) -> Bar:
+    """只改标签，**不碰任何价格字段**。已经对的标签不构造新对象。"""
+    changes: dict[str, object] = {}
+    if bar.asset_class != spec.asset_class:
+        changes["asset_class"] = spec.asset_class
+    if continuous_symbol is not None and bar.symbol != continuous_symbol:
+        changes["symbol"] = continuous_symbol
+    return replace(bar, **changes) if changes else bar
+
+
+def _back_adjust(segments: list[ContractSegment], continuous_symbol: str | None) -> list[Bar]:
     """
     从最新一段往回累加偏移。
 
@@ -152,8 +183,10 @@ def _back_adjust(segments: list[ContractSegment]) -> list[Bar]:
     """
     offsets = _cumulative_offsets(segments)
     return [
-        _shift(bar, offset)
-        for (_, bars), offset in zip(segments, offsets, strict=True)
+        # 先平移再打标签：`_shift` 在偏移为 0 时原样返回 bar，
+        # 若顺序反过来，最新那一段（offset=0）就会漏掉标签。
+        _relabel(_shift(bar, offset), spec, continuous_symbol)
+        for (spec, bars), offset in zip(segments, offsets, strict=True)
         for bar in bars
     ]
 
