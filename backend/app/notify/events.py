@@ -37,6 +37,7 @@ _EVENT_LABELS: dict[NotifyEventType, tuple[str, str]] = {
     NotifyEventType.RETRAIN_DONE: ("🧠", "模型再训练完成"),
     NotifyEventType.DATA_GAP: ("🕳️", "数据缺口"),
     NotifyEventType.REBALANCE_EXECUTED: ("⚖️", "再平衡已执行"),
+    NotifyEventType.MODEL_DRIFT: ("📉", "特征分布漂移"),
 }
 
 

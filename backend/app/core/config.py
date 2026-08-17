@@ -111,6 +111,20 @@ class Settings(BaseSettings):
     user_strategies_enabled: bool = False
     user_strategies_dir: str = "./user_data/strategies"
 
+    # 自适应再训练定时调度（M6）
+    #
+    # 默认关闭。一个无人值守、每周自己跑的重训任务，产出的是一串没人看过的模型
+    # 和一笔算力账单；开启前请先手动跑通一次 POST /retrain/jobs 看指标。
+    # ⚠️ 即使开启，产出也**只入库不上线** —— 替换线上模型永远是人工动作。
+    retrain_schedule_enabled: bool = False
+    #: 定时重训的标的清单（逗号分隔）。为空时定时任务跳过并记日志。
+    retrain_symbols: str = ""
+    retrain_market: str = "US"
+    retrain_model_kind: str = "lasso"
+    #: beat 的星期（0=周日）与小时，默认每周日 22:00
+    retrain_schedule_day_of_week: int = 0
+    retrain_schedule_hour: int = 22
+
     # 监控
     prometheus_enabled: bool = True
 

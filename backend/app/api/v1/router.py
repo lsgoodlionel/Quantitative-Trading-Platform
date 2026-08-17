@@ -43,6 +43,7 @@ from app.api.v1.endpoints import (
     quant,
     rebalance,
     reconcile,
+    retrain,
     risk,
     screener,
     sequence_models,
@@ -141,3 +142,8 @@ api_router.include_router(users.router,     prefix="/users",     tags=["Users"])
 # 必须在 lab.router 之后注册：lab 的 /artifacts/{artifact_id} 不会吞掉
 # /auto-loop（前缀不同段），但保持「专用路由跟在通用路由后面」的既有约定。
 api_router.include_router(lab_auto_loop.router, prefix="/lab", tags=["Auto Factor Loop"])
+
+# ── v4.0 Wave F-a：自适应再训练 + 漂移检测（M6）──────────────────
+# 只有「触发 / 查历史」，**没有**上线端点：重训产出写进 LabStore 后由人工确认，
+# 漂移检测只发通知不触发重训。两条立场与 I2 一致，详见端点模块 docstring。
+api_router.include_router(retrain.router, prefix="/retrain", tags=["Adaptive Retrain"])

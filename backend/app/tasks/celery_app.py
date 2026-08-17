@@ -35,6 +35,7 @@ celery_app = Celery(
         "app.tasks.archive",
         "app.tasks.auto_loop",
         "app.tasks.reconcile",
+        "app.tasks.retrain",
     ],
 )
 
@@ -57,6 +58,8 @@ celery_app.conf.update(
         "app.tasks.auto_loop.*":  {"queue": "compute"},
         # 对账是只读的券商查询，走默认队列即可（不与数据回填抢 IO）
         "app.tasks.reconcile.*":  {"queue": "default"},
+        # 再训练 / 漂移检测同属长耗时纯计算，与完整验证共用 compute 队列
+        "app.tasks.retrain.*":    {"queue": "compute"},
     },
 
     # 结果保留时间
@@ -110,3 +113,22 @@ celery_app.conf.update(
         },
     },
 )
+
+# ── V4 M6：自适应再训练的周期调度 ─────────────────────────────────
+#
+# **默认关闭**，由 `settings.retrain_schedule_enabled` 显式开启。
+# 关闭时连条目都不注册 —— 注册一个进去就立刻 return 的任务，只会在 beat 日志里
+# 每周留下一条看起来像在工作的记录。任务体内还有第二道开关检查（防御性），
+# 见 `app/tasks/retrain.py::scheduled_retrain_task`。
+#
+# ⚠️ 即使开启，重训产出也**只入库不上线**。
+if settings.retrain_schedule_enabled:
+    celery_app.conf.beat_schedule["adaptive-retrain"] = {
+        "task": "app.tasks.retrain.scheduled_retrain_task",
+        "schedule": crontab(
+            day_of_week=settings.retrain_schedule_day_of_week,
+            hour=settings.retrain_schedule_hour,
+            minute=0,
+        ),
+        "options": {"queue": "compute"},
+    }

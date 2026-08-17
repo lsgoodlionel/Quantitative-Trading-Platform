@@ -36,9 +36,12 @@ from app.notify.emit import (
     emit_data_source_degraded,
     emit_hyperopt_done,
     emit_mining_done,
+    emit_model_drift,
     emit_price_alert,
     emit_rebalance_executed,
     emit_reconcile_diff,
+    emit_retrain_done,
+    emit_retrain_failed,
     notify_safe,
 )
 from app.notify.events import NotifyEvent, render_event
@@ -382,11 +385,11 @@ def test_new_channel_defaults_to_empty_subscription() -> None:
 # ── Wave O-a / O4：补齐的 3 个事件类型 ────────────────────────
 
 def test_wave_oa_event_types_exist() -> None:
-    """3 个类型齐了，共 15 类。"""
+    """3 个类型齐了；V4 M6 再补 model_drift，共 16 类。"""
     assert {e.value for e in WAVE_OA_EVENT_TYPES} == {
         "retrain_done", "data_gap", "rebalance_executed"
     }
-    assert len(list(NotifyEventType)) == 15
+    assert len(list(NotifyEventType)) == 16
 
 
 @pytest.mark.parametrize("event_type", WAVE_OA_EVENT_TYPES)
@@ -397,26 +400,101 @@ def test_wave_oa_event_types_default_to_in_app_only(event_type: NotifyEventType)
 
 
 def test_wave_oa_emit_helpers_produce_events(fake_redis: FakeRedis) -> None:
-    """两个有发射点的类型都能走通（retrain_done 本期无发射点，只留类型）。"""
+    """三个类型的发射点都能走通（retrain_done 的发射器由 V4 M6 补上）。"""
     emit_data_gap(
         market="US", frequency="1d",
         gaps=["AAPL: 2024-01-02~2024-01-20"], failures=["MSFT: 数据源全挂"],
     )
     emit_rebalance_executed(market="US", submitted=3, rejected=1, strategy_id="s-1")
+    emit_retrain_done(
+        model_kind="lasso", market="US", artifact_id="a-1",
+        new_metrics={"ic": 0.05}, previous_metrics=None,
+    )
 
     recorded = [inbox.parse_notification(v) for v in fake_redis.strings.values()]
     types = {n.type for n in recorded if n is not None}
     assert types == {
         NotifyEventType.DATA_GAP.value,
         NotifyEventType.REBALANCE_EXECUTED.value,
+        NotifyEventType.RETRAIN_DONE.value,
     }
 
 
-def test_retrain_done_has_no_emitter_yet() -> None:
-    """M6 未做，本期只留类型 —— 提醒后来者别以为忘了写发射器。"""
-    from app.notify import emit
+# ── V4 M6：再训练 / 漂移 ──────────────────────────────────────────
 
-    assert not hasattr(emit, "emit_retrain_done")
+def test_model_drift_type_defaults_to_in_app_only() -> None:
+    """沿用 A-c 的规矩：新类型一律只走站内，外发要用户显式勾选。"""
+    assert NotifyEventType.MODEL_DRIFT in IN_APP_ONLY_DEFAULT_EVENTS
+    assert NotifyEventType.MODEL_DRIFT not in default_channel_events()
+
+
+def _only_notification(fake_redis: FakeRedis):
+    recorded = [inbox.parse_notification(v) for v in fake_redis.strings.values()]
+    present = [n for n in recorded if n is not None]
+    assert len(present) == 1
+    return present[0]
+
+
+def test_retrain_done_payload_puts_new_and_old_metrics_side_by_side(
+    fake_redis: FakeRedis,
+) -> None:
+    """
+    只报新模型的 IC，用户没有依据判断这次重训是进步还是退步 ——
+    而这条通知存在的全部意义就是让他做这个判断。
+    """
+    emit_retrain_done(
+        model_kind="lasso", market="US", artifact_id="a-1",
+        new_metrics={"ic": 0.08, "rank_ic": 0.07, "sharpe": 1.1},
+        previous_metrics={"ic": 0.03, "rank_ic": 0.02, "sharpe": 0.6},
+        window="2023-01-01 ~ 2024-12-31",
+    )
+
+    notification = _only_notification(fake_redis)
+    assert notification.payload["样本外 IC"] == 0.08
+    assert notification.payload["旧模型 IC"] == 0.03
+    assert "未上线" in notification.payload["状态"]
+    assert "未上线" in notification.title
+
+
+def test_retrain_done_states_when_there_is_no_baseline(fake_redis: FakeRedis) -> None:
+    """没有旧模型时明写「无对比基准」，不留空、不用 0 冒充。"""
+    emit_retrain_done(
+        model_kind="lasso", market="US", artifact_id="a-1",
+        new_metrics={"ic": 0.08}, previous_metrics=None,
+    )
+
+    assert _only_notification(fake_redis).payload["旧模型"] == "无对比基准"
+
+
+def test_retrain_failed_says_old_model_untouched(fake_redis: FakeRedis) -> None:
+    """失败通知要说清线上没被弄坏，否则用户第一反应是去回滚一个没变过的东西。"""
+    emit_retrain_failed(model_kind="lasso", market="US", reason="窗口内数据不足")
+
+    notification = _only_notification(fake_redis)
+    assert notification.type == NotifyEventType.RETRAIN_DONE.value
+    assert "失败" in notification.title
+    assert "未被改动" in notification.payload["影响"]
+
+
+def test_model_drift_payload_carries_evidence_and_says_no_auto_retrain(
+    fake_redis: FakeRedis,
+) -> None:
+    """
+    漂移通知必须带上原始 outlier_ratio 与两个阈值 —— is_drifting 是启发式，
+    用户有权不同意它，但得看得见依据。同时明写不会自动重训。
+    """
+    emit_model_drift(
+        artifact_id="a-1", market="US",
+        outlier_ratio=0.42, threshold=2.0, outlier_ratio_threshold=0.1,
+        n_samples=300, sampling_note="两两距离基于随机抽样的 2000 行",
+    )
+
+    notification = _only_notification(fake_redis)
+    assert notification.type == NotifyEventType.MODEL_DRIFT.value
+    assert notification.payload["离群样本占比"] == "42.00%"
+    assert notification.payload["单样本 DI 阈值"] == 2.0
+    assert "不会自动重训" in notification.payload["处置"]
+    assert "抽样" in notification.payload["口径"]
 
 
 def test_data_gap_payload_lists_gaps_and_failures(fake_redis: FakeRedis) -> None:

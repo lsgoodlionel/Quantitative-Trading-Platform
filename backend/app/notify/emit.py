@@ -234,6 +234,103 @@ def emit_rebalance_executed(
     ))
 
 
+def emit_retrain_done(
+    *,
+    model_kind: str,
+    market: str,
+    artifact_id: str | None,
+    new_metrics: dict[str, Any],
+    previous_metrics: dict[str, Any] | None,
+    window: str = "",
+) -> dict:
+    """
+    自适应再训练完成（V4 M6）。
+
+    **必须把新旧指标并排放进 payload。** 只报新模型的 IC，用户没有任何依据判断
+    这次重训是进步还是退步 —— 而这条通知存在的全部意义就是让他做这个判断。
+    没有旧模型时明写「无对比基准」，不留空、不用 0 冒充。
+
+    标题里写死「未上线」：这条通知是**待办**，不是完成报告。
+    """
+    payload: dict[str, Any] = {
+        "模型": model_kind,
+        "样本外 IC": new_metrics.get("ic", 0.0),
+        "样本外 RankIC": new_metrics.get("rank_ic", 0.0),
+        "样本外夏普": new_metrics.get("sharpe", 0.0),
+    }
+    if previous_metrics is None:
+        payload["旧模型"] = "无对比基准"
+    else:
+        payload["旧模型 IC"] = previous_metrics.get("ic", 0.0)
+        payload["旧模型 RankIC"] = previous_metrics.get("rank_ic", 0.0)
+        payload["旧模型夏普"] = previous_metrics.get("sharpe", 0.0)
+    if window:
+        payload["训练窗口"] = window
+    payload["产物"] = artifact_id or "入库失败"
+    payload["状态"] = "已入库，**未上线** —— 需人工确认后替换"
+    return notify_safe(NotifyEvent(
+        type=NotifyEventType.RETRAIN_DONE,
+        title=f"模型再训练完成（未上线）· {model_kind}",
+        market=market,
+        payload=payload,
+    ))
+
+
+def emit_retrain_failed(*, model_kind: str, market: str, reason: str) -> dict:
+    """
+    再训练失败（V4 M6）。
+
+    失败必须发通知：一个每周静默失败的定时重训，表现是「模型三个月没更新过，
+    而没有任何人知道」。payload 里明写旧模型未受影响，免得用户以为线上被弄坏了。
+    """
+    return notify_safe(NotifyEvent(
+        type=NotifyEventType.RETRAIN_DONE,
+        title=f"模型再训练失败 · {model_kind}",
+        market=market,
+        payload={
+            "原因": reason,
+            "影响": "线上模型未被改动（训练与评估全部完成后才写入，本次未走到写入）",
+        },
+    ))
+
+
+def emit_model_drift(
+    *,
+    artifact_id: str,
+    market: str,
+    outlier_ratio: float,
+    threshold: float,
+    outlier_ratio_threshold: float,
+    n_samples: int,
+    sampling_note: str = "",
+) -> dict:
+    """
+    特征分布漂移（V4 M6）。
+
+    ⚠️ **只是通知，不触发任何动作。** payload 里明写「不会自动重训」——
+    否则用户会以为系统已经在处理了，于是谁也不处理。
+
+    原始 `outlier_ratio` 与两个阈值都要给出：`is_drifting` 是启发式判断，
+    用户有权不同意它，但必须看得见判断依据。
+    """
+    payload: dict[str, Any] = {
+        "模型产物": artifact_id,
+        "离群样本占比": f"{outlier_ratio:.2%}",
+        "离群占比阈值": f"{outlier_ratio_threshold:.2%}",
+        "单样本 DI 阈值": threshold,
+        "检测样本数": n_samples,
+        "处置": "不会自动重训 —— 是否重训请人工判断",
+    }
+    if sampling_note:
+        payload["口径"] = sampling_note
+    return notify_safe(NotifyEvent(
+        type=NotifyEventType.MODEL_DRIFT,
+        title="特征分布疑似漂移",
+        market=market,
+        payload=payload,
+    ))
+
+
 def emit_reconcile_diff(
     *,
     market: str,

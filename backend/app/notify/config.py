@@ -34,9 +34,14 @@ class NotifyEventType(str, Enum):
     DATA_SOURCE_DEGRADED = "data_source_degraded"
     RECONCILE_DIFF = "reconcile_diff"    # G6 对账差异（G6 本身不在本期）
     # ── Wave O-a / O4：补齐的 3 类 ────────────────────────────
-    RETRAIN_DONE = "retrain_done"        # M6 自适应再训练（M6 未做，本期只留类型）
+    RETRAIN_DONE = "retrain_done"        # M6 自适应再训练完成 / 失败
     DATA_GAP = "data_gap"                # M-a 归档下载后的缺口/失败明细
     REBALANCE_EXECUTED = "rebalance_executed"   # V3 A-b 的再平衡执行完成
+    # ── V4 M6：特征分布漂移 ───────────────────────────────────
+    # 与 retrain_done 分开：漂移是「模型可能已经不适用了」的观察，
+    # 重训完成是「有一份新产物待人工确认」的动作结果。混成一类，
+    # 用户就没法只订阅前者 —— 而前者恰恰是唯一需要立刻看一眼的。
+    MODEL_DRIFT = "model_drift"
 
 
 # 默认「仅站内」的事件类型。
@@ -54,6 +59,7 @@ IN_APP_ONLY_DEFAULT_EVENTS: frozenset[NotifyEventType] = frozenset({
     NotifyEventType.RETRAIN_DONE,
     NotifyEventType.DATA_GAP,
     NotifyEventType.REBALANCE_EXECUTED,
+    NotifyEventType.MODEL_DRIFT,
 })
 
 
