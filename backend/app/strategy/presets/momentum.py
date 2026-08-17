@@ -8,25 +8,41 @@
 
 from __future__ import annotations
 
-from app.strategy.base import StrategyBase
+import pandas as pd
+
+from app.strategy.base import IndicatorSpec, StrategyBase
 from app.strategy.context import StrategyContext
+
+
+def momentum_series(frame: pd.DataFrame, lookback: int) -> pd.Series:
+    """过去 `lookback` 根的收益率。`shift(lookback)` 是向**后**看，因果。
+
+    与改造前 `df["close"].iloc[-(lookback + 1)]` 等价：history 含当前 bar，
+    所以 `iloc[-1]` 是当前、`iloc[-(lookback+1)]` 正是 `shift(lookback)` 在末位的值。
+    """
+    past = frame["close"].shift(lookback)
+    return (frame["close"] - past) / past
 
 
 class MomentumStrategy(StrategyBase):
     name = "momentum"
     description = "价格动量策略（过去N日收益率）"
 
+    def declare_indicators(self, spec: IndicatorSpec) -> None:
+        spec.add("momentum", momentum_series, self.param("lookback", 20))
+
     def on_bar(self, ctx: StrategyContext) -> None:
         lookback = self.param("lookback", 20)
         threshold = self.param("threshold", 0.03)
 
-        df = ctx.history
-        if len(df) < lookback + 1:
+        ind = ctx.ind
+        if ind.bars_seen < lookback + 1:
             return
 
-        past_close = df["close"].iloc[-(lookback + 1)]
+        momentum = ind.value("momentum")
+        if momentum is None:
+            return
         current_close = ctx.bar.close
-        momentum = (current_close - past_close) / past_close
 
         if momentum > threshold and ctx.qty == 0:
             qty = int(ctx.cash * 0.95 / current_close)

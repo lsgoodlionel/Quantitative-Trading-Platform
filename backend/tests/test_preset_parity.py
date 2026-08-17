@@ -30,9 +30,16 @@ from app.strategy.indicators import (
     crossunder,
     ema,
     macd,
+    rsi,
     sma,
 )
-from app.strategy.presets import BollingerStrategy, DoubleMaStrategy, MacdStrategy
+from app.strategy.presets import (
+    BollingerStrategy,
+    DoubleMaStrategy,
+    MacdStrategy,
+    MomentumStrategy,
+    RsiMeanReversionStrategy,
+)
 
 BASE_TIME = datetime(2024, 1, 2, tzinfo=UTC)
 INITIAL_CASH = 100_000.0
@@ -170,6 +177,55 @@ class _LegacyBollinger(StrategyBase):
             ctx.sell_all()
 
 
+class _LegacyRsiMeanReversion(StrategyBase):
+    name = "legacy_rsi_mean_reversion"
+
+    def on_bar(self, ctx: StrategyContext) -> None:
+        period = self.param("period", 14)
+        oversold = self.param("oversold", 30)
+        overbought = self.param("overbought", 70)
+
+        df = ctx.history
+        if len(df) < period + 2:
+            return
+
+        rsi_val = rsi(df, period).iloc[-1]
+        if rsi_val is None or rsi_val != rsi_val:  # NaN check
+            return
+
+        if rsi_val <= oversold and ctx.qty == 0:
+            qty = int(ctx.cash * 0.95 / ctx.bar.close)
+            if qty > 0:
+                ctx.buy(qty)
+
+        elif rsi_val >= overbought and ctx.qty > 0:
+            ctx.sell_all()
+
+
+class _LegacyMomentum(StrategyBase):
+    name = "legacy_momentum"
+
+    def on_bar(self, ctx: StrategyContext) -> None:
+        lookback = self.param("lookback", 20)
+        threshold = self.param("threshold", 0.03)
+
+        df = ctx.history
+        if len(df) < lookback + 1:
+            return
+
+        past_close = df["close"].iloc[-(lookback + 1)]
+        current_close = ctx.bar.close
+        momentum = (current_close - past_close) / past_close
+
+        if momentum > threshold and ctx.qty == 0:
+            qty = int(ctx.cash * 0.95 / current_close)
+            if qty > 0:
+                ctx.buy(qty)
+
+        elif momentum < 0 and ctx.qty > 0:
+            ctx.sell_all()
+
+
 # ── 参数矩阵：每个预设 ≥3 组参数 × 2 个市场 ──────────────────
 
 _PARAM_SETS: tuple[tuple[str, type[StrategyBase], type[StrategyBase], dict], ...] = (
@@ -183,6 +239,14 @@ _PARAM_SETS: tuple[tuple[str, type[StrategyBase], type[StrategyBase], dict], ...
     ("bollinger/default", BollingerStrategy, _LegacyBollinger, {}),
     ("bollinger/tight", BollingerStrategy, _LegacyBollinger, {"period": 10, "std_dev": 1.0}),
     ("bollinger/wide", BollingerStrategy, _LegacyBollinger, {"period": 40, "std_dev": 2.5}),
+    ("rsi/default", RsiMeanReversionStrategy, _LegacyRsiMeanReversion, {}),
+    ("rsi/short", RsiMeanReversionStrategy, _LegacyRsiMeanReversion,
+     {"period": 7, "oversold": 25, "overbought": 75}),
+    ("rsi/long", RsiMeanReversionStrategy, _LegacyRsiMeanReversion,
+     {"period": 28, "oversold": 40, "overbought": 60}),
+    ("momentum/default", MomentumStrategy, _LegacyMomentum, {}),
+    ("momentum/short", MomentumStrategy, _LegacyMomentum, {"lookback": 5, "threshold": 0.01}),
+    ("momentum/long", MomentumStrategy, _LegacyMomentum, {"lookback": 60, "threshold": 0.08}),
 )
 
 _CASES = [
