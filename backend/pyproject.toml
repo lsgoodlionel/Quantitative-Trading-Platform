@@ -154,7 +154,10 @@ testpaths = ["tests"]
 #   2026-08-14  + V3 Wave C-b（实盘对账 + 多用户/审计落库）
 #               两个 Postgres 仓储的 SQL 分支需要真实库才能覆盖，故合并后仍先保持 72，
 #               待 Wave C 全部合入后统一按实测值上调
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=72"
+#   2026-08-14  V3 Wave C/D/E + V4 Wave F 全部合入后实测 74.98%，ratchet 上调至 74
+#               （留约 1pp 余量：这道门禁要抓的是「覆盖率倒退」，
+#                不是「今天某个用例恰好少走了一个分支」）
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=74"
 
 [tool.coverage.run]
 omit = ["tests/*", "alembic/*"]
