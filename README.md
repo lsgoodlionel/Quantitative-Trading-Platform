@@ -28,11 +28,19 @@
 
 ## 功能概览
 
-> **v2.0 已交付**（Wave 1-3 + 平台化）：从「能用的量化平台」升级为「专业级 AI 量化研究 + 稳健实盘工作站」。
-> 118 API 端点 · 16 页面 · 593 单元测试 · 6 真实数据源 + 演示兜底。
-> 详见 [CHANGELOG.md](CHANGELOG.md)（行程）· [HANDOFF.md](HANDOFF.md)（移交/后续）· [DEVPLAN_V2.md](DEVPLAN_V2.md)（蓝图）。
+> **v4.0 已交付**（v2.0 三波 + V3 全部 + V4 全部）：在专业级量化工作站之上，
+> 补齐了研究→交易主动脉、LLM/AI 层与生产加固。
+> **182 API 端点 + 4 WebSocket · 9 主页 + 4 独立页 · 后端 2861 / 前端 285 / E2E 6 测试全绿 ·
+> 覆盖率 75.10% · 6 真实数据源 + 演示兜底。**
+> 详见 [CHANGELOG.md](CHANGELOG.md)（行程）· [HANDOFF.md](HANDOFF.md)（移交/后续/已知坑）·
+> [DEVPLAN_V3.md](DEVPLAN_V3.md) / [DEVPLAN_V4.md](DEVPLAN_V4.md)（蓝图）。
 
-**完整量化工作流：选股 → 因子研究 → 策略验证 → 组合构建 → 实盘执行 → 多用户/审计**
+**完整量化工作流：选股 → 因子研究 → 策略验证 → 组合构建 → 实盘执行 → 对账/审计**
+
+> ⚠️ **v3.0 做过一次页面重组**：16 个旧路由收敛为 9 主页 + 4 独立页，
+> 子功能改由 `?tab=` 驱动。若你从旧文档/旧书签过来，
+> `/market-events`、`/algolab`、`/portfolio-optimizer`、`/factor`、`/orders`、
+> `/live-strategy` 都已不存在 —— 页面对照见 [HANDOFF.md 第二节](HANDOFF.md#二代码地图哪块功能在哪)。
 
 | 模块 | 功能 |
 |------|------|
@@ -149,11 +157,21 @@ docker compose -f infra/docker-compose.yml up -d
 ### 5. 默认账号
 
 ```
-用户名: admin
-密码:   admin123
+用户名: admin    密码: admin123     （ADMIN）
+用户名: trader   密码: trader123    （TRADER）
+用户名: viewer   密码: viewer123    （VIEWER）
 ```
 
-> ⚠️ 生产环境请立即通过 `POST /api/v1/auth/change-password` 修改密码。
+> ⚠️ **这三个密码公开写在源码与本文档里，暴露到公网前必须先改。**
+> 改密走 `PUT /api/v1/users/{user_id}`（需 ADMIN 权限），
+> 用户列表从 `GET /api/v1/users` 取。
+>
+> 早先这里写的是 `POST /api/v1/auth/change-password` —— **那个端点不存在**，
+> 照着做会得到 404，而这恰恰是最不该失手的一步。
+>
+> 另：`ENVIRONMENT=production` 时若 `SECRET_KEY` 仍是 `.env.example` 里的占位值，
+> **后端会直接拒绝启动**。这是刻意的 —— 用公开已知的串签 JWT，
+> 等于任何人都能伪造 admin token。
 
 ---
 
@@ -386,6 +404,14 @@ GRAFANA_PASSWORD=CHANGE_ME
 
 ### 主要端点
 
+> 下面只是**常用的一小部分**。完整清单（182 个端点 + 4 个 WebSocket）以
+> **OpenAPI 为准**：启动后访问 http://localhost:8000/docs ——
+> 它由代码生成，不会像手写清单那样腐烂。
+>
+> v3.0/v4.0 新增的几组：`/llm/*`（LLM 网关与配额）· `/copilot/*` ·
+> `/ai/reports/*`（研报与回测诊断）· `/lab/*`（产物库与自动因子循环）·
+> `/reconcile/*`（实盘对账）· `/users/*` · `/retrain/*`（自适应再训练）。
+
 ```
 # 行情
 GET  /api/v1/bars                    # K线历史数据
@@ -403,8 +429,8 @@ POST /api/v1/backtests/montecarlo    # 蒙特卡洛模拟
 GET  /api/v1/strategies              # 策略列表
 POST /api/v1/strategies              # 创建策略
 GET  /api/v1/strategies/presets      # 预设策略
-POST /api/v1/strategies/{id}/start   # 启动策略
-POST /api/v1/live-strategies/start   # 实盘启动
+POST /api/v1/live-strategies/start              # 启动实盘策略实例
+POST /api/v1/live-strategies/{instance_id}/stop # 停止实例
 
 # 订单与持仓
 POST /api/v1/orders                  # 下单
