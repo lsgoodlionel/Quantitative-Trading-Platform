@@ -6,10 +6,18 @@
 - service.FundamentalsService: 按市场路由 + 派生比率的统一入口
 - news_service.NewsCalendarService: 新闻 + 财报/分红日历（Wave-3f / A4）
 - options_service.OptionsService: 期权链 + Greeks（Wave-3f / A5，仅美股）
+- options_contracts: 期权链 → ContractSpec 合约元数据映射（V4 Wave F-b / O5）
 """
 
 from app.data.providers.news_service import NewsCalendarService
+from app.data.providers.options_contracts import chain_to_specs, option_contract_to_spec
 from app.data.providers.options_service import OptionsService
 from app.data.providers.service import FundamentalsService
 
-__all__ = ["FundamentalsService", "NewsCalendarService", "OptionsService"]
+__all__ = [
+    "FundamentalsService",
+    "NewsCalendarService",
+    "OptionsService",
+    "chain_to_specs",
+    "option_contract_to_spec",
+]

@@ -108,6 +108,16 @@ _ENTRY_MODULES = [
     "app.quant.lab.loop_runner",
     "app.tasks.auto_loop",
     "app.api.v1.endpoints.lab_auto_loop",
+    # V4 Wave F-b 多资产预留：data.models 从单文件变成了包，
+    # bar → asset_class ← contract 这三角必须保持单向
+    # （asset_class 是叶子，任何一侧回头 import bar/contract 都会成环）；
+    # continuous_futures 与 options_contracts 只能向 data.models 单向依赖
+    "app.data.models",
+    "app.data.models.asset_class",
+    "app.data.models.bar",
+    "app.data.models.contract",
+    "app.data.continuous_futures",
+    "app.data.providers.options_contracts",
 ]
 
 

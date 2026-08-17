@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.data.archive.columns import COLUMNS
+from app.data.archive.columns import COLUMNS, STRING_COLUMNS
 from app.data.archive.file_store import FileArchiveBase
 
 # numpy 无法表达 None，可空数值列统一用 NaN 占位（读回时由 columns._cell 还原为 None）
@@ -34,11 +34,15 @@ class NpzArchive(FileArchiveBase):
     def _dump(self, path: Path, data: dict[str, list]) -> None:
         import numpy as np
 
+        # 字符串列（time / asset_class）必须按 str 落盘：走 float64 会直接抛
+        # ValueError，或者更糟 —— 把枚举名悄悄变成 nan。
         arrays = {
-            "time": np.asarray(data.get("time", []), dtype=np.str_),
+            col: np.asarray(data.get(col, []), dtype=np.str_)
+            for col in COLUMNS
+            if col in STRING_COLUMNS
         }
         for col in COLUMNS:
-            if col == "time":
+            if col in STRING_COLUMNS:
                 continue
             values = [_NAN if v is None else float(v) for v in data.get(col, [])]
             arrays[col] = np.asarray(values, dtype=np.float64)

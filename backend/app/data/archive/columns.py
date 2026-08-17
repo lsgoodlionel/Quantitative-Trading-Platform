@@ -7,20 +7,34 @@ Bar ↔ 列式字典 的互转（M1）
 时间列刻意存 **ISO-8601 字符串**而非 epoch 数值：
 带时区的 datetime 走 epoch 会丢失原始 tzinfo，回读后与写入前不再逐字段相等，
 而验收要求「写入 → 读回，bar 逐笔一致」。字符串往返是无损的。
+
+`asset_class`（V4 Wave F-b）同样是**字符串列**，只能追加在列尾：
+既有归档文件里没有这一列，读回时 `_load` 会直接跳过它，
+`_build_bar` 便回落到默认的 EQUITY —— 与「不写 asset_class 就是股票」的语义一致。
+往中间插列会让老文件的列错位。
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from app.data.archive.base import ArchiveError, ArchiveKey
 from app.data.models import Bar
+from app.data.models.asset_class import DEFAULT_ASSET_CLASS, AssetClass
 
-# 列顺序即文件内的字段顺序，改动会破坏已有归档的兼容性
+logger = logging.getLogger(__name__)
+
+# 列顺序即文件内的字段顺序，改动会破坏已有归档的兼容性。
+# 新增列**只能追加到末尾**（见模块说明）。
 COLUMNS: tuple[str, ...] = (
     "time", "open", "high", "low", "close",
     "volume", "vwap", "turnover", "trade_count",
+    "asset_class",
 )
+
+# 字符串列：不走 `_cell` 的数值转换，后端也要按字符串数组落盘（见 npz.py）
+STRING_COLUMNS = frozenset({"time", "asset_class"})
 
 # 可为空的数值列：读回时 NaN/空串 → None
 _NULLABLE = frozenset({"vwap", "turnover", "trade_count"})
@@ -39,6 +53,7 @@ def bars_to_columns(bars: list[Bar]) -> dict[str, list]:
         "vwap": [b.vwap for b in bars],
         "turnover": [b.turnover for b in bars],
         "trade_count": [b.trade_count for b in bars],
+        "asset_class": [b.asset_class.value for b in bars],
     }
 
 
@@ -67,6 +82,26 @@ def columns_to_bars(key: ArchiveKey, data: dict[str, list]) -> list[Bar]:
     return sorted(bars, key=lambda b: b.time)
 
 
+def _parse_asset_class(raw: object) -> AssetClass:
+    """
+    还原资产类别；缺列/空值一律回落到 EQUITY。
+
+    这里刻意**不**对未知取值抛错：归档文件可能由更新版本写入（多出一个枚举值），
+    老版本读到它时应该退回默认值继续跑，而不是让整份归档变得不可读。
+    """
+    if raw is None:
+        return DEFAULT_ASSET_CLASS
+    text = str(raw).strip()
+    if not text or text == "nan":
+        return DEFAULT_ASSET_CLASS
+    try:
+        return AssetClass(text)
+    except ValueError:
+        logger.warning("归档 asset_class 列含未知取值 %r，按默认 %s 处理",
+                       text, DEFAULT_ASSET_CLASS.value)
+        return DEFAULT_ASSET_CLASS
+
+
 def _assert_aligned(data: dict[str, list], length: int) -> None:
     for column in COLUMNS:
         values = data.get(column)
@@ -78,6 +113,10 @@ def _build_bar(key: ArchiveKey, data: dict[str, list], i: int, raw_time: object)
     def get(column: str) -> float | int | None:
         values = data.get(column)
         return _cell(values[i], column) if values is not None else None
+
+    def get_raw(column: str) -> object:
+        values = data.get(column)
+        return values[i] if values is not None else None
 
     return Bar(
         time=_parse_time(raw_time),
@@ -92,6 +131,7 @@ def _build_bar(key: ArchiveKey, data: dict[str, list], i: int, raw_time: object)
         vwap=get("vwap"),
         turnover=get("turnover"),
         trade_count=get("trade_count"),
+        asset_class=_parse_asset_class(get_raw("asset_class")),
     )
 
 

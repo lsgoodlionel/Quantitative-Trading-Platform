@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from app.data.models.asset_class import DEFAULT_ASSET_CLASS, AssetClass
+
 
 class Market(str, Enum):
     US = "US"
@@ -39,7 +41,19 @@ class Bar:
     turnover: float | None = None   # 成交额（港股/A股有）
     trade_count: int | None = None  # 成交笔数
 
+    # 资产类别标签（V4 Wave F-b / O5）。
+    #
+    # ⚠️ 三条硬性约束，改动前先读 `asset_class.py` 的模块说明：
+    #   1. 必须**排在所有字段最后**且**带默认值** —— Bar 是 frozen dataclass，
+    #      全仓有数百个构造点（含大量位置参数构造），插到中间或不给默认值会全线报错；
+    #   2. 默认必须是 EQUITY —— 回归基线（tests/regression，1364 笔成交）
+    #      按「既有数据都是股票」钉死，换默认值等于让既有行为漂移；
+    #   3. **不参与下面的 __post_init__ 校验，也不参与任何撮合/风控分支** ——
+    #      本期它只是一个标签。
+    asset_class: AssetClass = DEFAULT_ASSET_CLASS
+
     def __post_init__(self) -> None:
+        # 注意：这里刻意不校验 asset_class（见上方约束 3）。
         if self.high < self.low:
             raise ValueError(f"high {self.high} < low {self.low} for {self.symbol}")
         if self.volume < 0:
