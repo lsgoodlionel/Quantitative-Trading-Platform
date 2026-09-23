@@ -52,11 +52,10 @@ services:
 
   # ── 后端 (生产多 Worker) ──────────────────────────────────────────
   backend:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
-      target: production
-    image: quantbot-backend:latest
+    # 拉 CI 预构建的多架构镜像，**不在部署机上现场构建**。
+    # 现场构建要装 numpy/scipy/pandas/cvxpy，在 ARM64 上尤其慢，
+    # 而且构建失败要到部署那一刻才暴露。见 infra/README.md。
+    image: ghcr.io/lsgoodlionel/quantbot-backend:${QB_VERSION:?请先设置 QB_VERSION，如 export QB_VERSION=4.0.0}
     container_name: qb_backend
     restart: unless-stopped
     env_file: ../.env
@@ -83,11 +82,7 @@ services:
   # 注意：不再对宿主发布端口。对外入口统一收敛到下面的 nginx 边缘反代，
   # 否则会与它争抢 80 端口，且绕过 TLS 直接裸奔 HTTP。
   frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
-      target: production
-    image: quantbot-frontend:latest
+    image: ghcr.io/lsgoodlionel/quantbot-frontend:${QB_VERSION:?请先设置 QB_VERSION，如 export QB_VERSION=4.0.0}
     container_name: qb_frontend
     restart: unless-stopped
     expose:

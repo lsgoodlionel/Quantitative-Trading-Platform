@@ -17,14 +17,15 @@ export default defineConfig({
         // Docker 容器内用 backend 服务名；本地裸跑用 localhost
         target: process.env.BACKEND_URL ?? "http://localhost:8000",
         changeOrigin: true,
+        // WebSocket 端点也在这个前缀下（/api/v1/stream/{bars,orders,portfolio,risk}），
+        // 所以升级必须配在这里。此前它配在下面一个 /ws 块里，而后端根本没有
+        // /ws 路由 —— 那个块永远没有流量，真正承载 WS 的 /api 反而不支持升级。
+        // 表现是「页面能开、行情不动」且不报错，是最难查的那类故障。
+        // frontend/nginx.conf 与 infra/nginx 曾是同一个错，已一并修正。
+        ws: true,
         // data-config/status 探测最长 10s，WS 超时关闭探测最长 30s
         timeout: 35000,
         proxyTimeout: 35000,
-      },
-      "/ws": {
-        target: process.env.WS_URL ?? "ws://localhost:8000",
-        ws: true,
-        changeOrigin: true,
       },
     },
   },
