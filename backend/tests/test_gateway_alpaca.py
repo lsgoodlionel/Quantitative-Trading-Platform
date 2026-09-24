@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-import asyncio
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
 from app.gateway.alpaca_gateway import AlpacaGateway, _map_alpaca_status
-from app.gateway.base import AccountInfo, BrokerPosition
+from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus
 
 
 class TestAlpacaStatusMapping:

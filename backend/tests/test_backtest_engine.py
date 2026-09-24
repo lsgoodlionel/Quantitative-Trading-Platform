@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.data.models import Bar, Market, Frequency
-from app.engine.backtest.engine import BacktestEngine, BacktestConfig
+from app.data.models import Bar, Frequency, Market
+from app.engine.backtest.engine import BacktestConfig, BacktestEngine
 from app.engine.backtest.slippage import NoSlippage
 from app.strategy.base import StrategyBase
 from app.strategy.context import StrategyContext
-from app.strategy.presets import DoubleMaStrategy, BollingerStrategy, MacdStrategy
+from app.strategy.presets import BollingerStrategy, DoubleMaStrategy, MacdStrategy
 
 
 def _make_bars(
@@ -22,7 +22,7 @@ def _make_bars(
 ) -> list[Bar]:
     """生成 n 根模拟日线 bar。"""
     bars = []
-    start = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 2, tzinfo=UTC)
     price = base_price
     for i in range(n):
         import random

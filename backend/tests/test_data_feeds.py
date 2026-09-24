@@ -7,20 +7,20 @@ Phase 1 数据源单元测试
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.data.feeds.alpaca import AlpacaDataFeed, _to_bar
 from app.data.feeds.yfinance_feed import YFinanceDataFeed, _to_yf_symbol
-from app.data.models import Bar, Frequency, Market
+from app.data.models import Frequency, Market
 
 
 class TestAlpacaDataFeed:
     def _make_mock_bar(self) -> MagicMock:
         raw = MagicMock()
-        raw.timestamp = datetime(2024, 1, 15, 14, 30, tzinfo=timezone.utc)
+        raw.timestamp = datetime(2024, 1, 15, 14, 30, tzinfo=UTC)
         raw.open = 180.0
         raw.high = 185.0
         raw.low = 179.0
@@ -59,14 +59,14 @@ class TestAlpacaDataFeed:
         feed = AlpacaDataFeed()
 
         raw1 = self._make_mock_bar()
-        raw1.timestamp = datetime(2024, 1, 16, tzinfo=timezone.utc)
+        raw1.timestamp = datetime(2024, 1, 16, tzinfo=UTC)
         raw1.open = 185.0
         raw1.close = 186.0
         raw1.high = 187.0
         raw1.low = 184.0
 
         raw2 = self._make_mock_bar()
-        raw2.timestamp = datetime(2024, 1, 15, tzinfo=timezone.utc)
+        raw2.timestamp = datetime(2024, 1, 15, tzinfo=UTC)
 
         mock_bar_set = MagicMock()
         mock_bar_set.data = {"AAPL": [raw1, raw2]}  # 逆序，检验排序
@@ -131,7 +131,7 @@ class TestYFinanceDataFeed:
                 "Close": [183.5],
                 "Volume": [1_000_000],
             },
-            index=pd.DatetimeIndex([datetime(2024, 1, 15, tzinfo=timezone.utc)]),
+            index=pd.DatetimeIndex([datetime(2024, 1, 15, tzinfo=UTC)]),
         )
 
         with patch("asyncio.get_event_loop") as mock_loop:

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 from app.notify.config import (
     ChannelConfig,
@@ -22,6 +21,7 @@ from app.notify.config import (
     default_notify_config,
 )
 from app.notify.events import NotifyEvent, render_event
+from app.notify.inbox import build_notification, record_notification_sync
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,8 @@ _CONFIG_VERSION_KEY = "notify:config:version"
 _DATA_FIELD = "data"
 
 # ── 同步配置缓存（按版本号失效） ──────────────────────────────
-_cached_config: Optional[NotifyConfig] = None
-_cached_version: Optional[str] = None
+_cached_config: NotifyConfig | None = None
+_cached_version: str | None = None
 _sync_client = None
 
 
@@ -137,16 +137,33 @@ def _enqueue_channel(event: NotifyEvent, channel: ChannelConfig) -> bool:
     return False
 
 
-def dispatch_event(event: NotifyEvent, config: Optional[NotifyConfig] = None) -> dict:
+def _record_inbox(event: NotifyEvent) -> bool:
+    """写入站内收件箱（通知中心）。Redis 不可用时降级为不记录，不影响外发。"""
+    client = _get_sync_client()
+    if client is None:
+        return False
+    try:
+        record_notification_sync(client, build_notification(event))
+        return True
+    except Exception:
+        logger.exception("站内通知写入失败，不影响事件外发")
+        return False
+
+
+def dispatch_event(event: NotifyEvent, config: NotifyConfig | None = None) -> dict:
     """
-    分发一个通知事件到所有匹配渠道（fire-and-forget）。
-    返回 {"dispatched": n, "skipped": bool} 供调试。
+    分发一个通知事件：先落站内收件箱，再外发到所有匹配渠道（fire-and-forget）。
+    返回 {"dispatched": n, "skipped": bool, "recorded": bool} 供调试。
+
+    站内始终记录（通知中心是默认渠道），Telegram/Webhook 需渠道显式订阅该事件类型。
     """
+    recorded = _record_inbox(event)
+
     cfg = config or get_notify_config()
     if not cfg.is_active:
-        return {"dispatched": 0, "skipped": True}
+        return {"dispatched": 0, "skipped": True, "recorded": recorded}
     if _should_suppress(event, cfg):
-        return {"dispatched": 0, "skipped": True}
+        return {"dispatched": 0, "skipped": True, "recorded": recorded}
 
     dispatched = 0
     for channel in cfg.channels:
@@ -157,4 +174,4 @@ def dispatch_event(event: NotifyEvent, config: Optional[NotifyConfig] = None) ->
         if _enqueue_channel(event, channel):
             dispatched += 1
 
-    return {"dispatched": dispatched, "skipped": False}
+    return {"dispatched": dispatched, "skipped": False, "recorded": recorded}

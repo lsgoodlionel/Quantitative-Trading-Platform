@@ -14,6 +14,8 @@ import {
   type ScreenerSortKey,
 } from "@/hooks/useScreener"
 import { DynamicPairlist } from "@/pages/screener/DynamicPairlist"
+import { SelectionActions } from "@/pages/screener/SelectionActions"
+import { candidateKey, isAllSelected, toggleAllKeys, toggleKey } from "@/pages/screener/selection"
 import type { Market } from "@/types"
 
 // ── 常量 ────────────────────────────────────────────────────────
@@ -114,19 +116,35 @@ function RangeInput({ label, minKey, maxKey, filter, onChange, step = 1 }: Range
 function ResultTable({
   rows,
   ccy,
+  selectedKeys,
+  onToggle,
+  onToggleAll,
   onGoMarket,
   onGoBacktest,
 }: {
   rows: ScreenerCandidate[]
   ccy: string
+  selectedKeys: ReadonlySet<string>
+  onToggle: (c: ScreenerCandidate) => void
+  onToggleAll: () => void
   onGoMarket: (c: ScreenerCandidate) => void
   onGoBacktest: (c: ScreenerCandidate) => void
 }) {
+  const allSelected = isAllSelected(rows, selectedKeys)
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm min-w-[880px]">
+      <table className="w-full text-sm min-w-[920px]">
         <thead>
           <tr className="text-[#8b949e] text-xs border-b border-[#21262d]">
+            <th className="py-2 px-3 w-8">
+              <input
+                type="checkbox"
+                aria-label="全选/取消全选"
+                checked={allSelected}
+                onChange={onToggleAll}
+                className="accent-[#1f6feb] cursor-pointer"
+              />
+            </th>
             <th className="text-left py-2 px-3">代码 / 名称</th>
             <th className="text-left py-2 px-2">行业</th>
             <th className="text-right py-2 px-2">现价</th>
@@ -141,7 +159,22 @@ function ResultTable({
         </thead>
         <tbody>
           {rows.map((c) => (
-            <tr key={`${c.market}-${c.symbol}`} className="border-b border-[#21262d]/40 hover:bg-[#161b22]">
+            <tr
+              key={candidateKey(c)}
+              data-testid="screener-row"
+              className={`border-b border-[#21262d]/40 hover:bg-[#161b22] ${
+                selectedKeys.has(candidateKey(c)) ? "bg-[#1f6feb]/[0.08]" : ""
+              }`}
+            >
+              <td className="py-2 px-3">
+                <input
+                  type="checkbox"
+                  aria-label={`选择 ${c.symbol}`}
+                  checked={selectedKeys.has(candidateKey(c))}
+                  onChange={() => onToggle(c)}
+                  className="accent-[#1f6feb] cursor-pointer"
+                />
+              </td>
               <td className="py-2 px-3">
                 <span className="font-mono text-[#58a6ff]">{c.symbol}</span>
                 <span className="text-[#e6edf3] ml-2">{c.name}</span>
@@ -225,6 +258,8 @@ export function Screener() {
   const { toast } = useToast()
   const [filter, setFilter] = useState<ScreenerFilter>(DEFAULT_FILTER)
   const [tab, setTab] = useState<"screen" | "movers" | "pairlist">("screen")
+  // 选中的候选键集合（跨重新筛选保留，交集由 selectedCandidates 兜住）
+  const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set())
 
   const presetsQ = useScreenerPresets()
   const sectorsQ = useScreenerSectors()
@@ -248,6 +283,8 @@ export function Screener() {
     }))
 
   const runScreen = (f: ScreenerFilter) => {
+    // 新一轮筛选的结果集不同，旧选中项已无意义
+    setSelectedKeys(new Set())
     runM.mutate(f, {
       onError: (e) => toast(`筛选失败: ${e.message}`, "error"),
     })
@@ -267,6 +304,17 @@ export function Screener() {
     navigate(`/backtest?symbol=${encodeURIComponent(c.symbol)}&market=${c.market}`)
 
   const result = runM.data
+  const candidates = useMemo(() => result?.candidates ?? [], [result])
+  // 只保留仍在当前结果集里的选中项，避免动作条对着已消失的标的操作
+  const selectedCandidates = useMemo(
+    () => candidates.filter((c) => selectedKeys.has(candidateKey(c))),
+    [candidates, selectedKeys],
+  )
+
+  const toggleOne = (c: ScreenerCandidate) =>
+    setSelectedKeys((prev) => toggleKey(prev, candidateKey(c)))
+
+  const toggleAll = () => setSelectedKeys((prev) => toggleAllKeys(candidates, prev))
 
   return (
     <AppShell title="股票筛选器">
@@ -401,16 +449,31 @@ export function Screener() {
             </div>
           </div>
 
+          {/* 多选动作条：选中后浮出 */}
+          <SelectionActions
+            selected={selectedCandidates}
+            market={filter.market}
+            onClear={() => setSelectedKeys(new Set())}
+          />
+
           {/* 结果 */}
           <div className="bg-[#161b22] border border-[#21262d] rounded-lg p-4">
             {runM.isPending ? (
               <div className="py-16 flex justify-center"><Spinner /></div>
             ) : !result ? (
               <EmptyState title="设置条件后开始筛选" description="或点击上方预设方案快速开始" />
-            ) : result.candidates.length === 0 ? (
+            ) : candidates.length === 0 ? (
               <EmptyState title="无匹配标的" description="放宽条件后重试（部分标的基本面数据可能缺失）" />
             ) : (
-              <ResultTable rows={result.candidates} ccy={ccy} onGoMarket={goMarket} onGoBacktest={goBacktest} />
+              <ResultTable
+                rows={candidates}
+                ccy={ccy}
+                selectedKeys={selectedKeys}
+                onToggle={toggleOne}
+                onToggleAll={toggleAll}
+                onGoMarket={goMarket}
+                onGoBacktest={goBacktest}
+              />
             )}
           </div>
         </>

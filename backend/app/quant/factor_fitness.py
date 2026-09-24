@@ -66,7 +66,7 @@ def _floored_fitness(instruments: list[str], config: FitnessConfig) -> FitnessRe
         avg_activity=0.0,
         n_big_drawdowns=0,
         activity_gate_passed=False,
-        per_instrument_score={s: config.inactivity_floor for s in instruments},
+        per_instrument_score=dict.fromkeys(instruments, config.inactivity_floor),
     )
 
 

@@ -2,12 +2,8 @@ import { useState } from "react"
 import { useHyperopt, useLossFunctions, type ParamSpaceDef } from "@/hooks/useBacktestValidation"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
-
-interface StrategyOpt {
-  name: string
-  description: string
-}
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { toRequestBase, useSharedConfig } from "./SharedConfig"
 
 const ALGORITHMS: { value: "grid" | "random" | "bayesian"; label: string }[] = [
   { value: "bayesian", label: "贝叶斯优化" },
@@ -18,23 +14,18 @@ const ALGORITHMS: { value: "grid" | "random" | "bayesian"; label: string }[] = [
 const DEFAULT_SPACE = '{\n  "fast_period": {"low": 3, "high": 30, "step": 1, "type": "int"},\n  "slow_period": {"low": 20, "high": 80, "step": 5, "type": "int"}\n}'
 
 // ── Tab: Hyperopt 参数优化（贝叶斯 + 多目标损失）─────────────────
-export function HyperoptTab({ strategies }: { strategies: StrategyOpt[] }) {
+export function HyperoptTab() {
+  const { config } = useSharedConfig()
   const { mutate: runHyperopt, isPending, data: result, error } = useHyperopt()
   const { data: lossFns } = useLossFunctions()
 
   const [form, setForm] = useState({
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(2),
-    end_date: today(),
-    initial_cash: 100000,
     algorithm: "bayesian" as "grid" | "random" | "bayesian",
     loss_function: "sharpe",
     n_trials: 40,
     min_trades: 3,
     param_space_text: DEFAULT_SPACE,
+    spaceError: "",
   })
 
   function handleSubmit(e: React.FormEvent) {
@@ -43,17 +34,12 @@ export function HyperoptTab({ strategies }: { strategies: StrategyOpt[] }) {
     try {
       param_space = JSON.parse(form.param_space_text)
     } catch {
-      alert("参数空间 JSON 格式错误")
+      setForm((f) => ({ ...f, spaceError: "参数空间 JSON 格式错误" }))
       return
     }
+    setForm((f) => ({ ...f, spaceError: "" }))
     runHyperopt({
-      strategy_name: form.strategy_name,
-      symbol: form.symbol,
-      market: form.market,
-      frequency: form.frequency,
-      start_date: form.start_date,
-      end_date: form.end_date,
-      initial_cash: form.initial_cash,
+      ...toRequestBase(config),
       param_space,
       algorithm: form.algorithm,
       loss_function: form.loss_function,
@@ -70,42 +56,7 @@ export function HyperoptTab({ strategies }: { strategies: StrategyOpt[] }) {
         <p className="text-[11px] text-[#6e7681] leading-relaxed">
           贝叶斯/随机/网格搜索最优参数，多目标损失函数防过拟合。
         </p>
-
-        <div>
-          <label className="label">策略</label>
-          <select className="select w-full mt-1" value={form.strategy_name}
-            onChange={(e) => setForm((f) => ({ ...f, strategy_name: e.target.value }))}>
-            {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">市场</label>
-            <select className="select w-full mt-1" value={form.market}
-              onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}>
-              {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">标的</label>
-            <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-              onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">开始日期</label>
-            <input className="input w-full mt-1" type="date" value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">结束日期</label>
-            <input className="input w-full mt-1" type="date" value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-          </div>
-        </div>
+        <SharedConfigNotice />
 
         <div>
           <label className="label">
@@ -153,9 +104,9 @@ export function HyperoptTab({ strategies }: { strategies: StrategyOpt[] }) {
           </div>
         </div>
 
-        {error && (
+        {(error || form.spaceError) && (
           <p className="text-[#f85149] text-xs bg-[#2a1b1b] border border-[#f85149]/30 rounded px-3 py-2">
-            {error.message}
+            {form.spaceError || error?.message}
           </p>
         )}
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.rbac import Role, require_role
-from app.oms.manager import OrderManager, RiskViolation
+from app.oms.manager import OrderManager, RiskViolationError
 from app.oms.order import LiveOrderSide, LiveOrderType
 
 router = APIRouter()
@@ -22,28 +22,28 @@ class SubmitOrderRequest(BaseModel):
     side: str = Field(..., description="BUY / SELL")
     qty: int = Field(..., ge=1)
     order_type: str = Field("MARKET", description="MARKET / LIMIT")
-    limit_price: Optional[float] = Field(None, ge=0)
-    strategy_id: Optional[str] = None
+    limit_price: float | None = Field(None, ge=0)
+    strategy_id: str | None = None
 
 
 class OrderResponse(BaseModel):
     order_id: str
-    broker_order_id: Optional[str] = None
+    broker_order_id: str | None = None
     paper_mode: bool = False           # True=模拟盘 False=实盘
-    strategy_id: Optional[str] = None
+    strategy_id: str | None = None
     symbol: str
     market: str
     side: str
     qty: int
     order_type: str
-    limit_price: Optional[float] = None
+    limit_price: float | None = None
     status: str
     filled_qty: int
-    avg_fill_price: Optional[float] = None
+    avg_fill_price: float | None = None
     commission: float
-    reject_reason: Optional[str] = None
+    reject_reason: str | None = None
     created_at: str
-    filled_at: Optional[str] = None
+    filled_at: str | None = None
 
 
 # ── 依赖注入 ──────────────────────────────────────────────────
@@ -99,6 +99,7 @@ async def get_trading_mode() -> dict:
     base_url = ""
     try:
         import redis.asyncio as aioredis
+
         from app.core.config import settings
         r = aioredis.from_url(settings.redis_url)
         raw = await r.hgetall("broker_config:alpaca")
@@ -136,12 +137,12 @@ async def submit_order(
     try:
         side = LiveOrderSide(body.side.upper())
     except ValueError:
-        raise HTTPException(400, detail=f"Invalid side '{body.side}'. Use BUY or SELL.")
+        raise HTTPException(400, detail=f"Invalid side '{body.side}'. Use BUY or SELL.") from None
 
     try:
         order_type = LiveOrderType(body.order_type.upper())
     except ValueError:
-        raise HTTPException(400, detail=f"Invalid order_type '{body.order_type}'.")
+        raise HTTPException(400, detail=f"Invalid order_type '{body.order_type}'.") from None
 
     try:
         order = await oms.submit_order(
@@ -153,18 +154,18 @@ async def submit_order(
             limit_price=body.limit_price,
             strategy_id=body.strategy_id,
         )
-    except RiskViolation as e:
-        raise HTTPException(status_code=422, detail=f"Risk violation: {e}")
+    except RiskViolationError as e:
+        raise HTTPException(status_code=422, detail=f"Risk violation: {e}") from e
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
 
     return _to_response(order)
 
 
 @router.get("", response_model=list[OrderResponse])
 async def list_orders(
-    strategy_id: Optional[str] = Query(None),
-    order_status: Optional[str] = Query(None, alias="status"),
+    strategy_id: str | None = Query(None),
+    order_status: str | None = Query(None, alias="status"),
     limit: int = Query(100, ge=1, le=1000),
 ) -> list[OrderResponse]:
     """查询订单列表。未配置券商时返回空列表。"""
@@ -197,9 +198,9 @@ async def cancel_order(
     try:
         order = await oms.cancel_order(order_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Cancel failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Cancel failed: {e}") from e
     return _to_response(order)
 
 
@@ -227,7 +228,7 @@ def _to_response(order) -> OrderResponse:
 
 @router.get("/attribution")
 async def get_performance_attribution(
-    market: Optional[str] = Query(None, description="筛选市场: US / HK / A"),
+    market: str | None = Query(None, description="筛选市场: US / HK / A"),
 ) -> dict:
     """
     持仓绩效归因分析。
@@ -241,7 +242,7 @@ async def get_performance_attribution(
     all_orders = oms.list_orders(limit=10000)
 
     # Filter filled orders
-    from app.oms.order import LiveOrderStatus, LiveOrderSide
+    from app.oms.order import LiveOrderSide, LiveOrderStatus
     filled = [
         o for o in all_orders
         if o.status == LiveOrderStatus.FILLED

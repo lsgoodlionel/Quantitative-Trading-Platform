@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 from app.oms.protections.base import (
     ActiveLock,
@@ -34,8 +33,8 @@ logger = logging.getLogger(__name__)
 class ProtectionManager:
     def __init__(
         self,
-        config: Optional[ProtectionsConfig] = None,
-        trade_source: Optional[TradeSource] = None,
+        config: ProtectionsConfig | None = None,
+        trade_source: TradeSource | None = None,
         starting_balance: float = 0.0,
         redis_client=None,
     ) -> None:
@@ -116,7 +115,7 @@ class ProtectionManager:
             max_minutes = max(max_minutes, rule.lookback_minutes, rule.stop_duration_minutes)
         return now - timedelta(minutes=max_minutes)
 
-    def _fetch_trades(self, symbol: Optional[str], since: datetime) -> list[TradeRecord]:
+    def _fetch_trades(self, symbol: str | None, since: datetime) -> list[TradeRecord]:
         if self._trade_source is None:
             return []
         try:
@@ -173,7 +172,7 @@ class ProtectionManager:
 
     # ── 评估 ──────────────────────────────────────────────────
 
-    def evaluate(self, now: Optional[datetime] = None) -> list[ProtectionResult]:
+    def evaluate(self, now: datetime | None = None) -> list[ProtectionResult]:
         """运行所有启用的全局 + 逐标的规则，创建/刷新活跃锁。"""
         now = ensure_utc(now) if now else utcnow()
         self._prune(now)
@@ -223,9 +222,9 @@ class ProtectionManager:
         self,
         symbol: str,
         market: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
         starting_balance: float = 0.0,
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         """
         返回阻止入场的锁（全局优先，其次标的级），否则 None。
         先查活跃锁（廉价），再评估规则。
@@ -256,7 +255,7 @@ class ProtectionManager:
 
     # ── 锁查询 / 管理 ─────────────────────────────────────────
 
-    def active_locks(self, now: Optional[datetime] = None) -> list[ActiveLock]:
+    def active_locks(self, now: datetime | None = None) -> list[ActiveLock]:
         now = ensure_utc(now) if now else utcnow()
         self._prune(now)
         return sorted(self._locks.values(), key=lambda lk: lk.locked_at, reverse=True)
@@ -268,7 +267,7 @@ class ProtectionManager:
             return True
         return False
 
-    def is_globally_locked(self, now: datetime) -> Optional[ActiveLock]:
+    def is_globally_locked(self, now: datetime) -> ActiveLock | None:
         for lk in self._locks.values():
             if lk.scope == LockScope.GLOBAL and lk.is_active(now):
                 return lk
@@ -276,7 +275,7 @@ class ProtectionManager:
 
     def is_symbol_locked(
         self, symbol: str, market: str, now: datetime
-    ) -> Optional[ActiveLock]:
+    ) -> ActiveLock | None:
         for lk in self._locks.values():
             if (
                 lk.scope == LockScope.SYMBOL
@@ -290,7 +289,7 @@ class ProtectionManager:
 
 # ── 全局单例 ──────────────────────────────────────────────────
 
-_manager: Optional[ProtectionManager] = None
+_manager: ProtectionManager | None = None
 
 
 def get_protection_manager() -> ProtectionManager:
@@ -301,8 +300,8 @@ def get_protection_manager() -> ProtectionManager:
 
 
 def init_protection_manager(
-    config: Optional[ProtectionsConfig] = None,
-    trade_source: Optional[TradeSource] = None,
+    config: ProtectionsConfig | None = None,
+    trade_source: TradeSource | None = None,
     starting_balance: float = 0.0,
     redis_client=None,
 ) -> ProtectionManager:

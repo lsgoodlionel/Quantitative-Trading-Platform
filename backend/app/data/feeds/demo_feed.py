@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
 from app.core.logging import get_logger
 from app.data.feeds.base import DataFeed
-from app.data.models import Bar, Frequency, Market, SymbolInfo, Tick
+from app.data.models import Bar, Frequency, Market, SymbolInfo
 
 logger = get_logger(__name__)
 
@@ -91,10 +91,10 @@ def _prices_to_bars(
                 c = prices[price_idx + 1]
                 intraday_range = abs(rng.normal(0, _DAILY_SIGMA)) * o
                 h = round(max(o, c) + intraday_range * rng.uniform(0.1, 0.5), 4)
-                l = round(max(min(o, c) - intraday_range * rng.uniform(0.1, 0.5), 0.01), 4)
+                lo = round(max(min(o, c) - intraday_range * rng.uniform(0.1, 0.5), 0.01), 4)
                 vol = int(rng.integers(200_000, 8_000_000))
 
-                ts = datetime(current.year, current.month, current.day, 16, 0, tzinfo=timezone.utc)
+                ts = datetime(current.year, current.month, current.day, 16, 0, tzinfo=UTC)
                 bars.append(Bar(
                     time=ts,
                     symbol=symbol,
@@ -102,7 +102,7 @@ def _prices_to_bars(
                     frequency=frequency,
                     open=round(o, 4),
                     high=h,
-                    low=l,
+                    low=lo,
                     close=round(c, 4),
                     volume=vol,
                 ))

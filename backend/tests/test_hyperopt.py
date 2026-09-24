@@ -15,18 +15,16 @@ import numpy as np
 import pytest
 
 from app.engine.backtest.hyperopt import (
+    _TOO_FEW_TRADES_PENALTY,
     LOSS_FUNCTIONS,
     HyperoptOutcome,
-    ParamDim,
     ParamSpace,
     Trial,
     _grid_search,
-    _TOO_FEW_TRADES_PENALTY,
     list_loss_functions,
     run_hyperopt,
     score_metrics,
 )
-
 
 # ── 测试辅助 ─────────────────────────────────────────────────────
 
@@ -226,7 +224,7 @@ class TestLossFunctions:
         assert score_metrics(high, "sharpe", 1) > score_metrics(low, "sharpe", 1)
 
     @pytest.mark.parametrize(
-        "loss_name, metric_key",
+        ("loss_name", "metric_key"),
         [
             ("sharpe", "sharpe_ratio"),
             ("sortino", "sortino_ratio"),

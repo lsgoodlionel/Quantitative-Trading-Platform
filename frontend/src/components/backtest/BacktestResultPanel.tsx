@@ -91,7 +91,7 @@ export function BacktestResultPanel({ result, form }: BacktestResultPanelProps) 
 
   /** 携带参数跳转到模拟盘 */
   function handleLaunchPaper() {
-    if (!form) { navigate("/live-strategy"); return }
+    if (!form) { navigate("/trading?tab=live"); return }
     const params = new URLSearchParams({
       strategy: form.strategy_name,
       symbol:   form.symbol,
@@ -99,7 +99,7 @@ export function BacktestResultPanel({ result, form }: BacktestResultPanelProps) 
       freq:     form.frequency,
       params:   JSON.stringify(form.params ?? {}),
     })
-    navigate(`/live-strategy?${params.toString()}`)
+    navigate(`/trading?tab=live&${params.toString()}`)
   }
 
   const RESULT_TABS: { key: ResultTab; label: string }[] = [

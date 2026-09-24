@@ -17,8 +17,8 @@ Walk-Forward 分析（C2）
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
 
 import numpy as np
 

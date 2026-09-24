@@ -31,6 +31,11 @@ celery_app = Celery(
     include=[
         "app.tasks.data",
         "app.tasks.notify",
+        "app.tasks.validation",
+        "app.tasks.archive",
+        "app.tasks.auto_loop",
+        "app.tasks.reconcile",
+        "app.tasks.retrain",
     ],
 )
 
@@ -46,6 +51,15 @@ celery_app.conf.update(
     task_routes={
         "app.tasks.data.*":     {"queue": "data"},
         "app.tasks.notify.*":   {"queue": "default"},
+        # 完整验证是长耗时纯计算，单独排队避免把数据回填的队列堵死
+        "app.tasks.validation.*": {"queue": "compute"},
+        "app.tasks.archive.*":    {"queue": "data"},
+        # 自动因子循环同属长耗时纯计算，与完整验证共用 compute 队列
+        "app.tasks.auto_loop.*":  {"queue": "compute"},
+        # 对账是只读的券商查询，走默认队列即可（不与数据回填抢 IO）
+        "app.tasks.reconcile.*":  {"queue": "default"},
+        # 再训练 / 漂移检测同属长耗时纯计算，与完整验证共用 compute 队列
+        "app.tasks.retrain.*":    {"queue": "compute"},
     },
 
     # 结果保留时间
@@ -88,5 +102,33 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/5"),
             "options": {"queue": "default"},
         },
+        # 每天 20:00 实盘对账（V3 G6）。只读：拉券商持仓/资金与本地 OMS 比对，
+        # 有差异或券商不可达才发通知，一致时静默。
+        # ⚠️ worker 进程的 OMS 订单簿与交易进程不共享，见 app/tasks/reconcile.py 的
+        # 模块 docstring；要拿到有意义的结果请走 POST /api/v1/reconcile/{market}。
+        "reconcile-live-positions": {
+            "task": "app.tasks.reconcile.reconcile_all_markets",
+            "schedule": crontab(hour=20, minute=0),
+            "options": {"queue": "default"},
+        },
     },
 )
+
+# ── V4 M6：自适应再训练的周期调度 ─────────────────────────────────
+#
+# **默认关闭**，由 `settings.retrain_schedule_enabled` 显式开启。
+# 关闭时连条目都不注册 —— 注册一个进去就立刻 return 的任务，只会在 beat 日志里
+# 每周留下一条看起来像在工作的记录。任务体内还有第二道开关检查（防御性），
+# 见 `app/tasks/retrain.py::scheduled_retrain_task`。
+#
+# ⚠️ 即使开启，重训产出也**只入库不上线**。
+if settings.retrain_schedule_enabled:
+    celery_app.conf.beat_schedule["adaptive-retrain"] = {
+        "task": "app.tasks.retrain.scheduled_retrain_task",
+        "schedule": crontab(
+            day_of_week=settings.retrain_schedule_day_of_week,
+            hour=settings.retrain_schedule_hour,
+            minute=0,
+        ),
+        "options": {"queue": "compute"},
+    }

@@ -10,16 +10,24 @@
 
 存储:
   - 使用进程内字典（适合单机演示）；生产环境应替换为 Redis 或数据库表。
+
+通知（V3 G5 §2.4）:
+  - 触发时统一走 app.notify 事件总线（risk_alert 类型），站内 / Telegram / Webhook
+    三个渠道只有一份配置。
+  - ⚠️ 行为变更：预警不再仅停留在站内。但 risk_alert 属于 IN_APP_ONLY_DEFAULT_EVENTS，
+    新建渠道默认不订阅，用户必须主动勾选才会推到手机。
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+
+from app.notify.emit import emit_price_alert
 
 router = APIRouter(tags=["Alerts"])
 
@@ -65,7 +73,7 @@ class AlertCheckRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _check_condition(alert: dict, price: float) -> bool:
@@ -159,8 +167,21 @@ async def check_alerts(body: AlertCheckRequest) -> dict:
             }
             _alerts[alert_id] = updated
             newly_triggered.append(updated)
+            _notify_triggered(updated, price)
 
     return {"triggered": newly_triggered, "count": len(newly_triggered)}
+
+
+def _notify_triggered(alert: dict, price: float) -> None:
+    """把触发的预警送上统一事件总线（旁路，失败不影响预警状态）。"""
+    emit_price_alert(
+        symbol=alert["symbol"],
+        market=alert["market"],
+        condition=alert["condition"],
+        threshold=alert["threshold"],
+        price=price,
+        note=alert.get("note", ""),
+    )
 
 
 @router.post("/{alert_id}/reset")

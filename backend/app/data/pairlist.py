@@ -20,7 +20,7 @@ import asyncio
 import json
 import logging
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 from app.data import screener as snap
 from app.data.models import Market

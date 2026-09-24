@@ -129,7 +129,7 @@ def analyze_pca(
     ]
 
     # PC1 贡献者（按第一主成分载荷绝对值排序）
-    pc1_loadings = loadings[:, 0].tolist()
+    loadings[:, 0].tolist()
     pc1_top = sorted(
         [{"asset": names[i], "loading": round(float(loadings[i, 0]), 4)} for i in range(N)],
         key=lambda d: abs(d["loading"]),  # type: ignore[return-value]

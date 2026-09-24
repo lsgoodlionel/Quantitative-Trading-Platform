@@ -126,6 +126,12 @@ class TestCapmBeta:
 
         # Assert: 等权代理下 β 的均值 ≈ 1
         assert float(betas.mean()) == pytest.approx(1.0, abs=1e-6)
+        # 且 capm_return 的输出确实是 β 的线性函数（CAPM 定义），相关系数应为 ±1。
+        # 不直接比对数值，避免把年化口径写死在测试里。
+        assert set(mu.index) == set(symbols)
+        assert abs(float(np.corrcoef(mu[symbols], betas[symbols])[0, 1])) == pytest.approx(
+            1.0, abs=1e-9
+        )
 
     def test_zero_variance_market_falls_back_to_rf(self) -> None:
         # Arrange: 恒定价格 → 收益全 0 → 市场无波动
@@ -147,19 +153,19 @@ class TestValidation:
         prices = pd.DataFrame({"A": [100.0, 101.0], "B": [50.0, 49.0]})
 
         # Act / Assert
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="价格数据不足以估计预期收益"):
             mean_historical_return(prices)
 
     def test_too_few_rows_raises_via_dispatcher(self) -> None:
         prices = pd.DataFrame({"A": [100.0, 101.0], "B": [50.0, 49.0]})
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="价格数据不足以估计预期收益"):
             expected_returns(prices, method="ema_historical")
 
     def test_non_dataframe_raises(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="prices 必须是 DataFrame"):
             mean_historical_return([100, 101, 102])  # type: ignore[arg-type]
 
     def test_unknown_method_raises(self) -> None:
         prices = _make_prices(60, ["A", "B"])
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="未知的预期收益方法"):
             expected_returns(prices, method="bogus")

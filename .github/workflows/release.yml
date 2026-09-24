@@ -1,0 +1,199 @@
+name: Release
+
+# 打版本标签即发布。刻意不挂在 push main 上 —— 发布应该是一个**明确的动作**，
+# 而不是每次合并的副作用。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "手动构建用的版本号（如 4.0.0），不会创建 Release"
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR 要求镜像名全小写，而仓库名 Quantitative-Trading-Platform 含大写 ——
+  # 这里写死小写名，不从 github.repository 推导，省掉一处必踩的坑。
+  IMAGE_BACKEND: ghcr.io/lsgoodlionel/quantbot-backend
+  IMAGE_FRONTEND: ghcr.io/lsgoodlionel/quantbot-frontend
+
+jobs:
+  # ── 1. 各架构分别在原生 runner 上构建，按 digest 推送 ──────────────
+  #
+  # 不用单机 QEMU 跑多架构：后端要装 numpy/scipy/pandas/cvxpy，
+  # 模拟执行下构建时间会翻几倍。公开仓库可以免费用 ARM runner，
+  # 让每个架构跑在自己的机器上，之后再合成一个多架构 manifest。
+  build:
+    name: Build ${{ matrix.component }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [backend, frontend]
+        arch: [amd64, arm64]
+        # include 里的条目与已有组合按 arch 匹配后合并进 runner，
+        # 不会额外增加组合 —— 最终是 2×2 = 4 个 job
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析镜像名
+        id: img
+        run: |
+          if [ "${{ matrix.component }}" = "backend" ]; then
+            echo "name=${{ env.IMAGE_BACKEND }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ env.IMAGE_FRONTEND }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建并按 digest 推送
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          target: production
+          platforms: linux/${{ matrix.arch }}
+          # 缓存存在 GitHub Actions cache 里，按组件+架构分桶，
+          # 避免 backend/frontend 互相覆盖对方的层
+          cache-from: type=gha,scope=${{ matrix.component }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}-${{ matrix.arch }}
+          outputs: type=image,name=${{ steps.img.outputs.name }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: 导出 digest
+        run: |
+          mkdir -p /tmp/digests/${{ matrix.component }}
+          digest='${{ steps.build.outputs.digest }}'
+          # 去掉 sha256: 前缀 —— 这是 bash 的子串删除，
+          # 写进 ${{ }} 表达式里不会生效（GitHub 表达式没有这个语法）
+          touch "/tmp/digests/${{ matrix.component }}/${digest#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.component }}-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.component }}/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ── 2. 合成多架构 manifest，打上版本标签 ──────────────────────────
+  manifest:
+    name: Manifest ${{ matrix.component }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - name: 解析版本与镜像名
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"      # v4.0.0 → 4.0.0
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "${{ matrix.component }}" = "backend" ]; then
+            echo "image=${{ env.IMAGE_BACKEND }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image=${{ env.IMAGE_FRONTEND }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-${{ matrix.component }}-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 合成并推送多架构 manifest
+        working-directory: /tmp/digests
+        run: |
+          IMAGE="${{ steps.meta.outputs.image }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          # 同时打**不可变的版本标签**与便捷的 latest。
+          # 生产编排钉的是版本标签 —— latest 是浮动的，
+          # 两台机器在不同时间拉到的可能不是同一个镜像。
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${VERSION}" \
+            --tag "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
+
+  # ── 3. 创建 GitHub Release ────────────────────────────────────────
+  release:
+    name: 创建 Release
+    needs: manifest
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成发布说明
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREV=$(git tag --sort=-version:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          {
+            echo "## 部署"
+            echo
+            echo '```bash'
+            echo "export QB_VERSION=${VERSION}"
+            echo "docker compose -f infra/docker-compose.prod.yml pull"
+            echo "docker compose -f infra/docker-compose.prod.yml up -d"
+            echo '```'
+            echo
+            echo "镜像（linux/amd64 + linux/arm64）："
+            echo
+            echo "- \`${{ env.IMAGE_BACKEND }}:${VERSION}\`"
+            echo "- \`${{ env.IMAGE_FRONTEND }}:${VERSION}\`"
+            echo
+            echo "> 生产编排钉的是版本标签而非 \`latest\`：**同一个 QB_VERSION 在任何机器、任何时间拉到的都是同一个镜像**，出问题改回上一个版本号即可回滚。"
+            echo
+            echo "## 变更"
+            echo
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty='- %s' "${PREV}..${GITHUB_REF_NAME}"
+            else
+              echo "首个正式 Release。完整行程见 [CHANGELOG.md](CHANGELOG.md)。"
+            fi
+          } > /tmp/notes.md
+          echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/notes.md \
+            --verify-tag

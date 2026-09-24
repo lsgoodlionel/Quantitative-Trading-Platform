@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -17,10 +15,10 @@ class PositionResponse(BaseModel):
     market: str
     qty: int
     avg_cost: float
-    current_price: Optional[float] = None
-    market_value: Optional[float] = None
-    unrealized_pnl: Optional[float] = None
-    unrealized_pnl_pct: Optional[float] = None
+    current_price: float | None = None
+    market_value: float | None = None
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
 
 
 class AccountResponse(BaseModel):
@@ -90,9 +88,9 @@ async def list_positions(
     try:
         positions = await oms.get_positions(market.upper())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to fetch positions: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to fetch positions: {e}") from e
 
     return [PositionResponse(**p) for p in positions]
 
@@ -109,8 +107,8 @@ async def get_account(
     try:
         account = await oms.get_account(market.upper())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Failed to fetch account: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to fetch account: {e}") from e
 
     return AccountResponse(**account)

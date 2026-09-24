@@ -24,7 +24,7 @@ ML 策略训练模块
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -50,12 +50,16 @@ FEATURE_NAMES = [
 def _build_features(df: pd.DataFrame) -> pd.DataFrame:
     """从 OHLCV DataFrame 构建特征矩阵。"""
     from app.quant.indicators import (
-        rsi, macd, bollinger_bands, atr, sma, ema,
+        atr,
+        bollinger_bands,
+        macd,
+        rsi,
+        sma,
     )
 
     close  = df["close"]
-    high   = df["high"]
-    low    = df["low"]
+    df["high"]
+    df["low"]
     vol    = df["volume"]
 
     features = pd.DataFrame(index=df.index)
@@ -131,10 +135,10 @@ class MLTrainResult:
 
 def _build_pipeline(model_type: ModelType):
     """返回 StandardScaler + 分类器的 sklearn Pipeline。"""
-    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
     from sklearn.linear_model import LogisticRegression
-    from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
 
     classifiers = {
         "logistic_regression": LogisticRegression(max_iter=500, random_state=42, C=1.0),
@@ -155,8 +159,12 @@ def _build_pipeline(model_type: ModelType):
 def _evaluate_clf(clf, X_train, y_train, X_test, y_test) -> dict:
     """计算全套评估指标，返回字典。"""
     from sklearn.metrics import (
-        accuracy_score, precision_score, recall_score,
-        f1_score, roc_auc_score, confusion_matrix,
+        accuracy_score,
+        confusion_matrix,
+        f1_score,
+        precision_score,
+        recall_score,
+        roc_auc_score,
     )
 
     y_pred = clf.predict(X_test)
@@ -187,7 +195,7 @@ def _extract_feature_importance(clf) -> list[dict]:
 
     return [
         {"name": name, "importance": round(float(imp), 6)}
-        for name, imp in sorted(zip(FEATURE_NAMES, raw), key=lambda x: x[1], reverse=True)
+        for name, imp in sorted(zip(FEATURE_NAMES, raw, strict=True), key=lambda x: x[1], reverse=True)
     ]
 
 
@@ -223,13 +231,18 @@ def train_ml_strategy(
     -------
     MLTrainResult 包含评估指标和近期预测信号
     """
-    from sklearn.model_selection import cross_val_score, TimeSeriesSplit
+    from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
     # 1. Build features and target
     X = _build_features(df)
     close   = df["close"]
     fwd_ret = close.pct_change(forward_days).shift(-forward_days)
-    y       = (fwd_ret > 0).astype(int)
+    # 末尾 forward_days 根 bar 的未来收益是 NaN（shift(-n) 的必然结果）。
+    # 直接 `(fwd_ret > 0).astype(int)` 会把 NaN 判成 False → 0，也就是把
+    # 「未来未知」标成「跌」，而下一行的 dropna() 剔不掉（标签已是 0 而非 NaN）。
+    # 后果是每次训练都掺进 forward_days 条噪音样本且系统性偏向「跌」。
+    # 用 where 保住 NaN，交给 dropna() 剔除。
+    y       = (fwd_ret > 0).astype(float).where(fwd_ret.notna())
 
     # 2. Align, drop NaNs
     combined = pd.concat([X, y.rename("target")], axis=1).dropna()
@@ -237,6 +250,11 @@ def train_ml_strategy(
         raise ValueError(f"Not enough clean samples: {len(combined)} (need >= 100)")
 
     X_clean = combined[FEATURE_NAMES].values
+
+    # 最新信号要用**特征齐全但标签未知**的那几根 bar：训练必须排除它们
+    # （未来收益未知），但预测根本不需要标签。若沿用带标签的 combined，
+    # 「最新信号」会滞后 forward_days 根 —— 那才是用户真正在意的那一根。
+    X_latest = X.dropna()
     y_clean = combined["target"].values
     times   = combined.index.tolist()
 
@@ -269,11 +287,11 @@ def train_ml_strategy(
 
     predictions = [
         {"time": str(t), "actual": int(a), "predicted": int(p), "probability": round(float(pr), 4)}
-        for t, a, p, pr in zip(recent_times, recent_y, recent_pred, recent_prob)
+        for t, a, p, pr in zip(recent_times, recent_y, recent_pred, recent_prob, strict=True)
     ]
 
     # 9. Latest signal
-    signal, latest_prob = _latest_signal(clf, X_clean)
+    signal, latest_prob = _latest_signal(clf, X_latest[FEATURE_NAMES].values)
 
     return MLTrainResult(
         model_type=model_type,

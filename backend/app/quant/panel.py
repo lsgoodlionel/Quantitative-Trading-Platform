@@ -11,7 +11,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,7 @@ MIN_BARS_PER_SYMBOL: int = 60
 DEFAULT_MAX_ROWS: int = 2000
 
 
-def _bars_to_ohlcv(bars: list["Bar"]) -> pd.DataFrame:
+def _bars_to_ohlcv(bars: list[Bar]) -> pd.DataFrame:
     """单标的 bar 列表 → 以 ISO 时间字符串为 index 的 OHLCV DataFrame。"""
     df = pd.DataFrame(
         [
@@ -44,7 +45,7 @@ def _bars_to_ohlcv(bars: list["Bar"]) -> pd.DataFrame:
 
 
 def bars_to_panel(
-    bars_by_symbol: dict[str, list["Bar"]],
+    bars_by_symbol: dict[str, list[Bar]],
     feature_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None,
 ) -> pd.DataFrame:
     """由每标的 bar 序列构建 (datetime, instrument) 面板。

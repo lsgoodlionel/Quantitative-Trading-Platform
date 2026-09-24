@@ -51,7 +51,7 @@ def _resolve_fields(panel: pd.DataFrame, fields: list[str] | None) -> list[str]:
 class Processor:
     """处理器基类。默认无状态；有状态处理器需覆写 fit()。"""
 
-    def fit(self, panel: pd.DataFrame) -> "Processor":
+    def fit(self, panel: pd.DataFrame) -> Processor:
         """在训练窗口切片上学习参数，返回**新的**已拟合实例（不修改 self）。
         无状态处理器为 no-op，直接返回自身。"""
         return self
@@ -184,7 +184,7 @@ class RobustZScoreNorm(Processor):
     def is_stateful(self) -> bool:
         return True
 
-    def fit(self, panel: pd.DataFrame) -> "RobustZScoreNorm":
+    def fit(self, panel: pd.DataFrame) -> RobustZScoreNorm:
         cols = _resolve_fields(panel, self.fields)
         new = RobustZScoreNorm(
             fields=self.fields,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def send_telegram_sync(
         )
         resp.raise_for_status()
         result = resp.json().get("result", {})
-        msg_id: Optional[int] = result.get("message_id")
+        msg_id: int | None = result.get("message_id")
         return {"ok": True, "message_id": msg_id, "error": None}
     except Exception as e:  # noqa: BLE001 - 记录并返回错误，不向调用方抛出
         err = _extract_error(e)

@@ -19,11 +19,11 @@ from pydantic import BaseModel, Field
 
 from app.quant.models.networks import SequenceModelType
 from app.quant.models.sequence import (
+    TORCH_INSTALL_HINT,
     SequenceConfig,
     sequence_models_meta,
     torch_available,
     train_sequence_model,
-    TORCH_INSTALL_HINT,
 )
 
 router = APIRouter(tags=["Sequence Models"])
@@ -99,7 +99,8 @@ async def train_sequence(req: SequenceTrainRequest) -> dict:
 async def _load_bars(req: SequenceTrainRequest) -> pd.DataFrame:
     """按请求加载 OHLCV 行情并转为 DataFrame（index 为时间字符串）。"""
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
 
     end_date = date.fromisoformat(req.end) if req.end else date.today()

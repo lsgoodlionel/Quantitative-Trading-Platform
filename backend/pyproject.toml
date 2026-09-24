@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "quantbot-backend"
-version = "0.1.0"
+version = "4.0.0"
 description = "QuantBot — Multi-market quantitative trading platform (US/HK/A)"
 authors = ["QuantBot Team"]
 readme = "README.md"
@@ -30,7 +30,12 @@ celery = { version = "^5.4.0", extras = ["redis"] }
 
 # 认证
 python-jose = { version = "^3.3.0", extras = ["cryptography"] }
-passlib = { version = "^1.7.4", extras = ["bcrypt"] }
+# 直接依赖 bcrypt，不经 passlib。
+# passlib 1.7.4 读 `bcrypt.__about__.__version__`，而 bcrypt ≥4.1 已移除该属性 ——
+# `passlib.hash.bcrypt.hash()` 会抛 AttributeError，再被包装成一条误导性的
+# 「password cannot be longer than 72 bytes」。auth.py 本来就直接调 bcrypt，
+# passlib 是个只会把人带沟里的死依赖（V3 Wave C-b 契约就是照它写错的）。
+bcrypt = "^5.0.0"
 
 # 数据处理
 pandas = "^2.2.3"
@@ -72,7 +77,7 @@ pytest-asyncio = "^0.24.0"
 pytest-cov = "^6.0.0"
 httpx = "^0.28.0"           # TestClient
 faker = "^30.8.2"
-ruff = "^0.7.4"
+ruff = "^0.14.5"      # 与 requirements-dev.txt / CI 保持一致
 mypy = "^1.13.0"
 pre-commit = "^4.0.1"
 
@@ -83,8 +88,45 @@ build-backend = "poetry.core.masonry.api"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+# ruff ≥0.2 起 select/ignore 归属 [tool.ruff.lint]；写在顶层会被忽略（此前即如此，
+# 等于从未真正启用过规则集）。
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "PT"]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    # 项目刻意把 stdlib 的小写类别名成 PascalCase（`from datetime import date as Date`），
+    # 一是避开局部变量 `date` 的遮蔽，二是对齐「类型用 PascalCase」的命名规范
+    "N812",
+    # 函数内的大写变量在本项目有两类正当来源，逐一豁免不如整体关掉：
+    #   1) 量化数学记号：S=现价/协方差、K=行权价、T=到期时间、X=特征矩阵、W=权重
+    #      —— 与 BSM/因子模型论文及被测代码保持一致，改成小写反而更难读
+    #   2) 函数内常量：BATCH_SIZE、_MAX_ICEBERG_SLICES —— UPPER_SNAKE 本就是项目命名规范
+    "N806",
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 的依赖注入就是「在参数默认值里调用」，这是框架惯用法而非 B008 所指的可变默认值陷阱。
+# 后两个是 @dataclass(frozen=True)，作默认值不存在跨调用共享变更的风险。
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body",
+    "fastapi.Form", "fastapi.File", "fastapi.Header", "fastapi.Cookie",
+    "fastapi.Security",
+    "app.quant.factor_fitness.FitnessConfig",
+    "app.quant.mining.genetic.GAConfig",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 量化/引擎模块的函数参数同样使用数学记号（sqrt_T、Sigma、X/W 矩阵）
+"app/quant/**" = ["N803"]
+"app/engine/**" = ["N803"]
+# PT 是 pytest 风格规则，不该作用于生产代码。
+# 否则 FastAPI 端点里 `_user: Annotated[UserInfo, Depends(require_role(...))]`
+# 这种「靠依赖注入做鉴权、参数本身不用」的写法会被误判成 pytest fixture。
+"app/**" = ["PT"]
+# on_start / on_stop 是**可选**生命周期钩子，默认空实现即为正确语义
+# （子类按需覆盖）。加 @abstractmethod 会强制所有策略实现它们，与设计相悖。
+"app/strategy/base.py" = ["B027", "PT"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -94,7 +136,28 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "--cov=app --cov-report=term-missing --cov-fail-under=80"
+# 覆盖率门禁是「防倒退的 ratchet」，不是目标值。
+#
+# 目标仍然是 80%。但此前配置写的就是 80，而实际覆盖率长期在 55% 左右 —— 门禁从未通过，
+# 结果是所有人都用 `--no-cov` 绕过，等于没有门禁。这里改成「略低于当前实际值」，
+# 让它真正起作用：覆盖率一旦下降就红。每次提升覆盖率后，请同步上调此值。
+#
+#   2026-08-07  55.06% → 57.40%（新增 tests/regression 引擎基线），ratchet 设为 57
+#   2026-08-07  57.40% → 59.47%（Wave K-a 订单类型/做空 + K-b 滑点/日历/复权），ratchet 设为 59
+#   2026-08-07  59.47% → 61.88%（Wave K-c 组合引擎 + K-d 止损/Insight 框架），ratchet 设为 61
+#   2026-08-11  61.88% → 67.49%（Wave L 控制/风控/执行/钩子/实盘接线 + V3 Wave A），ratchet 设为 67
+#   2026-08-11  67.49% → 69.59%（Wave M 归档/宇宙/截面算子/Alpha101/产物库/模型模板），ratchet 设为 69
+#   2026-08-11  69.59% → 71.32%（Wave N-a 分析报告 + O-a 热加载/CLI/通知），ratchet 设为 71
+#   2026-08-11  71.32% → 71.97%（V3 Wave B-a LLM 网关），ratchet 保持 71（余量不足 1pp）
+#   2026-08-12  71.97% → 72.51%（V3 Wave B-c Copilot），ratchet 上调至 72
+#   2026-08-14  72.51% → 73.01%（V3 Wave C-a AI 研报/回测诊断），ratchet 保持 72（余量不足 1pp）
+#   2026-08-14  + V3 Wave C-b（实盘对账 + 多用户/审计落库）
+#               两个 Postgres 仓储的 SQL 分支需要真实库才能覆盖，故合并后仍先保持 72，
+#               待 Wave C 全部合入后统一按实测值上调
+#   2026-08-14  V3 Wave C/D/E + V4 Wave F 全部合入后实测 74.98%，ratchet 上调至 74
+#               （留约 1pp 余量：这道门禁要抓的是「覆盖率倒退」，
+#                不是「今天某个用例恰好少走了一个分支」）
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=74"
 
 [tool.coverage.run]
 omit = ["tests/*", "alembic/*"]

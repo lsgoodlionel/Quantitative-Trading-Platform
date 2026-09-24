@@ -20,7 +20,7 @@ AkShare A 股数据源 — 沪深 A 股历史 K 线（免费，无需 API key）
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
@@ -48,7 +48,7 @@ def _to_ak_symbol(symbol: str) -> str:
     if s.startswith("SZ"):
         return "sz" + s[2:]
     # 裸数字，按前缀判断
-    digits = s.lstrip("0") or "0"
+    s.lstrip("0") or "0"
     if s[0] in _SH_PREFIXES:
         return "sh" + s
     return "sz" + s
@@ -58,7 +58,7 @@ def _df_to_bars(df: pd.DataFrame, symbol: str, frequency: Frequency) -> list[Bar
     bars: list[Bar] = []
     for _, row in df.iterrows():
         try:
-            dt = datetime.strptime(str(row["日期"]), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(str(row["日期"]), "%Y-%m-%d").replace(tzinfo=UTC)
         except (ValueError, KeyError):
             continue
         bars.append(

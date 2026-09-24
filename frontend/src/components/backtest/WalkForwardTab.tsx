@@ -2,28 +2,18 @@ import { useState } from "react"
 import { useWalkForward, useLossFunctions, type ParamSpaceDef, type WalkForwardResult } from "@/hooks/useBacktestValidation"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
-
-interface StrategyOpt {
-  name: string
-  description: string
-}
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { toRequestBase, useSharedConfig } from "./SharedConfig"
 
 const DEFAULT_SPACE = '{\n  "fast_period": [5, 10, 15, 20],\n  "slow_period": [30, 50, 80]\n}'
 
 // ── Tab: Walk-Forward 滚动样本内外验证 ──────────────────────────
-export function WalkForwardTab({ strategies }: { strategies: StrategyOpt[] }) {
+export function WalkForwardTab() {
+  const { config } = useSharedConfig()
   const { mutate: runWf, isPending, data: result, error } = useWalkForward()
   const { data: lossFns } = useLossFunctions()
 
   const [form, setForm] = useState({
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(4),
-    end_date: today(),
-    initial_cash: 100000,
     train_size: 250,
     test_size: 60,
     mode: "rolling" as "rolling" | "anchored",
@@ -31,6 +21,7 @@ export function WalkForwardTab({ strategies }: { strategies: StrategyOpt[] }) {
     loss_function: "sharpe",
     inner_trials: 24,
     param_space_text: DEFAULT_SPACE,
+    spaceError: "",
   })
 
   function handleSubmit(e: React.FormEvent) {
@@ -39,12 +30,12 @@ export function WalkForwardTab({ strategies }: { strategies: StrategyOpt[] }) {
     try {
       param_space = JSON.parse(form.param_space_text)
     } catch {
-      alert("参数空间 JSON 格式错误")
+      setForm((f) => ({ ...f, spaceError: "参数空间 JSON 格式错误" }))
       return
     }
-    const { param_space_text, ...rest } = form
-    void param_space_text
-    runWf({ ...rest, param_space })
+    const { param_space_text: _text, spaceError: _err, ...rest } = form
+    setForm((f) => ({ ...f, spaceError: "" }))
+    runWf({ ...toRequestBase(config), ...rest, param_space })
   }
 
   return (
@@ -55,42 +46,7 @@ export function WalkForwardTab({ strategies }: { strategies: StrategyOpt[] }) {
         <p className="text-[11px] text-[#6e7681] leading-relaxed">
           滚动训练窗口寻优 + 紧邻测试窗口样本外验证，衡量抗曲线拟合能力。
         </p>
-
-        <div>
-          <label className="label">策略</label>
-          <select className="select w-full mt-1" value={form.strategy_name}
-            onChange={(e) => setForm((f) => ({ ...f, strategy_name: e.target.value }))}>
-            {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">市场</label>
-            <select className="select w-full mt-1" value={form.market}
-              onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}>
-              {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">标的</label>
-            <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-              onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">开始日期</label>
-            <input className="input w-full mt-1" type="date" value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">结束日期</label>
-            <input className="input w-full mt-1" type="date" value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-          </div>
-        </div>
+        <SharedConfigNotice />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -139,9 +95,9 @@ export function WalkForwardTab({ strategies }: { strategies: StrategyOpt[] }) {
           />
         </div>
 
-        {error && (
+        {(error || form.spaceError) && (
           <p className="text-[#f85149] text-xs bg-[#2a1b1b] border border-[#f85149]/30 rounded px-3 py-2">
-            {error.message}
+            {form.spaceError || error?.message}
           </p>
         )}
 

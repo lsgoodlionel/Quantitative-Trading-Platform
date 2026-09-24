@@ -12,9 +12,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 
 TRADING_DAYS_US = 252
 TRADING_DAYS_HK = 245
@@ -55,6 +54,20 @@ class BacktestMetrics:
 
     # ── 基准对比 ──────────────────────────────────────────────
     buy_hold_return: float       # 同期买入持有收益率
+
+
+def is_close_fill(fill: dict) -> bool:
+    """
+    判断一笔成交是否为「平仓事件」—— total_trades 的计数口径。
+
+    引擎自 K2 起在 fill 上直接给出 `is_close`（做空后 BUY 也可能是平仓，
+    SELL 也可能是开仓，单看方向会重复计数）。外部传入的历史 fill 没有该字段时，
+    回退到「SELL 即平仓」的旧口径，保证纯多头结果与既有基线逐笔一致。
+    """
+    flag = fill.get("is_close")
+    if flag is not None:
+        return bool(flag)
+    return str(fill.get("side", "")).upper() == "SELL"
 
 
 def compute_metrics(
@@ -102,9 +115,9 @@ def compute_metrics(
 
     calmar = annual_return / abs(max_dd) if abs(max_dd) > 1e-10 else 0.0
 
-    # ── 交易统计（按卖出方向计一笔完整交易）─────────────────────
-    sell_fills = [f for f in fills if f.get("side") in ("SELL", "sell")]
-    pnls = [f.get("realized_pnl", 0.0) for f in sell_fills]
+    # ── 交易统计（按平仓事件计一笔完整交易）─────────────────────
+    close_fills = [f for f in fills if is_close_fill(f)]
+    pnls = [f.get("realized_pnl", 0.0) for f in close_fills]
     total_trades = len(pnls)
 
     wins = [p for p in pnls if p > 0]

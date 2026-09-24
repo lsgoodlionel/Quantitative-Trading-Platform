@@ -12,6 +12,13 @@ formula_factor.py 的栈式虚拟机（evaluate_formula）执行——与 AlphaG
   - Node 为 frozen dataclass，所有变换返回新树（不可变，符合项目风格）。
   - 生成用「grow」法：越深越可能收敛为叶子，从而约束公式长度。
   - 交叉/变异按前序索引随机选点，重建时复制未改动子树。
+
+⚠️ `parse_expr` 是**唯一**允许把外部字符串（例如 LLM 提出的种子表达式）变成
+可执行个体的入口。它是一个手写的递归下降解析器 —— 不是 `eval`，也不是
+`ast.literal_eval`：函数名必须命中 `formula_factor` 的算子/特征白名单，
+元数必须对得上，规模必须在 RPN token 上限内，任何不满足的输入一律抛
+`ExpressionParseError`。让模型输出的字符串走 Python 求值等于把 RCE 面
+交给一个正在猜测的东西。
 """
 
 from __future__ import annotations
@@ -28,19 +35,25 @@ class Node:
 
     kind: str                       # "leaf" | "op"
     value: str                      # 特征名或算子名
-    children: tuple["Node", ...] = field(default=())
+    children: tuple[Node, ...] = field(default=())
 
 
 # ── 词表（惰性构建，来自 formula_factor 单一真源，避免漂移）─────────────
 
-@lru_cache(maxsize=1)
-def _vocab() -> tuple[list[str], dict[int, list[str]]]:
-    """返回 (叶子特征名列表, {arity: 算子名列表})，与公式引擎共享同一份定义。"""
-    from app.quant.formula_factor import FEATURE_META, OPS
+@lru_cache(maxsize=2)
+def _vocab(include_cross_section: bool = False) -> tuple[list[str], dict[int, list[str]]]:
+    """返回 (叶子特征名列表, {arity: 算子名列表})，与公式引擎共享同一份定义。
+
+    `include_cross_section=True` 时把 CS_* 截面算子并入搜索空间 —— 只有当挖掘走
+    panel 求值路径时才可以打开，否则搜出来的公式在单标的路径上必然报错。
+    默认关闭，因此既有实验的 seed → 结果映射保持不变。
+    """
+    from app.quant.formula_factor import CS_OPS, FEATURE_META, OPS
 
     leaves = [m["name"] for m in FEATURE_META]
+    ops = [*OPS, *CS_OPS] if include_cross_section else list(OPS)
     ops_by_arity: dict[int, list[str]] = {}
-    for op in OPS:
+    for op in ops:
         ops_by_arity.setdefault(op.arity, []).append(op.name)
     return leaves, ops_by_arity
 
@@ -49,8 +62,8 @@ def leaf_names() -> list[str]:
     return list(_vocab()[0])
 
 
-def op_names_by_arity() -> dict[int, list[str]]:
-    return {a: list(names) for a, names in _vocab()[1].items()}
+def op_names_by_arity(include_cross_section: bool = False) -> dict[int, list[str]]:
+    return {a: list(names) for a, names in _vocab(include_cross_section)[1].items()}
 
 
 # ── 结构工具 ──────────────────────────────────────────────────────
@@ -85,20 +98,22 @@ def to_expr(node: Node) -> str:
 
 # ── 随机生成（grow 法）────────────────────────────────────────────
 
-def random_tree(rng: random.Random, max_depth: int) -> Node:
+def random_tree(
+    rng: random.Random, max_depth: int, include_cross_section: bool = False
+) -> Node:
     """按 grow 法随机生成一棵表达式树。"""
-    return _grow(rng, depth=0, max_depth=max_depth)
+    return _grow(rng, depth=0, max_depth=max_depth, include_cs=include_cross_section)
 
 
-def _grow(rng: random.Random, depth: int, max_depth: int) -> Node:
-    leaves, ops_by_arity = _vocab()
+def _grow(rng: random.Random, depth: int, max_depth: int, include_cs: bool = False) -> Node:
+    leaves, ops_by_arity = _vocab(include_cs)
     leaf_prob = 0.3 + 0.7 * (depth / max(max_depth, 1))
     if depth >= max_depth or rng.random() < leaf_prob:
         return Node("leaf", rng.choice(leaves))
 
     arity = _pick_arity(rng, ops_by_arity)
     op_name = rng.choice(ops_by_arity[arity])
-    children = tuple(_grow(rng, depth + 1, max_depth) for _ in range(arity))
+    children = tuple(_grow(rng, depth + 1, max_depth, include_cs) for _ in range(arity))
     return Node("op", op_name, children)
 
 
@@ -154,19 +169,175 @@ def crossover(rng: random.Random, parent_a: Node, parent_b: Node) -> Node:
     return replace_random_subtree(rng, parent_a, donor)
 
 
-def mutate(rng: random.Random, tree: Node, max_depth: int, subtree_depth: int = 2) -> Node:
+def mutate(
+    rng: random.Random,
+    tree: Node,
+    max_depth: int,
+    subtree_depth: int = 2,
+    include_cross_section: bool = False,
+) -> Node:
     """点变异：把随机子树替换为一棵新的小随机树。"""
-    fresh = random_tree(rng, max_depth=subtree_depth)
+    fresh = random_tree(rng, max_depth=subtree_depth, include_cross_section=include_cross_section)
     mutated = replace_random_subtree(rng, tree, fresh)
-    return mutated if tree_size(mutated) <= _MAX_NODES else random_tree(rng, max_depth)
+    if tree_size(mutated) <= _MAX_NODES:
+        return mutated
+    return random_tree(rng, max_depth, include_cross_section=include_cross_section)
 
 
 # 节点数硬上限（对应 evaluate_formula 的 32-token 约束，留裕量）
 _MAX_NODES = 24
 
 
-def clamp_size(rng: random.Random, tree: Node, max_depth: int) -> Node:
+def clamp_size(
+    rng: random.Random, tree: Node, max_depth: int, include_cross_section: bool = False
+) -> Node:
     """若树过大（超过 RPN token 上限）则回退为一棵小树。"""
     if tree_size(tree) <= _MAX_NODES and len(to_rpn(tree)) <= 30:
         return tree
-    return random_tree(rng, max_depth=min(max_depth, 3))
+    return random_tree(
+        rng, max_depth=min(max_depth, 3), include_cross_section=include_cross_section
+    )
+
+
+# ── 解析（`to_expr` 的逆运算）─────────────────────────────────────
+#
+# 存在的唯一理由：把**不可信来源**的表达式字符串（LLM 提出的种子）安全地
+# 变成个体。安全性完全来自「白名单 + 元数 + 规模」三重校验，见模块 docstring。
+
+#: 输入字符串长度上限 —— 模型偶尔会吐出一整段散文，没必要拿去解析
+MAX_EXPR_CHARS = 400
+#: 嵌套深度上限，防止病态输入把递归解析器压爆
+MAX_PARSE_DEPTH = 12
+#: 与 formula_factor.MAX_TOKENS 对齐的 RPN 长度上限
+_MAX_PARSED_TOKENS = 32
+
+
+class ExpressionParseError(ValueError):
+    """表达式字符串非法：语法错误 / 名字不在白名单 / 元数不符 / 规模超限。"""
+
+
+def parse_expr(text: str, include_cross_section: bool = False) -> Node:
+    """
+    解析 `to_expr` 形态的表达式（如 ``DIV(MOM20, ATR_RATIO)``）为表达式树。
+
+    语法只有两条产生式，刻意做到没有任何求值语义::
+
+        expr := NAME "(" expr ("," expr)* ")"   # 算子
+              | NAME                             # 叶子特征
+
+    Raises
+    ------
+    ExpressionParseError : 任何不满足白名单 / 元数 / 规模约束的输入
+    """
+    if not isinstance(text, str):
+        raise ExpressionParseError(f"表达式必须是字符串，实得 {type(text).__name__}")
+    source = text.strip()
+    if not source:
+        raise ExpressionParseError("表达式为空")
+    if len(source) > MAX_EXPR_CHARS:
+        raise ExpressionParseError(f"表达式过长（最多 {MAX_EXPR_CHARS} 字符）")
+
+    tokens = _lex(source)
+    parser = _Parser(tokens, include_cross_section)
+    node = parser.parse_expr(depth=0)
+    parser.expect_end()
+
+    if tree_size(node) > _MAX_NODES:
+        raise ExpressionParseError(f"表达式节点过多（最多 {_MAX_NODES} 个）")
+    if len(to_rpn(node)) > _MAX_PARSED_TOKENS:
+        raise ExpressionParseError(f"表达式过长（最多 {_MAX_PARSED_TOKENS} 个 RPN token）")
+    return node
+
+
+_NAME_START = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+_NAME_BODY = _NAME_START | frozenset("0123456789")
+_PUNCT = frozenset("(),")
+
+
+def _lex(source: str) -> list[str]:
+    """切成 `NAME` 与 `( ) ,` 三类记号。出现其他字符直接拒绝。"""
+    tokens: list[str] = []
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        if ch.isspace():
+            i += 1
+            continue
+        if ch in _PUNCT:
+            tokens.append(ch)
+            i += 1
+            continue
+        if ch not in _NAME_START:
+            raise ExpressionParseError(f"表达式含非法字符 {ch!r}")
+        start = i
+        while i < len(source) and source[i] in _NAME_BODY:
+            i += 1
+        tokens.append(source[start:i])
+    return tokens
+
+
+class _Parser:
+    """递归下降解析器。只认名字与括号，不认字面量、运算符、属性访问。"""
+
+    def __init__(self, tokens: list[str], include_cross_section: bool) -> None:
+        self._tokens = tokens
+        self._pos = 0
+        leaves, ops_by_arity = _vocab(include_cross_section)
+        self._leaves = frozenset(leaves)
+        self._arity_by_op = {
+            name: arity for arity, names in ops_by_arity.items() for name in names
+        }
+
+    def _peek(self) -> str | None:
+        return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+    def _next(self) -> str:
+        token = self._peek()
+        if token is None:
+            raise ExpressionParseError("表达式意外结束")
+        self._pos += 1
+        return token
+
+    def expect_end(self) -> None:
+        if self._peek() is not None:
+            raise ExpressionParseError(f"表达式尾部有多余内容：{self._peek()!r}")
+
+    def parse_expr(self, depth: int) -> Node:
+        if depth > MAX_PARSE_DEPTH:
+            raise ExpressionParseError(f"表达式嵌套过深（最多 {MAX_PARSE_DEPTH} 层）")
+        name = self._next()
+        if name in _PUNCT:
+            raise ExpressionParseError(f"期待特征名或算子名，实得 {name!r}")
+        if self._peek() != "(":
+            return self._leaf(name)
+        self._next()  # 吃掉 "("
+        children = self._parse_arguments(depth)
+        return self._op(name, children)
+
+    def _parse_arguments(self, depth: int) -> tuple[Node, ...]:
+        children: list[Node] = [self.parse_expr(depth + 1)]
+        while self._peek() == ",":
+            self._next()
+            children.append(self.parse_expr(depth + 1))
+        if self._next() != ")":
+            raise ExpressionParseError("括号不匹配，缺少 ')'")
+        return tuple(children)
+
+    def _leaf(self, name: str) -> Node:
+        if name in self._arity_by_op:
+            raise ExpressionParseError(
+                f"{name} 是算子，需要写成 {name}(...) 的形式"
+            )
+        if name not in self._leaves:
+            raise ExpressionParseError(f"未知特征名：{name}（不在白名单内）")
+        return Node("leaf", name)
+
+    def _op(self, name: str, children: tuple[Node, ...]) -> Node:
+        arity = self._arity_by_op.get(name)
+        if arity is None:
+            raise ExpressionParseError(f"未知算子：{name}（不在白名单内）")
+        if len(children) != arity:
+            raise ExpressionParseError(
+                f"算子 {name} 需要 {arity} 个参数，实得 {len(children)} 个"
+            )
+        return Node("op", name, children)

@@ -9,22 +9,20 @@ import {
 } from "@/hooks/useBacktestRobustness"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
+import { MonteCarloTab } from "./MonteCarloTab"
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { toRequestBase, useSharedConfig } from "./SharedConfig"
 
-interface StrategyOpt {
-  name: string
-  description: string
-}
+type SubTab = "mc" | "sig" | "shuffle"
 
-type SubTab = "mc" | "sig"
-
-// ── 容器：稳健性 / 显著性 二级切换 ────────────────────────────────
-export function RobustnessTab({ strategies }: { strategies: StrategyOpt[] }) {
+// ── 容器：稳健性 / 显著性 / 成交顺序蒙特卡洛 三合一（V3 · H2 合并 Tab）─
+export function RobustnessTab() {
   const [sub, setSub] = useState<SubTab>("mc")
 
   const SUBS: { key: SubTab; label: string }[] = [
     { key: "mc", label: "🎰 蒙特卡洛稳健性" },
     { key: "sig", label: "🧪 统计显著性" },
+    { key: "shuffle", label: "🎲 成交顺序蒙特卡洛" },
   ]
 
   return (
@@ -43,79 +41,10 @@ export function RobustnessTab({ strategies }: { strategies: StrategyOpt[] }) {
         ))}
       </div>
 
-      {sub === "mc" ? <McPanel strategies={strategies} /> : <SigPanel strategies={strategies} />}
+      {sub === "mc" && <McPanel />}
+      {sub === "sig" && <SigPanel />}
+      {sub === "shuffle" && <MonteCarloTab />}
     </div>
-  )
-}
-
-// ── 共享的基础配置字段 ───────────────────────────────────────────
-interface BaseForm {
-  strategy_name: string
-  symbol: string
-  market: string
-  frequency: string
-  start_date: string
-  end_date: string
-  initial_cash: number
-}
-
-function baseDefaults(): BaseForm {
-  return {
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(3),
-    end_date: today(),
-    initial_cash: 100000,
-  }
-}
-
-function BaseFields<T extends BaseForm>({
-  form, strategies, set,
-}: {
-  form: T
-  strategies: StrategyOpt[]
-  set: (patch: Partial<T>) => void
-}) {
-  return (
-    <>
-      <div>
-        <label className="label">策略</label>
-        <select className="select w-full mt-1" value={form.strategy_name}
-          onChange={(e) => set({ strategy_name: e.target.value } as Partial<T>)}>
-          {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">市场</label>
-          <select className="select w-full mt-1" value={form.market}
-            onChange={(e) => set({ market: e.target.value } as Partial<T>)}>
-            {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="label">标的</label>
-          <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-            onChange={(e) => set({ symbol: e.target.value.toUpperCase() } as Partial<T>)} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="label">开始日期</label>
-          <input className="input w-full mt-1" type="date" value={form.start_date}
-            onChange={(e) => set({ start_date: e.target.value } as Partial<T>)} />
-        </div>
-        <div>
-          <label className="label">结束日期</label>
-          <input className="input w-full mt-1" type="date" value={form.end_date}
-            onChange={(e) => set({ end_date: e.target.value } as Partial<T>)} />
-        </div>
-      </div>
-    </>
   )
 }
 
@@ -123,14 +52,15 @@ function BaseFields<T extends BaseForm>({
 // C4 — 蒙特卡洛稳健性
 // ══════════════════════════════════════════════════════════════════
 
-function McPanel({ strategies }: { strategies: StrategyOpt[] }) {
+function McPanel() {
+  const { config } = useSharedConfig()
   const { mutate: run, isPending, data: result, error } = useMcRobustness()
-  const [form, setForm] = useState({ ...baseDefaults(), method: "bootstrap" as McMethod, n_scenarios: 1000 })
+  const [form, setForm] = useState({ method: "bootstrap" as McMethod, n_scenarios: 1000 })
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }))
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    run({ ...form, params: {} })
+    run({ ...toRequestBase(config), ...form, params: config.params })
   }
 
   return (
@@ -141,7 +71,7 @@ function McPanel({ strategies }: { strategies: StrategyOpt[] }) {
           对回测的逐笔盈亏做重采样，产出收益/最大回撤的置信区间，判断这条曲线有多少来自运气。
         </p>
 
-        <BaseFields form={form} strategies={strategies} set={set} />
+        <SharedConfigNotice />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -282,14 +212,15 @@ function McView({ result }: { result: McRobustnessResult }) {
 // C5 — 统计显著性
 // ══════════════════════════════════════════════════════════════════
 
-function SigPanel({ strategies }: { strategies: StrategyOpt[] }) {
+function SigPanel() {
+  const { config } = useSharedConfig()
   const { mutate: run, isPending, data: result, error } = useSignificance()
-  const [form, setForm] = useState({ ...baseDefaults(), n_simulations: 2000 })
+  const [form, setForm] = useState({ n_simulations: 2000 })
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }))
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    run({ ...form, params: {} })
+    run({ ...toRequestBase(config), ...form, params: config.params })
   }
 
   return (
@@ -300,7 +231,7 @@ function SigPanel({ strategies }: { strategies: StrategyOpt[] }) {
           Bootstrap 假设检验：判断策略 edge（逐笔平均盈亏 &gt; 0）是真信号还是随机噪声，并分解各规则贡献度。
         </p>
 
-        <BaseFields form={form} strategies={strategies} set={set} />
+        <SharedConfigNotice />
 
         <div>
           <label className="label">Bootstrap 次数</label>

@@ -135,7 +135,7 @@ class FundamentalsService:
 
         bundle_parts: dict[str, Any] = {}
         warnings: list[str] = []
-        for key, res in zip(keys, results):
+        for key, res in zip(keys, results, strict=True):
             if isinstance(res, Exception):
                 logger.warning("fundamentals section failed", section=key, error=str(res))
                 warnings.append(f"{key} 数据获取失败: {res}")

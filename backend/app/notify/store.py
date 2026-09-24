@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 import redis.asyncio as aioredis
 
@@ -70,7 +69,7 @@ async def save_config(redis: aioredis.Redis, config: NotifyConfig) -> NotifyConf
     return merged
 
 
-async def read_version(redis: aioredis.Redis) -> Optional[int]:
+async def read_version(redis: aioredis.Redis) -> int | None:
     try:
         v = await redis.get(CONFIG_VERSION_KEY)
         return int(v) if v is not None else None

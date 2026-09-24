@@ -2,53 +2,31 @@ import { useState } from "react"
 import { useBiasCheck, type BiasCheckResult } from "@/hooks/useBacktestValidation"
 import { Spinner } from "@/components/ui/Spinner"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { toRequestBase, useSharedConfig } from "./SharedConfig"
 
-interface StrategyOpt {
-  name: string
-  description: string
-}
+const DEFAULT_STARTUP_CANDLES = [50, 100, 200]
 
 // ── Tab: 前视 / 递归偏差检测 ────────────────────────────────────
-export function BiasCheckTab({ strategies }: { strategies: StrategyOpt[] }) {
+export function BiasCheckTab() {
+  const { config } = useSharedConfig()
   const { mutate: runCheck, isPending, data: result, error } = useBiasCheck()
 
   const [form, setForm] = useState({
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US",
-    frequency: "1d",
-    start_date: yearsAgo(2),
-    end_date: today(),
-    initial_cash: 100000,
-    params_text: '{"fast_period": 10, "slow_period": 30}',
     startup_text: "50, 100, 200",
     lookahead_cut_ratio: 0.7,
   })
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    let params: Record<string, unknown>
-    try {
-      params = JSON.parse(form.params_text)
-    } catch {
-      alert("策略参数 JSON 格式错误")
-      return
-    }
     const startup_candles = form.startup_text
       .split(",")
       .map((s) => parseInt(s.trim(), 10))
       .filter((n) => Number.isFinite(n) && n > 0)
     runCheck({
-      strategy_name: form.strategy_name,
-      symbol: form.symbol,
-      market: form.market,
-      frequency: form.frequency,
-      start_date: form.start_date,
-      end_date: form.end_date,
-      initial_cash: form.initial_cash,
-      params,
-      startup_candles: startup_candles.length ? startup_candles : [50, 100, 200],
+      ...toRequestBase(config),
+      params: config.params,
+      startup_candles: startup_candles.length ? startup_candles : DEFAULT_STARTUP_CANDLES,
       lookahead_cut_ratio: form.lookahead_cut_ratio,
     })
   }
@@ -61,52 +39,7 @@ export function BiasCheckTab({ strategies }: { strategies: StrategyOpt[] }) {
         <p className="text-[11px] text-[#6e7681] leading-relaxed">
           通过截断重跑对比成交序列，识别策略是否偷看未来数据、指标是否随历史长度漂移。
         </p>
-
-        <div>
-          <label className="label">策略</label>
-          <select className="select w-full mt-1" value={form.strategy_name}
-            onChange={(e) => setForm((f) => ({ ...f, strategy_name: e.target.value }))}>
-            {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">市场</label>
-            <select className="select w-full mt-1" value={form.market}
-              onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}>
-              {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">标的</label>
-            <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-              onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">开始日期</label>
-            <input className="input w-full mt-1" type="date" value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">结束日期</label>
-            <input className="input w-full mt-1" type="date" value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-          </div>
-        </div>
-
-        <div>
-          <label className="label">策略参数 <span className="text-[10px] text-[#6e7681]">JSON（固定）</span></label>
-          <textarea
-            className="input w-full mt-1 font-mono text-xs resize-none"
-            rows={2}
-            value={form.params_text}
-            onChange={(e) => setForm((f) => ({ ...f, params_text: e.target.value }))}
-          />
-        </div>
+        <SharedConfigNotice />
 
         <div className="grid grid-cols-2 gap-3">
           <div>

@@ -55,7 +55,14 @@ export function useFactorAnalysis() {
 // ── 公式因子（Formula Factor）────────────────────────────────────
 
 export interface FormulaFeature { name: string; label: string; group: string }
-export interface FormulaOperator { name: string; label: string; arity: number; group: string }
+export interface FormulaOperator {
+  name: string
+  label: string
+  arity: number
+  group: string
+  /** 截面算子：求值需要多标的面板，单标的公式分析页不可用 */
+  requires_panel?: boolean
+}
 export interface FormulaPreset { name: string; tokens: string[]; desc: string }
 
 export interface FormulaMeta {

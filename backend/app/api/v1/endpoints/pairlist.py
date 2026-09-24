@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 import redis.asyncio as aioredis
@@ -107,13 +107,13 @@ async def run_pairlist(body: PairlistRunRequest) -> PairlistRunResponse:
     try:
         universe = await svc.build_universe(body.market, rules, lookback)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"标的池数据采集失败: {exc}")
+        raise HTTPException(status_code=503, detail=f"标的池数据采集失败: {exc}") from exc
 
     matched = svc.apply_chain(universe, rules)
     items = [PairMetricsOut(**svc.metrics_to_dict(m)) for m in matched]
     return PairlistRunResponse(
         market=body.market.value,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
         lookback_days=lookback,
         universe_size=len(universe),
         count=len(matched),
@@ -138,7 +138,7 @@ async def list_saved(
     try:
         raw_map = await redis.hgetall(_SAVED_KEY)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"读取标的池失败: {exc}")
+        raise HTTPException(status_code=503, detail=f"读取标的池失败: {exc}") from exc
 
     saved = [p for p in (_parse_saved(v) for v in raw_map.values()) if p is not None]
     saved.sort(key=lambda p: p.updated_at or "", reverse=True)
@@ -151,7 +151,7 @@ async def upsert_saved(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ) -> SavedPairlist:
     """新建或更新一个标的池。id 留空则新建。"""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     pid = body.id or uuid.uuid4().hex[:12]
 
     created_at = now

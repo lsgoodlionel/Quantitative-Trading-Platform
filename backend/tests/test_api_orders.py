@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
-import pytest
-from httpx import AsyncClient, ASGITransport
 
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.api.v1.endpoints.auth import UserInfo, get_current_user
+from app.api.v1.endpoints.orders import get_oms
 from app.main import app
 from app.oms.manager import OrderManager
-from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
-from app.api.v1.endpoints.orders import get_oms
-from app.api.v1.endpoints.positions import _try_get_oms as get_oms_pos
-from app.api.v1.endpoints.auth import get_current_user, UserInfo
+from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus
 
 
 def _admin_user() -> UserInfo:
@@ -20,14 +20,14 @@ def _admin_user() -> UserInfo:
 
 
 def _make_order(**kwargs) -> LiveOrder:
-    defaults = dict(
-        symbol="AAPL",
-        market="US",
-        side=LiveOrderSide.BUY,
-        qty=10,
-        status=LiveOrderStatus.SUBMITTED,
-        broker_order_id="broker-123",
-    )
+    defaults = {
+        "symbol": "AAPL",
+        "market": "US",
+        "side": LiveOrderSide.BUY,
+        "qty": 10,
+        "status": LiveOrderStatus.SUBMITTED,
+        "broker_order_id": "broker-123",
+    }
     defaults.update(kwargs)
     return LiveOrder(**defaults)
 

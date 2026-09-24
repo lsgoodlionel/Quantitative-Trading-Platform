@@ -110,9 +110,9 @@ def compute_kelly(
         # 近似破产概率
         p_up = win_rate
         p_dn = loss_rate
-        w = f * b  # 相对盈利
-        l = f      # 相对亏损
-        ratio = (p_dn * l) / (p_up * w) if (p_up * w) > 0 else 1.0
+        rel_win = f * b  # 相对盈利
+        rel_loss = f     # 相对亏损
+        ratio = (p_dn * rel_loss) / (p_up * rel_win) if (p_up * rel_win) > 0 else 1.0
         return float(min(1.0, ratio ** 10))  # 简化估计，10次迭代近似
 
     ruin_full = ruin_prob(full_kelly)

@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from app.data.models import Bar, Market, Frequency
-from app.engine.backtest.broker import SimulatedBroker, OrderSide, OrderStatus
+from app.data.models import Bar, Frequency, Market
+from app.engine.backtest.broker import OrderSide, OrderStatus, SimulatedBroker
 from app.engine.backtest.commission import USCommissionModel
 from app.engine.backtest.slippage import NoSlippage
 
 
 def _bar(symbol: str = "AAPL", open_: float = 100.0, close: float = 105.0) -> Bar:
     return Bar(
-        time=datetime(2024, 1, 2, tzinfo=timezone.utc),
+        time=datetime(2024, 1, 2, tzinfo=UTC),
         symbol=symbol,
         market=Market.US,
         frequency=Frequency.DAY_1,

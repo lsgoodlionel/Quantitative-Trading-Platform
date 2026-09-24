@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
 from celery import shared_task
 
@@ -122,7 +121,7 @@ def backfill_symbol(
         return {"symbol": symbol, "market": market, "bars": count, "status": "ok"}
     except Exception as e:
         logger.error("backfill_symbol failed: %s %s — %s", symbol, market, e)
-        raise self.retry(exc=e)
+        raise self.retry(exc=e) from e
 
 
 @shared_task(name="app.tasks.data.cleanup_cache")
@@ -136,6 +135,7 @@ def cleanup_cache() -> dict:
     """
     try:
         import redis
+
         from app.core.config import settings
         r = redis.from_url(settings.redis_url, socket_connect_timeout=5)
         r.ping()
@@ -189,9 +189,10 @@ async def _backfill_one(
 
     使用独立的数据库 session（Celery worker 进程中没有 FastAPI request context）。
     """
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
     from app.core.config import settings
-    from app.data.models import Market, Frequency
+    from app.data.models import Frequency, Market
     from app.data.service import DataService
 
     engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)

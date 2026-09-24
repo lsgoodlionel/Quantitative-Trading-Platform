@@ -138,29 +138,29 @@ class TestValidation:
     def test_nan_weight_raises(self) -> None:
         weights = {"AAPL": 0.5, "MSFT": float("nan")}
         prices = {"AAPL": 190.0, "MSFT": 410.0}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="权重包含 NaN"):
             greedy_allocation(weights, prices, 100_000.0)
 
     def test_empty_weights_raises(self) -> None:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="weights 必须是非空 dict"):
             greedy_allocation({}, {}, 100_000.0)
 
     def test_non_positive_budget_raises(self) -> None:
         weights = {"AAPL": 1.0}
         prices = {"AAPL": 190.0}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="total_value 必须大于"):
             greedy_allocation(weights, prices, 0.0)
 
     def test_all_prices_missing_raises(self) -> None:
         weights = {"AAPL": 0.5, "MSFT": 0.5}
         prices: dict[str, float] = {}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="清洗后没有可配置的资产"):
             greedy_allocation(weights, prices, 100_000.0)
 
     def test_unknown_method_raises(self) -> None:
         weights = {"AAPL": 1.0}
         prices = {"AAPL": 190.0}
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="未知的配置方法"):
             allocate(weights, prices, 100_000.0, method="bogus")
 
 

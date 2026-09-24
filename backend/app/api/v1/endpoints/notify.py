@@ -4,6 +4,7 @@
 - GET  /notify/config   脱敏配置（Settings UI）
 - PUT  /notify/config   持久化 + 版本自增 + 热重载；空密钥沿用旧值
 - POST /notify/test     向指定渠道同步发送测试事件，返回成功/错误
+- /notify/inbox*        通知中心（见 notifications.py，在文件末尾挂载）
 
 存储 / 版本化与 broker_config / protections 一致。
 """

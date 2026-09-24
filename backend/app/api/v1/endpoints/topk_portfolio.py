@@ -57,7 +57,8 @@ async def _fetch_universe(req: TopkRequest) -> dict[str, list]:
     from datetime import date, timedelta
 
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
 
     end_date = date.fromisoformat(req.end) if req.end else date.today()
@@ -144,7 +145,8 @@ async def build_topk_portfolio(req: TopkRequest) -> dict:
     每期最多剔除 n_drop 只、控制换手，返回持仓时间线、换手率、净值曲线与绩效。
     """
     from app.engine.portfolio.topk_dropout import (
-        TopkConfig, run_topk_dropout,
+        TopkConfig,
+        run_topk_dropout,
     )
 
     bars_by_symbol = await _fetch_universe(req)

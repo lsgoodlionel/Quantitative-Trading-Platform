@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
+from app.api.v1.endpoints.auth import UserInfo, get_current_user
 from app.main import app
 from app.risk.engine import init_risk_engine
-from app.api.v1.endpoints.auth import get_current_user, UserInfo
 
 
 @pytest.fixture(autouse=True)

@@ -4,7 +4,7 @@ Phase 1 数据模型单元测试
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ from app.data.models import Bar, Frequency, Market, Tick
 class TestBarModel:
     def _make_bar(self, **kwargs) -> Bar:
         defaults = {
-            "time": datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc),
+            "time": datetime(2024, 1, 15, 9, 30, tzinfo=UTC),
             "symbol": "AAPL",
             "market": Market.US,
             "frequency": Frequency.DAY_1,
@@ -80,7 +80,7 @@ class TestBarModel:
 class TestTickModel:
     def _make_tick(self, **kwargs) -> Tick:
         defaults = {
-            "time": datetime(2024, 1, 15, 10, 0, tzinfo=timezone.utc),
+            "time": datetime(2024, 1, 15, 10, 0, tzinfo=UTC),
             "symbol": "AAPL",
             "market": Market.US,
             "last_price": 183.5,

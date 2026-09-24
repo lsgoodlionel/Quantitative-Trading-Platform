@@ -11,8 +11,8 @@ A 股无公司新闻源（yfinance 不覆盖 A 股新闻），前端对 A 股隐
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from datetime import date as DateType
-from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -54,7 +54,7 @@ def _as_date(value: Any) -> DateType | None:
 
 def _recent_report_periods(count: int) -> list[str]:
     """最近 count 个季度末报告期（YYYYMMDD），从上一个已过季度末往前。"""
-    today = datetime.now(tz=timezone.utc).date()
+    today = datetime.now(tz=UTC).date()
     quarter_ends = [(3, 31), (6, 30), (9, 30), (12, 31)]
     periods: list[str] = []
     year = today.year
@@ -100,7 +100,7 @@ class AkShareEarningsFetcher(Fetcher[CalendarQueryParams, list[EarningsEvent]]):
     def transform_data(
         query: CalendarQueryParams, data: list[tuple[str, pd.DataFrame]]
     ) -> list[EarningsEvent]:
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
         events: list[EarningsEvent] = []
         for period, df in data:
             row = df.iloc[0]
@@ -146,7 +146,7 @@ class AkShareDividendFetcher(Fetcher[CalendarQueryParams, list[DividendEvent]]):
     ) -> list[DividendEvent]:
         if data.empty:
             return []
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
         events: list[DividendEvent] = []
         # 已按报告期降序返回；取最近 limit 条
         for _, row in data.head(query.limit).iterrows():

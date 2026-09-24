@@ -20,10 +20,13 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
-from typing import Literal
+from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING, Literal
 
 import redis.asyncio as aioredis
+
+if TYPE_CHECKING:
+    from app.strategy.factor_strategy import FactorStrategySpec
 
 _KEY_PREFIX = "experiments"
 _RECORD_KEY = f"{_KEY_PREFIX}:record"
@@ -61,6 +64,11 @@ class ExperimentRecord:
     metrics: ExperimentMetrics = field(default_factory=ExperimentMetrics)
     note: str = ""
     created_at: float = 0.0
+    #: 已被提升成的命名策略（G1）；None = 尚未提升
+    promoted_strategy: str | None = None
+    #: 引用的投研产物 ID（V4 · M4，见 `app/quant/lab`）。
+    #: 产物有独立生命周期：本记录被 MAX_RECORDS 淘汰后，这些产物照样加载得到。
+    artifact_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = asdict(self)
@@ -91,6 +99,7 @@ def build_record(
     tokens: list[str] | None = None,
     params: dict | None = None,
     note: str = "",
+    artifact_ids: list[str] | None = None,
 ) -> ExperimentRecord:
     """构造一条带 id / 时间戳的实验记录（不落库）。"""
     return ExperimentRecord(
@@ -104,6 +113,7 @@ def build_record(
         metrics=metrics,
         note=note,
         created_at=time.time(),
+        artifact_ids=list(artifact_ids or []),
     )
 
 
@@ -195,6 +205,38 @@ def _parse_record(raw: str) -> ExperimentRecord | None:
             metrics=metrics,
             note=data.get("note", ""),
             created_at=float(data.get("created_at", 0.0)),
+            promoted_strategy=data.get("promoted_strategy"),
+            artifact_ids=data.get("artifact_ids", []),
         )
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+async def promote_to_strategy(
+    redis: aioredis.Redis,
+    experiment_id: str,
+    name: str,
+    spec: FactorStrategySpec,
+) -> str:
+    """
+    把一条实验记录提升为命名策略，回写实验记录的 `promoted_strategy` 字段。
+
+    ⚠️ 策略以**完整 spec** 独立存储（见 `app/strategy/factor_store.py`）：
+    实验记录会被 `MAX_RECORDS` 滚动淘汰，只存实验 id 的引用会让策略成为孤儿。
+    因此实验记录不存在（已被淘汰）时**不报错**，照常落库策略，只是没得可回写。
+
+    返回落库后的策略名。
+    """
+    # 延迟导入：`app.strategy` 会连带拉起引擎与 16 个 preset，
+    # 而实验记录器在纯分析路径上也会被导入，不该为此付这份代价。
+    from app.strategy.factor_store import save_factor_strategy
+
+    saved = await save_factor_strategy(
+        redis, name=name, spec=spec, source_experiment_id=experiment_id
+    )
+
+    record = await get_experiment(redis, experiment_id)
+    if record is None:
+        return saved.name
+    await save_experiment(redis, replace(record, promoted_strategy=saved.name))
+    return saved.name

@@ -3,6 +3,7 @@
 涵盖 A股（沪深）、港股（恒指成分）、美股（道琼斯+纳斯达克主要成分）。
 """
 from __future__ import annotations
+
 from app.data.models import Market
 
 # ── A股（沪深）─────────────────────────────────────────────────

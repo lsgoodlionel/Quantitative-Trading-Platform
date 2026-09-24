@@ -193,7 +193,7 @@ def lp_allocation(
 
     MILP 不可行 / 无界时回退到 greedy。
     """
-    from scipy.optimize import LinearConstraint, milp, Bounds
+    from scipy.optimize import Bounds, LinearConstraint, milp
 
     symbols, target_weights, prices, skipped = _prepare(weights, latest_prices, total_value)
     n = len(symbols)
@@ -271,7 +271,7 @@ def allocate(
     try:
         m = AllocationMethod(method) if not isinstance(method, AllocationMethod) else method
     except ValueError:
-        raise ValueError(f"未知的配置方法: {method}")
+        raise ValueError(f"未知的配置方法: {method}") from None
 
     if m == AllocationMethod.LP:
         return lp_allocation(weights, latest_prices, total_value)

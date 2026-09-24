@@ -14,8 +14,8 @@ yfinance 为阻塞库，extract_data 保持同步，由 base.Fetcher.fetch_data 
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from datetime import date as DateType
-from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -62,7 +62,7 @@ def _parse_dt(value: Any) -> datetime | None:
         return None
     if isinstance(value, (int, float)):
         try:
-            return datetime.fromtimestamp(float(value), tz=timezone.utc)
+            return datetime.fromtimestamp(float(value), tz=UTC)
         except (ValueError, OverflowError, OSError):
             return None
     try:
@@ -181,7 +181,7 @@ class YFinanceEarningsFetcher(Fetcher[CalendarQueryParams, list[EarningsEvent]])
     def transform_data(
         query: CalendarQueryParams, data: dict[str, Any]
     ) -> list[EarningsEvent]:
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
         events: list[EarningsEvent] = []
         seen: set[DateType] = set()
 
@@ -263,7 +263,7 @@ class YFinanceDividendFetcher(Fetcher[CalendarQueryParams, list[DividendEvent]])
     def transform_data(
         query: CalendarQueryParams, data: dict[str, Any]
     ) -> list[DividendEvent]:
-        today = datetime.now(tz=timezone.utc).date()
+        today = datetime.now(tz=UTC).date()
         info = data.get("info") or {}
         dy = _num(info.get("dividendYield"))
         if dy is not None and dy > 1:  # 新版 yfinance 返回百分比 → 统一为分数

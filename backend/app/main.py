@@ -1,13 +1,15 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
 from app.core.config import settings
 from app.core.database import engine
 from app.core.logging import get_logger, setup_logging
+from app.core.security_headers import SecurityHeadersMiddleware
+from app.core.version import APP_VERSION
 
 logger = get_logger(__name__)
 
@@ -22,12 +24,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
     logger.info("Database connection pool ready")
 
+    # 用户表播种（V3 J3）：空表时写入 admin / trader / viewer 三个内置账户。
+    # 失败只警告不阻断启动 —— 登录路径本身也会在数据库不可达时回落内置账户。
+    try:
+        from app.core.database import AsyncSessionLocal
+        from app.data.storage.users import PostgresUserStore, seed_builtin_users
+
+        async with AsyncSessionLocal() as session:
+            seed = await seed_builtin_users(PostgresUserStore(session))
+        if seed.warning:
+            logger.warning(seed.warning)
+    except Exception as e:
+        logger.warning("User seeding skipped: %s", e)
+
     # 初始化 OMS：自动检测 Redis 中的 Alpaca 配置
     # - 已配置 Alpaca → AlpacaGateway (Paper/Live) 处理美股
     # - 未配置 Alpaca → PaperGateway（本地纸面交易）
-    from app.oms.manager import init_hybrid_order_manager
-    from app.core.redis import get_redis_pool
     import redis.asyncio as aioredis
+
+    from app.core.redis import get_redis_pool
+    from app.oms.manager import init_hybrid_order_manager
     try:
         redis_client = aioredis.Redis(connection_pool=get_redis_pool())
         await redis_client.ping()
@@ -66,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="QuantBot API",
-        version="0.1.0",
+        version=APP_VERSION,
         description="Multi-market quantitative trading platform (US/HK/A)",
         docs_url="/docs" if not settings.is_production else None,
         redoc_url="/redoc" if not settings.is_production else None,
@@ -82,6 +98,12 @@ def create_app() -> FastAPI:
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
 
+    # 安全响应头。必须在 CORS **之后**注册：add_middleware 是往外层加，
+    # 后加的在更外层，这样 CORS 自己短路返回的预检响应也能带上这些头。
+    # HSTS 只在 production 开启（且中间件内部还要求这一跳确实是 HTTPS）——
+    # 在 http://localhost 上下发会把开发者浏览器锁死在 https。
+    app.add_middleware(SecurityHeadersMiddleware, enable_hsts=settings.is_production)
+
     # Prometheus 指标端点
     if settings.prometheus_enabled:
         metrics_app = make_asgi_app()
@@ -91,11 +113,28 @@ def create_app() -> FastAPI:
     from app.api.v1.router import api_router
     app.include_router(api_router, prefix="/api/v1")
 
-    @app.get("/health", tags=["System"])
-    async def health_check() -> dict[str, str]:
-        return {"status": "ok", "version": "0.1.0", "environment": settings.environment}
+    # 存活 /health 与就绪 /health/ready（见 app/api/health.py）
+    from app.api.health import router as health_router
+    app.include_router(health_router)
 
+    _register_exception_handlers(app)
     return app
+
+
+def _register_exception_handlers(app: FastAPI) -> None:
+    """把「用户配置错误」类异常翻译成 4xx，而不是让它们变成 500。
+
+    500 的含义是「服务端出了意料之外的问题」。用户策略目录里放了一个与
+    preset 重名的文件是**用户能自己修好的配置问题**，报 500 会让人以为
+    是平台坏了，而真正的原因（哪两个名字撞了）还埋在服务端日志里。
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.strategy.resolver import StrategyNameConflictError
+
+    @app.exception_handler(StrategyNameConflictError)
+    async def _on_strategy_name_conflict(_request: Request, exc: StrategyNameConflictError):
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 app = create_app()

@@ -7,11 +7,10 @@ broker_order_id（券商返回的订单号）、strategy_id（策略归属）等
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
-import uuid
 
 
 class LiveOrderSide(str, Enum):
@@ -43,24 +42,24 @@ class LiveOrder:
     side: LiveOrderSide
     qty: int
     order_type: LiveOrderType = LiveOrderType.MARKET
-    limit_price: Optional[float] = None
+    limit_price: float | None = None
 
     order_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    broker_order_id: Optional[str] = None   # 券商返回的原始 ID
-    strategy_id: Optional[str] = None
-    account_id: Optional[str] = None
+    broker_order_id: str | None = None   # 券商返回的原始 ID
+    strategy_id: str | None = None
+    account_id: str | None = None
 
     status: LiveOrderStatus = LiveOrderStatus.PENDING_SUBMIT
     filled_qty: int = 0
-    avg_fill_price: Optional[float] = None
+    avg_fill_price: float | None = None
     commission: float = 0.0
-    reject_reason: Optional[str] = None
+    reject_reason: str | None = None
 
     paper_mode: bool = False              # 模拟盘 True / 实盘 False
 
     created_at: datetime = field(default_factory=datetime.utcnow)
-    submitted_at: Optional[datetime] = None
-    filled_at: Optional[datetime] = None
+    submitted_at: datetime | None = None
+    filled_at: datetime | None = None
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
     @property
@@ -109,7 +108,7 @@ class LiveFill:
     price: float
     commission: float
     filled_at: datetime
-    broker_fill_id: Optional[str] = None
+    broker_fill_id: str | None = None
 
     def to_dict(self) -> dict:
         return {

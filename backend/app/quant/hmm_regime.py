@@ -97,7 +97,7 @@ def fit_hmm(
     rng = np.random.default_rng(seed)
 
     # 初始化参数（K-means 风格：按分位数划分）
-    sorted_r = np.sort(r)
+    np.sort(r)
     quantiles = np.linspace(0, 1, n_states + 2)[1:-1]
     mu = np.array([float(np.percentile(r, q * 100)) for q in quantiles])
     sigma = np.full(n_states, float(np.std(r)))

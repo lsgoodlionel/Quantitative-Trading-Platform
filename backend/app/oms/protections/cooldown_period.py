@@ -7,7 +7,6 @@ CooldownPeriod — 任一标的成交后，在冷却窗口内禁止再次入场�
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 from app.oms.protections.base import (
     IProtection,
@@ -26,7 +25,7 @@ class CooldownPeriod(IProtection):
 
     def global_stop(
         self, now: datetime, trades: list[TradeRecord], starting_balance: float
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         return None
 
     def stop_per_symbol(
@@ -36,7 +35,7 @@ class CooldownPeriod(IProtection):
         now: datetime,
         trades: list[TradeRecord],
         starting_balance: float,
-    ) -> Optional[ProtectionResult]:
+    ) -> ProtectionResult | None:
         window_start = now - timedelta(minutes=self._cfg.stop_duration_minutes)
         recent = [t for t in trades if t.close_date >= window_start]
         if not recent:

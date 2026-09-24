@@ -6,26 +6,29 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, AreaChart, Area,
 } from "recharts"
-import type { Market, Frequency } from "@/types"
-import { MARKET_CFGS, today, yearsAgo } from "./config"
+import type { Frequency, Market } from "@/types"
+import { SharedConfigNotice } from "./SharedConfigNotice"
+import { useSharedConfig } from "./SharedConfig"
 
-// ── Tab: 蒙特卡洛 ─────────────────────────────────────────────
-export function MonteCarloTab({ strategies }: { strategies: { name: string; description: string }[] }) {
+// ── Tab: 蒙特卡洛（成交顺序随机排列）───────────────────────────
+export function MonteCarloTab() {
+  const { config } = useSharedConfig()
   const { mutate: runMC, isPending, data: result, error } = useMonteCarlo()
-  const [form, setForm] = useState({
-    strategy_name: "double_ma",
-    symbol: "AAPL",
-    market: "US" as Market,
-    frequency: "1d" as Frequency,
-    start_date: yearsAgo(2),
-    end_date: today(),
-    initial_cash: 100000,
-    n_simulations: 300,
-  })
+  const [form, setForm] = useState({ n_simulations: 300 })
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    runMC({ ...form, params: {} })
+    runMC({
+      strategy_name: config.strategy_name,
+      symbol: config.symbol,
+      market: config.market as Market,
+      frequency: config.frequency as Frequency,
+      start_date: config.start_date,
+      end_date: config.end_date,
+      initial_cash: config.initial_cash,
+      params: config.params,
+      n_simulations: form.n_simulations,
+    })
   }
 
   return (
@@ -37,42 +40,7 @@ export function MonteCarloTab({ strategies }: { strategies: { name: string; desc
           随机打乱成交顺序 N 次，评估策略统计显著性。
           若大部分模拟结果均为正收益，则策略具有统计稳健性。
         </p>
-
-        <div>
-          <label className="label">策略</label>
-          <select className="select w-full mt-1" value={form.strategy_name}
-            onChange={(e) => setForm((f) => ({ ...f, strategy_name: e.target.value }))}>
-            {strategies.map((s) => <option key={s.name} value={s.name}>{s.description || s.name}</option>)}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">市场</label>
-            <select className="select w-full mt-1" value={form.market}
-              onChange={(e) => setForm((f) => ({ ...f, market: e.target.value as Market }))}>
-              {MARKET_CFGS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="label">标的</label>
-            <input className="input w-full mt-1 font-mono uppercase" value={form.symbol}
-              onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value.toUpperCase() }))} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">开始日期</label>
-            <input className="input w-full mt-1" type="date" value={form.start_date}
-              onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">结束日期</label>
-            <input className="input w-full mt-1" type="date" value={form.end_date}
-              onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} />
-          </div>
-        </div>
+        <SharedConfigNotice />
 
         <div>
           <label className="label">模拟次数</label>

@@ -24,8 +24,8 @@ from pydantic import BaseModel, Field
 from app.quant.bsm import price_option
 from app.quant.cointegration import analyze_cointegration
 from app.quant.copula import analyze_copula
-from app.quant.gbm import simulate_gbm
 from app.quant.garch import fit_garch11
+from app.quant.gbm import simulate_gbm
 from app.quant.hmm_regime import fit_hmm
 from app.quant.kelly import compute_kelly
 from app.quant.pca_factor import analyze_pca
@@ -247,11 +247,14 @@ async def run_factor_analysis(req: FactorAnalysisRequest) -> dict:
     返回 IC 时间序列、IC IR、分位数收益分析。
     """
     from datetime import date, timedelta
+
     import pandas as pd
-    from app.quant.factor_analysis import analyze_factor
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
-    from app.data.service import DataService
+
     from app.core.database import AsyncSessionLocal
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
+    from app.data.service import DataService
+    from app.quant.factor_analysis import analyze_factor
 
     # parse dates
     end_date = date.fromisoformat(req.end) if req.end else date.today()
@@ -337,12 +340,15 @@ async def run_formula_factor(req: FormulaFactorRequest) -> dict:
     示例 tokens：["MOM20", "ATR_RATIO", "DIV"]（动量除以波动率）
     """
     from datetime import date, timedelta
+
     import pandas as pd
-    from app.quant.factor_analysis import analyze_factor
-    from app.quant.formula_factor import evaluate_formula, FormulaError
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
-    from app.data.service import DataService
+
     from app.core.database import AsyncSessionLocal
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
+    from app.data.service import DataService
+    from app.quant.factor_analysis import analyze_factor
+    from app.quant.formula_factor import FormulaError, evaluate_formula
 
     end_date = date.fromisoformat(req.end) if req.end else date.today()
     start_date = date.fromisoformat(req.start) if req.start else end_date - timedelta(days=365 * 2)
@@ -431,11 +437,14 @@ async def train_ml_strategy(req: MLTrainRequest) -> dict:
     返回模型评估指标（准确率、AUC、特征重要度）和近期信号。
     """
     from datetime import date, timedelta
+
     import pandas as pd
-    from app.quant.ml_strategy import train_ml_strategy as _train
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
-    from app.data.service import DataService
+
     from app.core.database import AsyncSessionLocal
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
+    from app.data.service import DataService
+    from app.quant.ml_strategy import train_ml_strategy as _train
 
     end_date = date.fromisoformat(req.end) if req.end else date.today()
     start_date = (

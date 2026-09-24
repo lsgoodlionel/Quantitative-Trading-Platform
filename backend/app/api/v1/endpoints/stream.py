@@ -157,6 +157,7 @@ async def stream_orders(websocket: WebSocket) -> None:
         """从 Redis Stream 增量消费订单事件。"""
         try:
             import redis.asyncio as aioredis
+
             from app.core.config import settings
             r = aioredis.from_url(settings.redis_url)
 

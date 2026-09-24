@@ -1,28 +1,28 @@
 # ── 趋势跟踪类 ──────────────────────────────────────────────────
-from app.strategy.presets.double_ma import DoubleMaStrategy
-from app.strategy.presets.triple_ma import TripleMaStrategy
-from app.strategy.presets.macd import MacdStrategy
-from app.strategy.presets.supertrend import SupertrendStrategy
 from app.strategy.presets.adx_trend import AdxTrendStrategy
+from app.strategy.presets.atr_breakout import AtrBreakoutStrategy
 
 # ── 均值回归类 ──────────────────────────────────────────────────
 from app.strategy.presets.bollinger import BollingerStrategy
-from app.strategy.presets.rsi_mean_reversion import RsiMeanReversionStrategy
-from app.strategy.presets.stochastic import StochasticStrategy
-from app.strategy.presets.vwap_reversion import VwapReversionStrategy
 
 # ── 突破类 ──────────────────────────────────────────────────────
 from app.strategy.presets.donchian_breakout import DonchianBreakoutStrategy
+from app.strategy.presets.double_ma import DoubleMaStrategy
+from app.strategy.presets.grid_trading import GridTradingStrategy
 from app.strategy.presets.keltner_breakout import KeltnerBreakoutStrategy
-from app.strategy.presets.atr_breakout import AtrBreakoutStrategy
+from app.strategy.presets.macd import MacdStrategy
 
 # ── 动量类 ──────────────────────────────────────────────────────
 from app.strategy.presets.momentum import MomentumStrategy
 
 # ── 复合/高级类 ─────────────────────────────────────────────────
 from app.strategy.presets.multi_factor import MultiFactorStrategy
-from app.strategy.presets.grid_trading import GridTradingStrategy
 from app.strategy.presets.pairs_trading import PairsTradingStrategy
+from app.strategy.presets.rsi_mean_reversion import RsiMeanReversionStrategy
+from app.strategy.presets.stochastic import StochasticStrategy
+from app.strategy.presets.supertrend import SupertrendStrategy
+from app.strategy.presets.triple_ma import TripleMaStrategy
+from app.strategy.presets.vwap_reversion import VwapReversionStrategy
 
 STRATEGY_REGISTRY: dict[str, type] = {
     # 趋势跟踪

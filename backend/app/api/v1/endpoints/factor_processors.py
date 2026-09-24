@@ -11,7 +11,8 @@
 
 from __future__ import annotations
 
-from typing import Callable, Literal
+from collections.abc import Callable
+from typing import Literal
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
@@ -90,7 +91,8 @@ async def _fetch_universe(
     from datetime import date, timedelta
 
     from app.core.database import AsyncSessionLocal
-    from app.data.models import Frequency as FreqEnum, Market as MarketEnum
+    from app.data.models import Frequency as FreqEnum
+    from app.data.models import Market as MarketEnum
     from app.data.service import DataService
 
     end_date = date.fromisoformat(end) if end else date.today()
@@ -145,7 +147,10 @@ async def get_processor_meta() -> list[dict]:
 async def preview_processors(req: ProcessorPreviewRequest) -> dict:
     """运行防泄漏处理流水线，返回基础因子处理前/后的分布与样本对比。"""
     from app.quant.panel import (
-        attach_forward_label, bars_to_panel, column_cells, column_stats,
+        attach_forward_label,
+        bars_to_panel,
+        column_cells,
+        column_stats,
     )
     from app.quant.processing_pipeline import ProcessingPipeline, ProcessorConfig
     from app.quant.processors import ProcessorError

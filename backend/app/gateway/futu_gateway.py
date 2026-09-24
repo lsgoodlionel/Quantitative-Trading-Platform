@@ -15,12 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
-from typing import Optional
 
 from app.core.config import settings
-from app.gateway.base import TradingGateway, AccountInfo, BrokerPosition
-from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderStatus, LiveOrderType
+from app.gateway.base import AccountInfo, BrokerPosition, TradingGateway
+from app.oms.order import LiveOrder, LiveOrderSide, LiveOrderType
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +54,7 @@ class FutuGateway(TradingGateway):
         self._unlock_pwd = unlock_pwd if unlock_pwd is not None else settings.futu_unlock_pwd
         self._trade_ctx = None
         self._connected = False
-        self._account_id: Optional[str] = None
+        self._account_id: str | None = None
 
     async def connect(self) -> None:
         loop = asyncio.get_event_loop()

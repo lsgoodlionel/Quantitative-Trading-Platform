@@ -29,7 +29,7 @@ from app.core.database import get_db
 from app.core.logging import get_logger
 from app.data.service import DataService
 from app.strategy.engine import StrategyState, get_strategy_engine
-from app.strategy.presets import STRATEGY_REGISTRY
+from app.strategy.resolver import available_strategies
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -90,12 +90,12 @@ async def start_live_strategy(
     策略将订阅实时 K 线，每根 K 线触发一次 on_bar 回调，
     信号经过风控检查后通过 OMS 提交订单。
     """
-    if body.strategy_name not in STRATEGY_REGISTRY:
+    if body.strategy_name not in available_strategies():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"Unknown strategy '{body.strategy_name}'. "
-                f"Available: {sorted(STRATEGY_REGISTRY.keys())}"
+                f"Available: {sorted(available_strategies().keys())}"
             ),
         )
 
@@ -124,13 +124,13 @@ async def start_live_strategy(
             sim_days=body.sim_days,
         )
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to start strategy", instance_id=instance_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start strategy: {e}",
-        )
+        ) from e
 
     logger.info("Live strategy started", instance_id=instance_id, strategy=body.strategy_name)
     return StrategyInstanceResponse(**inst.to_dict())
@@ -159,7 +159,7 @@ async def stop_live_strategy(instance_id: str) -> StrategyInstanceResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to stop strategy: {e}",
-        )
+        ) from e
 
     logger.info("Live strategy stopped", instance_id=instance_id)
     return StrategyInstanceResponse(**inst.to_dict())

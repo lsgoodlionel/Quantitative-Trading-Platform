@@ -13,9 +13,9 @@ VaR / CVaR 风险计算引擎
 
 from __future__ import annotations
 
-import numpy as np
 from dataclasses import dataclass
 
+import numpy as np
 
 # ── 结果类 ────────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ def compute_portfolio_var(
     c95, c99 = confidence_levels
 
     # ── 历史模拟法 ──────────────────────────
-    sorted_r = np.sort(arr)  # ascending: worst first
+    np.sort(arr)  # ascending: worst first
 
     # VaR at level q = -(q-th percentile of returns)
     hist_var_95  = float(-np.percentile(arr, (1 - c95) * 100))

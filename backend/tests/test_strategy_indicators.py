@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import pandas as pd
-import numpy as np
-import pytest
 
 from app.strategy.indicators import (
-    sma, ema, rsi, macd, bollinger_bands, atr,
-    crossover, crossunder, obv, vwap,
+    bollinger_bands,
+    crossover,
+    crossunder,
+    ema,
+    macd,
+    obv,
+    rsi,
+    sma,
 )
 
 
@@ -60,7 +64,8 @@ class TestRsi:
         closes = [100.0 + i * 0.5 for i in range(30)]
         df = _make_df(closes)
         result = rsi(df, 14).dropna()
-        assert (result >= 0).all() and (result <= 100).all()
+        assert (result >= 0).all()
+        assert (result <= 100).all()
 
     def test_rsi_high_on_uptrend(self) -> None:
         closes = [100.0 + i for i in range(30)]

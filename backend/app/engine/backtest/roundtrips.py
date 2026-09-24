@@ -22,7 +22,6 @@ from datetime import datetime
 
 import pandas as pd
 
-
 # 无标签时的回退常量 (§1.1)
 DEFAULT_ENTRY_TAG = "untagged"
 DEFAULT_EXIT_REASON = "signal"
@@ -96,79 +95,119 @@ def build_round_trips(
     bars_index: pd.DatetimeIndex | None = None,
 ) -> list[RoundTrip]:
     """
-    从扁平 fills[] 通过 FIFO 批次匹配重构回合交易列表。
+    从扁平 fills[] 通过 FIFO 批次匹配重构回合交易列表（支持多空双向）。
 
-    - BUY 开/加多头批次；SELL FIFO 消耗多头批次（当前引擎为多头现货）。
+    - SELL 先 FIFO 消耗多头批次（产出 long 回合），剩余部分开空头批次。
+    - BUY  先 FIFO 消耗空头批次（产出 short 回合），剩余部分开多头批次。
     - 每消耗一个批次切片即产出一个 RoundTrip。
-    - pnl 按 (consumed / sell.qty) 比例分摊券商 realized_pnl，保证不变量成立。
+    - pnl 按 (consumed / 本笔平仓数量) 比例分摊券商 realized_pnl，保证
+      `sum(trip.pnl) == sum(realized_pnl)` 这一不变量成立。
     - entry_tag 取自开仓 fill，exit_reason 取自平仓 fill（缺省用回退常量）。
+
+    纯多头场景下与做空上线前逐笔一致：空头队列恒为空，SELL 全部用于平多。
     """
     trips: list[RoundTrip] = []
-    open_lots: dict[str, deque[_OpenLot]] = defaultdict(deque)
-    tid = 0
+    long_lots: dict[str, deque[_OpenLot]] = defaultdict(deque)
+    short_lots: dict[str, deque[_OpenLot]] = defaultdict(deque)
+    counter = _TripCounter()
 
     for fill in sorted(fills, key=lambda f: str(f.get("filled_at") or "")):
         side = str(fill.get("side", "")).upper()
+        if side not in ("BUY", "SELL"):
+            continue
         qty = float(fill.get("qty", 0) or 0)
         if qty <= _EPS:
             continue
-        price = float(fill.get("price", 0) or 0)
-        commission = float(fill.get("commission", 0) or 0)
-        filled_at = _parse_time(fill.get("filled_at"))
-        symbol = fill.get("symbol", "")
 
-        if side == "BUY":
-            tag = fill.get("entry_tag") or DEFAULT_ENTRY_TAG
-            open_lots[symbol].append(
-                _OpenLot(qty=qty, price=price, time=filled_at, tag=tag,
-                         commission=commission, orig_qty=qty)
-            )
-            continue
+        is_buy = side == "BUY"
+        closing = short_lots[fill.get("symbol", "")] if is_buy else long_lots[fill.get("symbol", "")]
+        opening = long_lots[fill.get("symbol", "")] if is_buy else short_lots[fill.get("symbol", "")]
 
-        if side != "SELL":
-            continue
-
-        realized = float(fill.get("realized_pnl", 0) or 0)
-        exit_reason = fill.get("exit_reason") or DEFAULT_EXIT_REASON
-        remaining = qty
-        lots = open_lots[symbol]
-
-        while remaining > _EPS and lots:
-            lot = lots[0]
-            consumed = min(remaining, lot.qty)
-
-            frac_sell = consumed / qty if qty > _EPS else 0.0
-            frac_lot = consumed / lot.orig_qty if lot.orig_qty > _EPS else 0.0
-            buy_comm = lot.commission * frac_lot
-            sell_comm = commission * frac_sell
-            pnl_slice = realized * frac_sell
-
-            holding_bars = _holding_bars(lot.time, filled_at, bars_index)
-            holding_days = max((filled_at - lot.time).total_seconds() / 86400.0, 0.0)
-
-            tid += 1
-            trips.append(RoundTrip(
-                trip_id=tid,
-                entry_time=lot.time,
-                exit_time=filled_at,
-                direction="long",
-                entry_tag=lot.tag,
-                exit_reason=exit_reason,
-                qty=consumed,
-                entry_price=lot.price,
-                exit_price=price,
-                pnl=pnl_slice,
-                commission=buy_comm + sell_comm,
-                holding_bars=holding_bars,
-                holding_days=holding_days,
+        consumed_total = _close_against(
+            fill, qty, closing, trips, counter,
+            direction="short" if is_buy else "long",
+            bars_index=bars_index,
+        )
+        remaining = qty - consumed_total
+        if remaining > _EPS:
+            commission = float(fill.get("commission", 0) or 0)
+            opening.append(_OpenLot(
+                qty=remaining,
+                price=float(fill.get("price", 0) or 0),
+                time=_parse_time(fill.get("filled_at")),
+                tag=fill.get("entry_tag") or DEFAULT_ENTRY_TAG,
+                # 整笔开仓时原样保留佣金，避免 (c*q)/q 的浮点末位漂移
+                commission=commission if remaining == qty else commission * (remaining / qty),
+                orig_qty=remaining,
             ))
 
-            lot.qty -= consumed
-            remaining -= consumed
-            if lot.qty <= _EPS:
-                lots.popleft()
-
     return trips
+
+
+class _TripCounter:
+    """回合序号发号器（避免在闭包里改外层变量）。"""
+
+    def __init__(self) -> None:
+        self.value = 0
+
+    def next(self) -> int:
+        self.value += 1
+        return self.value
+
+
+def _close_against(
+    fill: dict,
+    qty: float,
+    lots: deque[_OpenLot],
+    trips: list[RoundTrip],
+    counter: _TripCounter,
+    *,
+    direction: str,
+    bars_index: pd.DatetimeIndex | None,
+) -> float:
+    """用本笔成交 FIFO 消耗反向批次，产出回合。返回实际平仓数量。"""
+    closing_qty = min(qty, sum(lot.qty for lot in lots))
+    if closing_qty <= _EPS:
+        return 0.0
+
+    price = float(fill.get("price", 0) or 0)
+    commission = float(fill.get("commission", 0) or 0)
+    filled_at = _parse_time(fill.get("filled_at"))
+    realized = float(fill.get("realized_pnl", 0) or 0)
+    exit_reason = fill.get("exit_reason") or DEFAULT_EXIT_REASON
+
+    remaining = closing_qty
+    while remaining > _EPS and lots:
+        lot = lots[0]
+        consumed = min(remaining, lot.qty)
+
+        frac_close = consumed / closing_qty
+        frac_lot = consumed / lot.orig_qty if lot.orig_qty > _EPS else 0.0
+        entry_comm = lot.commission * frac_lot
+        exit_comm = commission * (consumed / qty)
+
+        trips.append(RoundTrip(
+            trip_id=counter.next(),
+            entry_time=lot.time,
+            exit_time=filled_at,
+            direction=direction,
+            entry_tag=lot.tag,
+            exit_reason=exit_reason,
+            qty=consumed,
+            entry_price=lot.price,
+            exit_price=price,
+            pnl=realized * frac_close,
+            commission=entry_comm + exit_comm,
+            holding_bars=_holding_bars(lot.time, filled_at, bars_index),
+            holding_days=max((filled_at - lot.time).total_seconds() / 86400.0, 0.0),
+        ))
+
+        lot.qty -= consumed
+        remaining -= consumed
+        if lot.qty <= _EPS:
+            lots.popleft()
+
+    return closing_qty - remaining
 
 
 def _holding_bars(entry: datetime, exit_: datetime, bars_index: pd.DatetimeIndex | None) -> int:

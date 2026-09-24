@@ -84,7 +84,7 @@ def _default_config() -> dict[str, MarketSourceConfig]:
 class DataSourceRegistry:
     """数据源注册表单例：持有 feed 实例 + 内存配置。"""
 
-    _instance: "DataSourceRegistry | None" = None
+    _instance: DataSourceRegistry | None = None
 
     def __init__(self) -> None:
         # 所有 feed 实例（懒复用；construction 无副作用）
@@ -107,7 +107,7 @@ class DataSourceRegistry:
         self._config: dict[str, MarketSourceConfig] = _default_config()
 
     @classmethod
-    def instance(cls) -> "DataSourceRegistry":
+    def instance(cls) -> DataSourceRegistry:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance

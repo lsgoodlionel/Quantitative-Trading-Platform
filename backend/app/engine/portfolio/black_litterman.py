@@ -271,6 +271,6 @@ def black_litterman(
         prior_returns=pd.Series(pi, index=symbols),
         risk_aversion=round(delta, 4),
         tau=tau,
-        market_weights={s: round(float(w), 4) for s, w in zip(symbols, mkt_w)},
+        market_weights={s: round(float(w), 4) for s, w in zip(symbols, mkt_w, strict=True)},
         view_labels=labels,
     )

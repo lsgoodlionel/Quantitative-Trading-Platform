@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from app.notify.config import WebhookFormat
 
@@ -34,8 +34,8 @@ def send_webhook_sync(
     timeout: int = 10,
     retries: int = 2,
     retry_delay: float = 1.0,
-    secret_header: Optional[str] = None,
-    secret_value: Optional[str] = None,
+    secret_header: str | None = None,
+    secret_value: str | None = None,
 ) -> dict[str, Any]:
     """
     同步 POST，带自重试退避。返回 {"ok", "http_status", "error", "attempts"}。
@@ -56,7 +56,7 @@ def send_webhook_sync(
     request_kwargs = _build_request_kwargs(fmt, payload, headers)
 
     total_attempts = 1 + max(0, retries)
-    last_error: Optional[str] = None
+    last_error: str | None = None
 
     for attempt in range(total_attempts):
         if attempt > 0:

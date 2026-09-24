@@ -11,13 +11,11 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.oms.algos.executor import AlgoValidationError, get_algo_executor
 from app.oms.algos.base import AlgoType
+from app.oms.algos.executor import AlgoValidationError, get_algo_executor
 
 router = APIRouter()
 
@@ -32,12 +30,12 @@ class SubmitAlgoRequest(BaseModel):
     total_qty: int = Field(..., ge=1, description="父单总股数")
 
     order_type: str = Field("MARKET", description="子单类型 MARKET / LIMIT")
-    limit_price: Optional[float] = Field(None, gt=0)
-    strategy_id: Optional[str] = None
+    limit_price: float | None = Field(None, gt=0)
+    strategy_id: str | None = None
 
     duration_seconds: float = Field(300.0, gt=0, description="总执行时长（秒）")
     slice_count: int = Field(6, ge=1, le=100, description="TWAP/VWAP 切片数")
-    display_qty: Optional[int] = Field(None, gt=0, description="冰山单每次露出股数")
+    display_qty: int | None = Field(None, gt=0, description="冰山单每次露出股数")
 
 
 class ChildSliceResponse(BaseModel):
@@ -45,11 +43,11 @@ class ChildSliceResponse(BaseModel):
     qty: int
     delay_seconds: float
     status: str
-    child_order_id: Optional[str] = None
+    child_order_id: str | None = None
     filled_qty: int
-    avg_fill_price: Optional[float] = None
-    error: Optional[str] = None
-    submitted_at: Optional[str] = None
+    avg_fill_price: float | None = None
+    error: str | None = None
+    submitted_at: str | None = None
 
 
 class AlgoOrderResponse(BaseModel):
@@ -60,20 +58,20 @@ class AlgoOrderResponse(BaseModel):
     side: str
     total_qty: int
     order_type: str
-    limit_price: Optional[float] = None
-    strategy_id: Optional[str] = None
+    limit_price: float | None = None
+    strategy_id: str | None = None
     duration_seconds: float
     slice_count: int
-    display_qty: Optional[int] = None
+    display_qty: int | None = None
     status: str
     filled_qty: int
     submitted_qty: int
-    avg_fill_price: Optional[float] = None
+    avg_fill_price: float | None = None
     progress_pct: float
     slices: list[ChildSliceResponse]
     created_at: str
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
+    started_at: str | None = None
+    finished_at: str | None = None
     updated_at: str
 
 
@@ -85,7 +83,7 @@ async def submit_algo_order(body: SubmitAlgoRequest) -> AlgoOrderResponse:
     try:
         algo_type = AlgoType(body.algo_type.upper())
     except ValueError:
-        raise HTTPException(400, detail=f"无效算法类型 '{body.algo_type}'（TWAP/VWAP/ICEBERG）")
+        raise HTTPException(400, detail=f"无效算法类型 '{body.algo_type}'（TWAP/VWAP/ICEBERG）") from None
 
     if body.side.upper() not in ("BUY", "SELL"):
         raise HTTPException(400, detail=f"无效方向 '{body.side}'（BUY/SELL）")
@@ -108,15 +106,15 @@ async def submit_algo_order(body: SubmitAlgoRequest) -> AlgoOrderResponse:
             display_qty=body.display_qty,
         )
     except AlgoValidationError as e:
-        raise HTTPException(status_code=422, detail=f"算法参数校验失败: {e}")
+        raise HTTPException(status_code=422, detail=f"算法参数校验失败: {e}") from e
 
     return AlgoOrderResponse(**algo.to_dict())
 
 
 @router.get("/algo", response_model=list[AlgoOrderResponse])
 async def list_algo_orders(
-    strategy_id: Optional[str] = Query(None),
-    algo_status: Optional[str] = Query(None, alias="status"),
+    strategy_id: str | None = Query(None),
+    algo_status: str | None = Query(None, alias="status"),
     limit: int = Query(100, ge=1, le=500),
 ) -> list[AlgoOrderResponse]:
     """列出算法单。"""
@@ -142,7 +140,7 @@ async def cancel_algo_order(algo_id: str) -> AlgoOrderResponse:
     try:
         algo = executor.cancel_algo(algo_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail=f"算法单 {algo_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"算法单 {algo_id} 不存在") from None
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return AlgoOrderResponse(**algo.to_dict())

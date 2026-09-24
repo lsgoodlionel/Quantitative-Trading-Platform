@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from app.quant.factor_lib.alpha101_exprs import ALPHA_EXPRESSIONS
 from app.quant.factor_lib.loader import (
     MAX_FACTORS,
     build_feature_fn,
@@ -23,6 +24,8 @@ from app.quant.factor_lib.loader import (
 # 家族数量（_FAMILIES 长度）与 KBAR 数量，用于推导预期因子数
 N_FAMILIES = 24
 N_KBAR = 6
+# Alpha101 分组（M3）已实现的因子数 —— 与 ALPHA_EXPRESSIONS 同源，避免手抄漂移
+N_ALPHA101 = len(ALPHA_EXPRESSIONS)
 
 
 def _make_ohlcv(n_days: int = 80, seed: int = 42) -> pd.DataFrame:
@@ -43,11 +46,11 @@ def _make_ohlcv(n_days: int = 80, seed: int = 42) -> pd.DataFrame:
 
 class TestGenerateFactorLibrary:
     def test_default_generation_count(self) -> None:
-        # Arrange / Act：默认 5 个窗口 + 全部家族 + KBAR
+        # Arrange / Act：默认 5 个窗口 + 全部家族 + KBAR + Alpha101
         specs = generate_factor_library()
 
         # Assert
-        assert len(specs) == N_KBAR + N_FAMILIES * 5
+        assert len(specs) == N_KBAR + N_ALPHA101 + N_FAMILIES * 5
 
     def test_windows_scale_family_count(self) -> None:
         # Arrange / Act：单动量家族 × 2 窗口，无 KBAR（K线 不在 groups）
@@ -91,6 +94,18 @@ class TestGenerateFactorLibrary:
         # Act / Assert
         with pytest.raises(ValueError, match=str(MAX_FACTORS)):
             generate_factor_library(windows=many_windows)
+
+    def test_alpha101_does_not_consume_the_combinatorial_budget(self) -> None:
+        """上限只约束「窗口 × 家族」的组合爆炸，不该被固定条数的 Alpha101 挤占。"""
+        # Arrange：8 个窗口 → 24×8 + 6 = 198 ≤ 240，加上 Alpha101 后总数仍应放行
+        eight_windows = tuple(range(2, 10))
+
+        # Act
+        specs = generate_factor_library(windows=eight_windows)
+
+        # Assert
+        assert len(specs) == N_KBAR + N_ALPHA101 + N_FAMILIES * 8
+        assert len(specs) > MAX_FACTORS  # 总数超过上限，但组合部分没有
 
     def test_unmatched_group_returns_empty(self) -> None:
         # Arrange / Act：不存在的分组 → 无因子

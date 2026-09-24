@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
@@ -60,7 +60,7 @@ def _symbol_to_futu(symbol: str, market: Market) -> str:
 def _futu_row_to_bar(row: pd.Series, symbol: str, market: Market, frequency: Frequency) -> Bar:
     """将富途 DataFrame 行转为内部 Bar。"""
     time_key: str = row["time_key"]
-    ts = datetime.strptime(time_key, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    ts = datetime.strptime(time_key, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     return Bar(
         time=ts,
         symbol=symbol,
@@ -136,7 +136,7 @@ class FutuDataFeed(DataFeed):
         while True:
             def _fetch(prk: object = page_req_key) -> tuple:
                 ctx = self._get_ctx()
-                from futu import KLType, AuType
+                from futu import AuType, KLType
                 kl_type = getattr(KLType, kltype)
                 return ctx.request_history_kline(  # type: ignore[attr-defined]
                     futu_code,
@@ -191,7 +191,7 @@ class FutuDataFeed(DataFeed):
 
         row = data.iloc[0]
         return Tick(
-            time=datetime.now(timezone.utc),
+            time=datetime.now(UTC),
             symbol=symbol,
             market=self.market,
             last_price=float(row.get("last_price", 0)),
@@ -216,7 +216,7 @@ class FutuDataFeed(DataFeed):
             raise ValueError(f"Realtime subscription unsupported for frequency: {frequency}")
 
         try:
-            from futu import SubType, RET_OK
+            from futu import SubType
         except ImportError as e:
             raise RuntimeError("futu-api not installed") from e
 
@@ -265,7 +265,7 @@ class FutuDataFeed(DataFeed):
     async def search_symbols(self, query: str) -> list[SymbolInfo]:
         """港股代码/名称搜索。"""
         try:
-            from futu import OpenQuoteContext, SimpleFilter, StockField, SortDir
+            from futu import SimpleFilter
         except ImportError:
             return []
 

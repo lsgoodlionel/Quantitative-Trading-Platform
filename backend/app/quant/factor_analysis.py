@@ -12,23 +12,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
 from app.quant.indicators import (
-    rsi, sma, ema, bollinger_bands, atr, obv, macd, adx, mfi,
+    adx,
+    atr,
+    bollinger_bands,
+    macd,
+    mfi,
+    obv,
+    rsi,
+    sma,
 )
-
 
 # ── 因子计算 ──────────────────────────────────────────────────────
 
 def _compute_factor(df: pd.DataFrame, factor_name: str) -> pd.Series:
     """根据因子名计算对应的因子值序列。"""
     close = df["close"]
-    high  = df["high"]
-    low   = df["low"]
+    df["high"]
+    df["low"]
     vol   = df["volume"]
 
     if factor_name == "momentum_20":
@@ -151,7 +157,6 @@ def analyze_factor(
 
         # Rolling 30-bar IC (Pearson correlation in rolling window)
         window = 30
-        ic_roll: list[dict] = []
 
         valid_mask = factor.notna() & fwd.notna()
         f_clean = factor[valid_mask]
@@ -191,7 +196,7 @@ def analyze_factor(
 
         result_ic_series[key] = [
             {"time": t, "ic": round(float(v), 4)}
-            for t, v in zip(ic_times, ic_arr)
+            for t, v in zip(ic_times, ic_arr, strict=True)
         ]
 
         result_ic_mean[key]     = round(float(np.mean(ic_arr)), 4) if len(ic_arr) else float("nan")
@@ -205,7 +210,7 @@ def analyze_factor(
         cum = np.cumsum(ic_arr)
         result_cum_ic[key] = [
             {"time": t, "cum_ic": round(float(v), 4)}
-            for t, v in zip(ic_times, cum)
+            for t, v in zip(ic_times, cum, strict=True)
         ]
 
         # Quantile analysis (5 quintiles)
