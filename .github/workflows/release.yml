@@ -145,10 +145,42 @@ jobs:
             $(printf "${IMAGE}@sha256:%s " *)
           docker buildx imagetools inspect "${IMAGE}:${VERSION}"
 
-  # ── 3. 创建 GitHub Release ────────────────────────────────────────
+  # ── 3. 生成 GitHub Release 附件 ───────────────────────────────────
+  packages:
+    name: 生成 Release 附件
+    needs: manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: 生成 tarball 与 deb
+        run: |
+          scripts/release/build_artifacts.sh "${{ steps.meta.outputs.version }}"
+          scripts/release/build_deb.sh "${{ steps.meta.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: dist/release/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # ── 4. 创建 GitHub Release ────────────────────────────────────────
   release:
     name: 创建 Release
-    needs: manifest
+    needs: [manifest, packages]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -179,6 +211,13 @@ jobs:
             echo
             echo "> 生产编排钉的是版本标签而非 \`latest\`：**同一个 QB_VERSION 在任何机器、任何时间拉到的都是同一个镜像**，出问题改回上一个版本号即可回滚。"
             echo
+            echo "## Release 附件"
+            echo
+            echo "- \`quantbot-backend-${VERSION}.tar.gz\`：后端源码包（用于审计/离线检查/应急重建）"
+            echo "- \`quantbot-frontend-${VERSION}.tar.gz\`：前端源码包（用于审计/离线检查/应急重建）"
+            echo "- \`quantbot-deploy-${VERSION}.tar.gz\`：生产 Docker Compose 部署骨架"
+            echo "- \`quantbot-${VERSION}.deb\`：Debian 部署骨架包（安装到 \`/opt/quantbot\`，仍拉取上面的 GHCR 镜像）"
+            echo
             echo "## 变更"
             echo
             if [ -n "$PREV" ]; then
@@ -189,11 +228,17 @@ jobs:
           } > /tmp/notes.md
           echo "prev=${PREV}" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist/release
+
       - name: 创建 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
+            dist/release/* \
             --title "${GITHUB_REF_NAME}" \
             --notes-file /tmp/notes.md \
             --verify-tag
