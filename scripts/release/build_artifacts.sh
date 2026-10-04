@@ -16,6 +16,11 @@ mkdir -p "$OUT_DIR" "$WORK_DIR"
 
 tar_backend() {
   tar -czf "$OUT_DIR/quantbot-backend-${VERSION}.tar.gz" \
+    --exclude='.env' \
+    --exclude='.env.*' \
+    --exclude='certs' \
+    --exclude='*.key' \
+    --exclude='*.pem' \
     --exclude='.venv' \
     --exclude='.pytest_cache' \
     --exclude='.ruff_cache' \
@@ -27,6 +32,11 @@ tar_backend() {
 
 tar_frontend() {
   tar -czf "$OUT_DIR/quantbot-frontend-${VERSION}.tar.gz" \
+    --exclude='.env' \
+    --exclude='.env.*' \
+    --exclude='certs' \
+    --exclude='*.key' \
+    --exclude='*.pem' \
     --exclude='node_modules' \
     --exclude='dist' \
     --exclude='playwright-report' \

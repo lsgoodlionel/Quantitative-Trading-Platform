@@ -87,7 +87,7 @@ Run:
 ```bash
 tar -tzf dist/release/quantbot-deploy-4.0.0-test.tar.gz
 tar -tzf dist/release/quantbot-frontend-4.0.0-test.tar.gz | rg '(^|/)node_modules/|(^|/)dist/|playwright-report|test-results' && exit 1 || true
-tar -tzf dist/release/quantbot-deploy-4.0.0-test.tar.gz | rg '(^|/)\\.env$|certs/|\\.key$|\\.pem$' && exit 1 || true
+for file in dist/release/*.tar.gz; do tar -tzf "$file"; done | rg -P '(^|/)\\.env($|\\.(?!example$))|(^|/)certs/|\\.key$|\\.pem$' && exit 1 || true
 ```
 
 Expected: deploy tarball lists install files; exclusion checks exit `0`.
