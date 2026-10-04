@@ -175,6 +175,7 @@ git diff tests/regression/     # 必须为空
 | 期权 IV | **仅美股**。港股/A 股写一条 `data_note` 说明 |
 | `passlib` | **不可用**且已从依赖移除。它读 `bcrypt.__about__`，而 bcrypt 5.0 已删该属性。直接用 `bcrypt` |
 | `docker compose restart` | 绕过 `depends_on healthy`，backend 可能抢跑崩。用 `stop && up -d` |
+| Release 包 / `.deb` | 打 `vX.Y.Z` 标签会生成 GHCR 镜像、`quantbot-backend-X.Y.Z.tar.gz`、`quantbot-frontend-X.Y.Z.tar.gz`、`quantbot-deploy-X.Y.Z.tar.gz` 与 `quantbot-X.Y.Z.deb`。`.deb` 只是 `/opt/quantbot` 下的 Docker Compose 部署骨架，仍通过 `QB_VERSION` 拉 GHCR 镜像；不包含 `.env`、TLS 私钥、证书、数据库数据，也不会启动/停止 Docker。 |
 | pytest | 在 host `backend/.venv`；单跑子集加 `--no-cov`（否则覆盖率门禁会因只跑子集而红） |
 | Playwright | 自带 Chromium 下载可能受网络限制；本机验证时可 `PW_CHROMIUM_CHANNEL=chrome` 用系统 Chrome。CI 不设此变量 |
 | E2E 非阻塞 | CI 里 `continue-on-error: true`。收紧条件写在 workflow 注释里：连续 20 次绿 |

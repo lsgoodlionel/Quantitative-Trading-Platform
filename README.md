@@ -3,7 +3,7 @@
 > 支持美股 / 港股 / 沪深A股的专业级 AI 量化研究与实盘工作站：
 > 选股 · 因子研究(含AI挖掘) · 策略验证 · 组合构建 · 实盘执行 · 多用户/审计，全流程闭环。
 >
-> **版本 v2.0** · [更新日志](CHANGELOG.md) · [移交文档](HANDOFF.md) · [升级蓝图](DEVPLAN_V2.md)
+> **版本 v4.0** · [更新日志](CHANGELOG.md) · [移交文档](HANDOFF.md) · [升级蓝图](DEVPLAN_V3.md) / [DEVPLAN_V4.md](DEVPLAN_V4.md)
 
 ![Platform](https://img.shields.io/badge/platform-Docker-2496ED?logo=docker)
 ![Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20Python%203.11-009688?logo=fastapi)
@@ -153,6 +153,13 @@ docker compose -f infra/docker-compose.yml up -d
 | **前端** | http://localhost:3000 |
 | **API 文档** | http://localhost:8000/docs |
 | **健康检查** | http://localhost:8000/health |
+
+### 生产发布
+
+正式版本通过 GitHub Release 发布：标签 `vX.Y.Z` 会构建并推送 GHCR 多架构镜像，
+同时附带 `quantbot-backend-X.Y.Z.tar.gz`、`quantbot-frontend-X.Y.Z.tar.gz`、
+`quantbot-deploy-X.Y.Z.tar.gz` 与 `quantbot-X.Y.Z.deb`。生产运行仍以
+`QB_VERSION=X.Y.Z` 拉取版本化镜像为准，详见 [infra/README.md](infra/README.md)。
 
 ### 5. 默认账号
 

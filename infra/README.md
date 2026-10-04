@@ -11,6 +11,46 @@ docker compose -f infra/docker-compose.prod.yml up -d
 前后端镜像由 CI 预先构建好推到 GHCR（`linux/amd64` + `linux/arm64`），
 部署机只需 `pull`。
 
+## GitHub Release 附件
+
+每个 `vX.Y.Z` 标签 Release 会同时附带四个文件：
+
+| 文件 | 用途 |
+|---|---|
+| `quantbot-backend-X.Y.Z.tar.gz` | 后端源码包，用于审计、离线检查或应急重建 |
+| `quantbot-frontend-X.Y.Z.tar.gz` | 前端源码包，用于审计、离线检查或应急重建 |
+| `quantbot-deploy-X.Y.Z.tar.gz` | 生产 Docker Compose 部署骨架 |
+| `quantbot-X.Y.Z.deb` | Debian/Ubuntu 部署骨架包，安装到 `/opt/quantbot` |
+
+这些附件不改变运行方式：生产服务仍通过 `QB_VERSION=X.Y.Z` 拉取 GHCR 镜像。
+
+### 使用 deploy tarball
+
+```bash
+tar -xzf quantbot-deploy-4.0.0.tar.gz
+cd quantbot-deploy-4.0.0
+cp .env.example .env        # 仅首次部署需要；已有 .env 不要覆盖
+# 编辑 .env，放置 TLS 证书，并确认 infra/nginx/conf.d/quantbot.conf 的 server_name
+export QB_VERSION=4.0.0
+docker compose -f infra/docker-compose.prod.yml pull
+docker compose -f infra/docker-compose.prod.yml up -d
+```
+
+### 使用 Debian 包
+
+```bash
+sudo dpkg -i quantbot-4.0.0.deb
+cd /opt/quantbot
+cp .env.example .env        # 仅首次部署需要；已有 .env 不要覆盖
+# 编辑 .env，放置 TLS 证书，并确认 infra/nginx/conf.d/quantbot.conf 的 server_name
+export QB_VERSION=4.0.0
+docker compose -f infra/docker-compose.prod.yml pull
+docker compose -f infra/docker-compose.prod.yml up -d
+```
+
+`.deb` 只安装 Docker Compose / Nginx 部署骨架，不包含 `.env`、TLS 私钥、
+证书、数据库数据或运行时卷，也不会启动/停止 Docker 服务。
+
 ## 为什么不在部署机上构建
 
 早先 `docker-compose.prod.yml` 里写的是 `build:`，每次部署都现场编译。两个问题：
@@ -35,12 +75,21 @@ docker compose -f infra/docker-compose.prod.yml up -d
 # 1. 改版本号（两处必须一致，有测试看守）
 #    backend/app/core/version.py 的 APP_VERSION
 #    backend/pyproject.toml 的 version
-# 2. 打标签推送，CI 自动构建镜像并创建 Release
+# 2. 打标签推送，CI 自动构建镜像并创建 Release 附件
 git tag v4.1.0 && git push origin v4.1.0
 ```
 
 发布只由**打标签**触发，不挂在 push main 上 ——
 发布该是一个明确的动作，而不是每次合并的副作用。
+
+Release 会推送以下镜像与附件：
+
+- `ghcr.io/lsgoodlionel/quantbot-backend:4.1.0`
+- `ghcr.io/lsgoodlionel/quantbot-frontend:4.1.0`
+- `quantbot-backend-4.1.0.tar.gz`
+- `quantbot-frontend-4.1.0.tar.gz`
+- `quantbot-deploy-4.1.0.tar.gz`
+- `quantbot-4.1.0.deb`
 
 ## 上线前必改
 
